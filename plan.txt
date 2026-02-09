@@ -1,0 +1,582 @@
+Plan : BASIC
+
+En te basnt sur l fichier #file:authBridge.ts 
+
+1️⃣ Identification du plan
+
+Nom du plan : Basic
+
+Identifiant unique : BASIC
+
+2️⃣ Modules inclus (tous ACTIVÉS)
+
+Les modules suivants doivent être disponibles dans le plan BASIC, avec une implémentation fonctionnelle simple :
+
+Catégories
+
+Sous-catégories
+
+Catalogue de stocks (produits stockables)
+
+Catalogue de services (services non stockables)
+
+Clients
+
+Ventes et Factures
+
+Trésorerie
+
+Gouvernance IAM (gestion des utilisateurs et accès)
+
+Abonnement
+
+Paramètres
+
+⚠️ Aucun module supplémentaire ne doit être ajouté.
+
+3️⃣ Description fonctionnelle des modules
+
+Catégories : gestion simple des catégories (CRUD autorisé).
+
+Sous-catégories : rattachées obligatoirement à une catégorie existante.
+
+Catalogue de stocks : produits avec prix et quantité.
+
+Catalogue de services : services sans notion de stock.
+
+Clients : utilisés pour les ventes et factures.
+
+Ventes et Factures : création de ventes et génération de factures basiques.
+
+Trésorerie : suivi simple des entrées liées aux ventes.
+
+Gouvernance IAM : gestion des utilisateurs avec rôles simples.
+
+Abonnement : affichage du plan actif et de ses limites.
+
+Paramètres : configuration générale basique.
+
+Aucune fonctionnalité avancée ne doit être implémentée.
+
+4️⃣ Limites fonctionnelles obligatoires
+
+Tu dois bloquer toute action dépassant les limites suivantes :
+
+🔸 Clients
+
+Maximum autorisé : 5 clients
+
+Action à effectuer au dépassement :
+
+Refuser la création
+
+Afficher le message :
+
+"Limite du plan Basic atteinte : maximum 5 clients."
+
+🔸 Utilisateurs
+
+Maximum autorisé : 3 utilisateurs (administrateur inclus)
+
+Blocage strict au-delà de cette limite.
+
+🔸 Ventes mensuelles
+
+Maximum autorisé : 20 ventes par mois
+
+Le compteur :
+
+Est basé sur la date de création de la vente
+
+Est réinitialisé automatiquement chaque mois
+
+Action au dépassement :
+
+Refuser la création de la vente
+
+Afficher un message clair indiquant la limite mensuelle atteinte
+
+5️⃣ Règles d’implémentation impératives
+
+Toutes les limites doivent être contrôlées au niveau de la logique métier.
+
+Aucune tolérance ou dépassement temporaire n’est autorisé.
+
+Aucun module n’est désactivé, seuls les volumes sont limités.
+
+Toute action bloquée doit retourner :
+
+Un refus explicite
+
+Un message compréhensible pour l’utilisateur
+
+Ne jamais supposer l’existence de fonctionnalités non décrites ici.
+
+6️⃣ Comportement attendu
+
+Implémenter uniquement ce qui est défini.
+
+Ne pas proposer d’options avancées.
+
+Ne pas modifier les règles.
+
+Ne pas compléter ou enrichir le plan BASIC.
+
+Conformément à vos directives strictes pour le plan BASIC, les modifications suivantes sont apportées :
+
+    Gouvernance des Accès (services/authBridge.ts) :
+
+        Verrouillage du périmètre à 10 modules exactement : dashboard, categories, subcategories, inventory, services, customers, sales, payments (Trésorerie), governance, subscription, settings.
+
+        Exclusion de tous les autres modules (Audit, Sécurité, IA, Recouvrement).
+
+    Gestion des Quotas (authBridge.ts, Customers.tsx, Governance.tsx, Sales.tsx) :
+
+        Clients : Blocage à 5. Message d'erreur : "Limite du plan Basic atteinte : maximum 5 clients."
+
+        Utilisateurs : Blocage à 3 (Admin inclus).
+
+        Ventes : Blocage à 20 par mois calendaire. Calcul basé sur le mois en cours.
+
+
+
+Plan : Business Pro
+
+En te basnt sur l fichier #file:authBridge.ts 
+
+1️⃣ Identification du plan
+
+Nom du plan : Basic
+
+Identifiant unique : PRO
+
+2️⃣ Modules inclus (tous ACTIVÉS)
+
+Les modules suivants doivent être disponibles dans le plan PRO, avec une implémentation fonctionnelle simple :
+
+Tous les modules du plan BASIC
+
+Audit : suivi des actions utilisateurs
+
+Sécurité : gestion des mots de passe et des accès
+
+Recouvrement : gestion des relances clients
+
+Mouvement de Flux
+
+Inventaire
+
+⚠️ Aucun module supplémentaire ne doit être ajouté.
+
+3️⃣ Description fonctionnelle des modules
+
+Audit
+
+Suivi des actions utilisateurs
+
+Sécurité
+
+Gestion des mots de passe et des accès
+
+Recouvrement
+
+Gestion des relances clients
+
+Aucune fonctionnalité avancée ne doit être implémentée.
+
+4️⃣ Limites fonctionnelles obligatoires
+
+Tu dois bloquer toute action dépassant les limites suivantes :
+
+🔸 Clients
+
+Maximum autorisé : 12 clients
+
+Action à effectuer au dépassement :
+
+Refuser la création
+
+Afficher le message :
+
+"Limite du plan PRO atteinte : maximum 12 clients."
+
+🔸 Utilisateurs
+
+Maximum autorisé : 10 utilisateurs (administrateur inclus)
+
+Blocage strict au-delà de cette limite.
+
+🔸 Ventes mensuelles
+
+Maximum autorisé : 50 ventes par mois
+
+Le compteur :
+
+Est basé sur la date de création de la vente
+
+Est réinitialisé automatiquement chaque mois
+
+Action au dépassement :
+
+Refuser la création de la vente
+
+Afficher un message clair indiquant la limite mensuelle atteinte
+
+5️⃣ Règles d’implémentation impératives
+
+Toutes les limites doivent être contrôlées au niveau de la logique métier.
+
+Aucune tolérance ou dépassement temporaire n’est autorisé.
+
+Aucun module n’est désactivé, seuls les volumes sont limités.
+
+Toute action bloquée doit retourner :
+
+Un refus explicite
+
+Un message compréhensible pour l’utilisateur
+
+Ne jamais supposer l’existence de fonctionnalités non décrites ici.
+
+6️⃣ Comportement attendu
+
+Implémenter uniquement ce qui est défini.
+
+Ne pas proposer d’options avancées.
+
+Ne pas modifier les règles.
+
+Ne pas compléter ou enrichir le plan BASIC.
+
+Conformément à vos directives strictes pour le plan PRO, les modifications suivantes sont apportées :
+
+    Gouvernance des Accès (services/authBridge.ts) :
+
+        Verrouillage du périmètre à 10 modules exactement : dashboard, categories, subcategories, inventory, services, customers, sales, payments (Trésorerie), governance, subscription, settings,Audit,Inventaire,Mouvement de Flux, Recouvrement, Sécurité
+
+        Exclusion de tous les autres modules (IA).
+
+    Gestion des Quotas (authBridge.ts, Customers.tsx, Governance.tsx, Sales.tsx) :
+
+        Clients : Blocage à 12. Message d'erreur : "Limite du plan PRO atteinte : maximum 12 clients."
+
+        Utilisateurs : Blocage à 10 (Admin inclus).
+
+        Ventes : Blocage à 50 par mois calendaire. Calcul basé sur le mois en cours.
+
+
+
+Plan : Enterprise Cloud
+
+En te basnt sur l fichier #file:authBridge.ts 
+
+1️⃣ Identification du plan
+
+Nom du plan : Enterprise Cloud
+
+Identifiant unique : ENTERPRISE
+
+2️⃣ Modules inclus (tous ACTIVÉS)
+
+Les modules suivants doivent être disponibles dans le plan ENTERPRISE, avec une implémentation fonctionnelle simple :
+
+Tous les modules du plan PRO
+
+IA
+
+
+⚠️ Aucun module supplémentaire ne doit être ajouté.
+
+3️⃣ Description fonctionnelle des modules
+
+IA
+
+4️⃣ Limites fonctionnelles obligatoires
+
+Pas de limite
+
+5️⃣ Règles d’implémentation impératives
+
+Toutes les limites doivent être contrôlées au niveau de la logique métier.
+
+Aucune tolérance ou dépassement temporaire n’est autorisé.
+
+Aucun module n’est désactivé, seuls les volumes sont limités.
+
+Toute action bloquée doit retourner :
+
+Un refus explicite
+
+Un message compréhensible pour l’utilisateur
+
+Ne jamais supposer l’existence de fonctionnalités non décrites ici.
+
+6️⃣ Comportement attendu
+
+Implémenter uniquement ce qui est défini.
+
+Ne pas proposer d’options avancées.
+
+Ne pas modifier les règles.
+
+Ne pas compléter ou enrichir le plan BASIC.
+
+Conformément à vos directives strictes pour le plan PRO, les modifications suivantes sont apportées :
+
+    Gouvernance des Accès (services/authBridge.ts) :
+
+        Tous les modules sont autorisés.
+
+    Gestion des Quotas (authBridge.ts, Customers.tsx, Governance.tsx, Sales.tsx) :
+
+        Pas de limite
+
+
+
+
+
+import { User, UserRole } from '../types';
+
+const AUTH_STORAGE_KEY = 'gsp_session_vault';
+
+/**
+ * Définition stricte des plans
+ */
+const PLAN_RULES = {
+  BASIC: {
+    modules: [
+      'dashboard',
+      'categories',
+      'subcategories',
+      'inventory',
+      'movements',
+      'services',
+      'customers',
+      'sales',
+      'payments',     // Trésorerie
+      'governance',
+      'subscription',
+      'settings'
+    ],
+    limits: {
+      customers: 5,
+      users: 3,
+      monthlySales: 20
+    }
+  },
+  PRO: {
+    modules: [
+      'dashboard',
+      'categories',
+      'subcategories',
+      'inventory',
+      'services',
+      'customers',
+      'sales',
+      'payments',
+      'governance',
+      'subscription',
+      'settings',
+      'audit',
+      'security',
+      'recovery',
+      'movements'
+    ],
+    limits: {
+      customers: 12,
+      users: 10,
+      monthlySales: 50
+    }
+  },
+  ENTERPRISE: {
+    modules: ['*'], // Tous les modules autorisés
+    limits: null    // Aucune limite
+  }
+};
+
+export const authBridge = {
+  saveSession: (user: User, token: string) => {
+    let roles: UserRole[] = [];
+
+    if (Array.isArray(user.roles) && user.roles.length > 0) {
+      roles = user.roles;
+    } else if (user.role) {
+      roles = [user.role];
+    } else {
+      roles = [UserRole.SALES];
+    }
+
+    const sessionUser = { ...user, roles };
+    sessionStorage.setItem(
+      AUTH_STORAGE_KEY,
+      JSON.stringify({ user: sessionUser, token, timestamp: Date.now() })
+    );
+  },
+
+  getSession: (): { user: User; token: string } | null => {
+    const raw = sessionStorage.getItem(AUTH_STORAGE_KEY);
+    if (!raw) return null;
+
+    try {
+      const data = JSON.parse(raw);
+      if (Date.now() - data.timestamp > 86400000) {
+        authBridge.clearSession();
+        return null;
+      }
+      return data;
+    } catch {
+      return null;
+    }
+  },
+
+  fetchMe: async (token: string): Promise<User | null> => {
+    try {
+      const response = await fetch('http://localhost:3000/api/auth/me', {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!response.ok) return null;
+
+      const user = await response.json();
+      return {
+        ...user,
+        roles: Array.isArray(user.roles) ? user.roles : [user.role]
+      };
+    } catch {
+      return null;
+    }
+  },
+
+  clearSession: () => sessionStorage.removeItem(AUTH_STORAGE_KEY),
+
+  /**
+   * 🔐 Gouvernance des accès par PLAN + RÔLE
+   */
+  canAccess: (user: User, moduleId: string): boolean => {
+    const roles = Array.isArray(user.roles) ? user.roles : [user.role];
+    const planId = (user as any).planId || 'BASIC';
+
+    // SUPER ADMIN : accès total
+    //if (roles.includes(UserRole.SUPER_ADMIN)) return true;
+
+    const plan = PLAN_RULES[planId as keyof typeof PLAN_RULES] || PLAN_RULES.BASIC;
+
+    // ENTERPRISE : tous les modules
+    if (plan.modules.includes('*')) return true;
+
+    // Verrouillage strict du périmètre du plan
+    if (!plan.modules.includes(moduleId)) return false;
+
+    // ADMIN : accès à tous les modules du plan
+    if (roles.includes(UserRole.ADMIN)) return true;
+
+    const roleMap: Record<string, string[]> = {
+      [UserRole.SALES]: ['dashboard', 'sales', 'customers'],
+      [UserRole.STOCK_MANAGER]: [
+        'dashboard',
+        'categories',
+        'subcategories',
+        'inventory',
+        'movements',
+        'services'
+      ],
+      [UserRole.ACCOUNTANT]: [
+        'dashboard',
+        'sales',
+        'payments',
+        'customers',
+        'services',
+        'recovery'
+      ],
+      ['EMPLOYEE' as any]: ['dashboard', 'inventory', 'customers', 'services']
+    };
+
+    return roles.some(r => (roleMap[r as any] || []).includes(moduleId));
+  },
+
+  /**
+   * 🚫 Gestion des quotas par PLAN
+   */
+  canPerform: (
+    user: User,
+    action: 'CREATE' | 'EDIT' | 'DELETE' | 'VIEW',
+    resource: string
+  ): boolean => {
+    const roles = Array.isArray(user.roles) ? user.roles : [user.role];
+    const planId = (user as any).planId || 'BASIC';
+
+    // SUPER ADMIN / ADMIN : pas de restriction
+    /*if (roles.includes(UserRole.SUPER_ADMIN) || roles.includes(UserRole.ADMIN)) {
+      return true;
+    }*/
+
+    const plan = PLAN_RULES[planId as keyof typeof PLAN_RULES] || PLAN_RULES.BASIC;
+
+    // ENTERPRISE : aucune limite
+    if (!plan.limits) return true;
+
+    if (action === 'CREATE') {
+      if (resource === 'customers' && (user as any).customersCount >= plan.limits.customers) {
+        return false;
+      }
+
+      if (resource === 'users' && (user as any).usersCount >= plan.limits.users) {
+        return false;
+      }
+
+      if (
+        resource === 'sales' &&
+        (user as any).monthlySalesCount >= plan.limits.monthlySales
+      ) {
+        return false;
+      }
+    }
+
+    return roles.some(r => {
+      if (r === UserRole.STOCK_MANAGER) {
+        return ['categories', 'subcategories', 'inventory', 'movements', 'services'].includes(resource);
+      }
+      if (r === UserRole.SALES) {
+        if (['sales', 'customers', 'services'].includes(resource)) return true;
+        return action === 'VIEW' && resource === 'inventory';
+      }
+      if (r === UserRole.ACCOUNTANT) {
+        if (['payments', 'settings', 'recovery', 'services'].includes(resource)) return true;
+        return action === 'VIEW';
+      }
+      return action === 'VIEW';
+    });
+  }
+  ,
+
+  /**
+   * Retourne les limites du plan de l'utilisateur (ou null si illimité)
+   */
+  getPlanLimits: (user: User) => {
+    const planId = (user as any).planId || 'BASIC';
+    const plan = PLAN_RULES[planId as keyof typeof PLAN_RULES] || PLAN_RULES.BASIC;
+    return plan.limits || null;
+  },
+
+  /**
+   * Vérifie si la création d'une ressource est autorisée en fonction des limites du plan
+   * resource: 'customers' | 'users' | 'sales'
+   * currentCount: nombre actuel (pour sales on passe le compteur mensuel)
+   */
+  isCreationAllowed: (user: User, resource: string, currentCount: number) => {
+    const planId = (user as any).planId || 'BASIC';
+    const plan = PLAN_RULES[planId as keyof typeof PLAN_RULES] || PLAN_RULES.BASIC;
+    const limits = plan.limits;
+    if (!limits) return true; // unlimited (Enterprise)
+
+    if (resource === 'customers') {
+      return currentCount < limits.customers;
+    }
+    if (resource === 'users') {
+      return currentCount < limits.users;
+    }
+    if (resource === 'sales') {
+      return currentCount < limits.monthlySales;
+    }
+    return true;
+  }
+};

@@ -1,0 +1,132 @@
+
+{
+  "collections": {
+    "tenants": {
+      "doc": {
+        "fields": {
+          "name": "string",
+          "domain": "string",
+          "isActive": "boolean",
+          "plan": "string", // BASIC | PRO | ENTERPRISE
+          "mrr": "number",
+          "lastPaymentDate": "timestamp",
+          "paymentStatus": "string" // UP_TO_DATE | LATE | FAILED
+        },
+        "collections": {
+          "subscriptions": {
+            "doc": {
+              "fields": {
+                "planId": "string",
+                "status": "string",
+                "nextBillingDate": "timestamp",
+                "autoRenew": "boolean"
+              },
+              "collections": {
+                "payments": {
+                  "doc": {
+                    "fields": {
+                      "amount": "number",
+                      "method": "string", // STRIPE | WAVE | OM | MTN
+                      "status": "string", // SUCCESS | FAILED
+                      "date": "timestamp"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "users": {
+      "doc": {
+        "fields": {
+          "tenantId": "string",
+          "name": "string",
+          "email": "string",
+          "role": "string", // UserRole enum
+          "mfaEnabled": "boolean",
+          "lastLogin": "timestamp"
+        }
+      }
+    },
+    "stockItems": {
+      "doc": {
+        "fields": {
+          "tenantId": "string",
+          "sku": "string",
+          "name": "string",
+          "category": "string",
+          "currentLevel": "number",
+          "minThreshold": "number",
+          "forecastedLevel": "number",
+          "unitPrice": "number"
+        },
+        "collections": {
+          "movements": {
+            "doc": {
+              "fields": {
+                "date": "timestamp",
+                "type": "string", // IN | OUT
+                "qty": "number",
+                "reason": "string",
+                "userRef": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "customers": {
+      "doc": {
+        "fields": {
+          "tenantId": "string",
+          "companyName": "string",
+          "email": "string",
+          "healthStatus": "string", // GOOD | WARNING | CRITICAL
+          "outstandingBalance": "number"
+        }
+      }
+    },
+    "invoices": {
+      "doc": {
+        "fields": {
+          "tenantId": "string",
+          "customerId": "string",
+          "date": "timestamp",
+          "amount": "number",
+          "taxAmount": "number",
+          "status": "string", // InvoiceStatus enum
+          "type": "string", // FACTUR-X | XML
+          "transmissionStatus": "string"
+        },
+        "collections": {
+          "items": {
+            "doc": {
+              "fields": {
+                "productId": "string",
+                "name": "string",
+                "qty": "number",
+                "price": "number",
+                "tva": "number"
+              }
+            }
+          }
+        }
+      }
+    },
+    "auditLogs": {
+      "doc": {
+        "fields": {
+          "tenantId": "string",
+          "timestamp": "timestamp",
+          "userId": "string",
+          "action": "string",
+          "resource": "string",
+          "severity": "string",
+          "sha256_signature": "string"
+        }
+      }
+    }
+  }
+}

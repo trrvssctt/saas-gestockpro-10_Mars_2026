@@ -1,0 +1,68 @@
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // --- HELPERS ---
+    function isSignedIn() { return request.auth != null; }
+    function getRole() { return request.auth.token.role; }
+    function getTenant() { return request.auth.token.tenantId; }
+    function isOwner(data) { return data.tenantId == getTenant(); }
+    
+    // --- ROLES CHECK ---
+    function isSuperAdmin() { return request.auth.token.superadmin == true; }
+    function isAdmin() { return getRole() == 'ADMIN' || isSuperAdmin(); }
+    function isStockManager() { return getRole() == 'STOCK_MANAGER'; }
+    function isAccountant() { return getRole() == 'ACCOUNTANT'; }
+    function isSales() { return getRole() == 'SALES'; }
+
+    // --- TENANTS (System Kernel) ---
+    match /tenants/{tenantId} {
+      allow read: if isSignedIn() && (tenantId == getTenant() || isSuperAdmin());
+      allow write: if isSuperAdmin(); // Seul le SuperAdmin suspend/active les comptes
+      
+      match /subscriptions/{subId} {
+        allow read: if isSignedIn() && (tenantId == getTenant() || isSuperAdmin());
+        match /payments/{payId} {
+          allow read: if isSignedIn() && (tenantId == getTenant() || isSuperAdmin());
+        }
+      }
+    }
+
+    // --- STOCK ITEMS ---
+    match /stockItems/{itemId} {
+      allow read: if isSignedIn() && isOwner(resource.data);
+      allow write: if isSignedIn() && isOwner(request.resource.data) && (isAdmin() || isStockManager());
+      
+      match /movements/{movId} {
+        allow read: if isSignedIn() && isAdmin();
+        allow create: if isSignedIn() && (isAdmin() || isStockManager());
+      }
+    }
+
+    // --- CUSTOMERS ---
+    match /customers/{customerId} {
+      allow read: if isSignedIn() && isOwner(resource.data);
+      allow write: if isSignedIn() && isOwner(request.resource.data) && (isAdmin() || isSales());
+    }
+
+    // --- INVOICES ---
+    match /invoices/{invId} {
+      allow read: if isSignedIn() && isOwner(resource.data);
+      // Les Sales peuvent créer des brouillons, les Accountants valident
+      allow create: if isSignedIn() && isOwner(request.resource.data) && (isAdmin() || isSales() || isAccountant());
+      allow update: if isSignedIn() && isOwner(resource.data) && (isAdmin() || isAccountant());
+      
+      match /items/{itemId} {
+        allow read, write: if isSignedIn();
+      }
+    }
+
+    // --- AUDIT LOGS ---
+    match /auditLogs/{logId} {
+      allow read: if isSignedIn() && (isAdmin() || isAccountant() || isSuperAdmin());
+      allow create: if isSignedIn(); // Création via Triggers uniquement recommandée
+      allow update, delete: if false; // Immuabilité
+    }
+  }
+}
