@@ -12,12 +12,12 @@ if (!rawBackend) {
     if (origin && !/localhost|127\.0\.0\.1/.test(origin)) {
       rawBackend = origin;
     } else {
-      rawBackend = 'https://gestockprov1-1-9-fevrier.onrender.com';
+      rawBackend = 'https://gestockpro.realtechprint.com';
       //rawBackend = 'http://localhost:3000'; // During development, point to local backend
     }
   } catch (e) {
     //rawBackend = 'http://localhost:3000';
-    rawBackend = 'https://gestockprov1-1-9-fevrier.onrender.com';
+    rawBackend = 'https://gestockpro.realtechprint.com';
   }
 }
 //const rawBackend = (import.meta as any).env?.VITE_BACKEND_URL || 'https://gestockprov1-1-9-fevrier.onrender.com';
