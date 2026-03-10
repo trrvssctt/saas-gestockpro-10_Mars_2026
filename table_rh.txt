@@ -1,0 +1,117 @@
+1. Table employees (Le cœur du module)
+
+Cette table stocke les informations administratives et personnelles des salariés.
+
+    id (UUID, PK)
+
+    tenant_id (UUID, FK) : Liaison avec l'entreprise cliente.
+
+    first_name, last_name (String)
+
+    email (String, Unique) : Email professionnel.
+
+    phone (String)
+
+    birth_date (Date)
+
+    gender (Enum: M, F)
+
+    address, city, country (String)
+
+    department_id (UUID, FK) : Liaison avec la table departments.
+
+    position (String) : Intitulé du poste.
+
+    manager_id (UUID, FK) : Auto-référence vers employees pour l'organigramme.
+
+    hire_date (Date) : Date d'entrée.
+
+    status (Enum: ACTIVE, INACTIVE, SUSPENDED)
+
+    base_salary (Decimal) : Salaire de base pour la paie.
+
+    bank_info (JSON) : Coordonnées bancaires (IBAN, BIC).
+
+2. Table contracts
+
+Gère l'historique contractuel de chaque employé.
+
+    id (UUID, PK)
+
+    employee_id (UUID, FK)
+
+    type (Enum: CDI, CDD, STAGE, FREELANCE)
+
+    start_date, end_date (Date) : end_date est nul pour les CDI.
+
+    salary (Decimal) : Salaire spécifique au contrat.
+
+    status (Enum: ACTIVE, EXPIRED, TERMINATED)
+
+    trial_period_end (Date) : Fin de période d'essai.
+
+    document_url (String) : Lien vers le PDF signé.
+
+3. Table leaves (Congés et Absences)
+
+    id (UUID, PK)
+
+    employee_id (UUID, FK)
+
+    type (Enum: PAID, SICK, MATERNITY, UNPAID)
+
+    start_date, end_date (DateTime)
+
+    status (Enum: PENDING, APPROVED, REJECTED)
+
+    reason (Text)
+
+    approved_by (UUID, FK) : ID du manager qui a validé.
+
+4. Table payroll_slips (Bulletins de Paie)
+
+    id (UUID, PK)
+
+    employee_id (UUID, FK)
+
+    period_month, period_year (Integer)
+
+    base_salary, bonuses, deductions (Decimal)
+
+    net_salary (Decimal)
+
+    tax_amount (Decimal)
+
+    status (Enum: DRAFT, PAID)
+
+    document_url (String) : Lien vers le bulletin généré.
+
+5. Table employee_documents (Coffre-fort numérique)
+
+    id (UUID, PK)
+
+    employee_id (UUID, FK)
+
+    category (Enum: ID, CONTRACT, DIPLOMA, PAYSLIP, OTHER)
+
+    name (String)
+
+    file_url (String)
+
+    mime_type (String)
+
+    uploaded_at (DateTime)
+
+6. Recrutement (job_offers & candidates)
+
+    job_offers: id, tenant_id, title, description, status (OPEN, CLOSED), salary_range.
+
+    candidates: id, job_offer_id, first_name, last_name, email, resume_url, status (NEW, INTERVIEW, HIRED, REJECTED), rating.
+
+7. Formation & Performance
+
+    trainings: id, title, provider, start_date, end_date, status.
+
+    training_participants: training_id, employee_id, status (ENROLLED, COMPLETED).
+
+    performance_reviews: id, employee_id, reviewer_id, period, rating (1-5), comments.
