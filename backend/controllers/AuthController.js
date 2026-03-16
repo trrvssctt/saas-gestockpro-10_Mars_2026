@@ -244,11 +244,13 @@ static async login(req, res) {
         console.warn('[AUTH] Failed to update lastLogin for user', user.id, uErr && uErr.message);
       }
 
-      // 4. Génération du token incluant le planId pour le frontend
-      const token = AuthService.generateToken({
-        ...user.toJSON(),
-        planId: planId
-      });
+      // 4. Création de la session avec informations de connexion
+      const sessionData = await AuthService.createSession(
+        { ...user.toJSON(), planId: planId },
+        req.ip || req.connection?.remoteAddress || null,
+        req.get('User-Agent') || null,
+        req.body.deviceInfo || null
+      );
 
       const userRoles = Array.isArray(user.roles) ? user.roles : [user.role || 'EMPLOYEE'];
 
@@ -271,7 +273,11 @@ static async login(req, res) {
       responseUser.last_login = responseUser.lastLogin;
       
 
-      return res.status(200).json({ token, user: responseUser });
+      return res.status(200).json({ 
+        token: sessionData.token, 
+        sessionToken: sessionData.sessionToken,
+        user: responseUser 
+      });
     } catch (error) {
       return AuthController.sendSafeError(res, 500, error);
     }
@@ -520,6 +526,121 @@ static async login(req, res) {
       if (!user) return res.status(404).json({ error: 'User not found' });
       await user.destroy();
       return res.status(204).send();
+    } catch (error) {
+      return AuthController.sendSafeError(res, 500, error);
+    }
+  }
+
+  /**
+   * Déconnexion avec terminaison de session
+   */
+  static async logout(req, res) {
+    try {
+      const sessionToken = req.headers['x-session-token'] || req.body.sessionToken;
+      
+      if (!sessionToken) {
+        return res.status(400).json({ 
+          error: 'BadRequest', 
+          message: 'Token de session manquant.' 
+        });
+      }
+
+      const success = await AuthService.terminateSession(sessionToken);
+      
+      if (!success) {
+        return res.status(404).json({ 
+          error: 'SessionNotFound', 
+          message: 'Session introuvable ou déjà terminée.' 
+        });
+      }
+
+      return res.status(200).json({ 
+        message: 'Déconnexion réussie.',
+        success: true 
+      });
+    } catch (error) {
+      return AuthController.sendSafeError(res, 500, error);
+    }
+  }
+
+  /**
+   * Déconnexion de toutes les sessions d'un utilisateur
+   */
+  static async logoutAll(req, res) {
+    try {
+      const userId = req.user.id;
+      const terminatedCount = await AuthService.terminateAllUserSessions(userId);
+
+      return res.status(200).json({ 
+        message: `${terminatedCount} session(s) terminée(s).`,
+        terminatedSessions: terminatedCount 
+      });
+    } catch (error) {
+      return AuthController.sendSafeError(res, 500, error);
+    }
+  }
+
+  /**
+   * Récupérer les sessions actives de l'utilisateur connecté
+   */
+  static async getActiveSessions(req, res) {
+    try {
+      const userId = req.user.id;
+      const sessions = await AuthService.getUserActiveSessions(userId);
+
+      const sessionsData = sessions.map(session => ({
+        id: session.id,
+        sessionToken: session.sessionToken,
+        ipAddress: session.ipAddress,
+        userAgent: session.userAgent,
+        deviceInfo: session.deviceInfo,
+        loginAt: session.loginAt,
+        lastActivity: session.lastActivity,
+        isActive: session.isActive
+      }));
+
+      return res.status(200).json({ sessions: sessionsData });
+    } catch (error) {
+      return AuthController.sendSafeError(res, 500, error);
+    }
+  }
+
+  /**
+   * Vérifier si une session est toujours valide
+   */
+  static async validateSession(req, res) {
+    try {
+      const sessionToken = req.headers['x-session-token'] || req.body.sessionToken;
+      
+      if (!sessionToken) {
+        return res.status(400).json({ 
+          error: 'BadRequest', 
+          message: 'Token de session manquant.' 
+        });
+      }
+
+      const sessionData = await AuthService.validateSession(sessionToken);
+      
+      if (!sessionData) {
+        return res.status(401).json({ 
+          error: 'InvalidSession', 
+          message: 'Session invalide ou expirée.' 
+        });
+      }
+
+      return res.status(200).json({ 
+        valid: true,
+        user: {
+          id: sessionData.user.id,
+          name: sessionData.user.name,
+          email: sessionData.user.email,
+          roles: sessionData.user.roles
+        },
+        session: {
+          lastActivity: sessionData.session.lastActivity,
+          expiresAt: sessionData.session.expiresAt
+        }
+      });
     } catch (error) {
       return AuthController.sendSafeError(res, 500, error);
     }

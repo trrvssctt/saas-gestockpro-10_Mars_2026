@@ -1,77 +1,196 @@
-
 import { AIService } from '../services/AIService.js';
-import { StockItem, Message, PromptTemplate } from '../models/index.js';
-import { sequelize_db_template, sequelize } from '../config/database.js';
+import { StockItem, PromptTemplate } from '../models/index.js';
+import { sequelize } from '../config/database.js';
 import axios from 'axios';
 
-export class AIController {
-  /**
-   * Récupère l'historique des conversations pour le tenant actuel
-   */
-  static async getHistory(req, res) {
+// ─────────────────────────────────────────────────────────────────────────────
+// Helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Parse une ligne de l'historique stockée dans la colonne `message`.
+ *
+ * Le workflow n8n v2 persiste un JSON complet :
+ *   { formattedResponse, format, rawResults, metadata, resultCount, documentData }
+ *
+ * Les anciennes lignes (avant la migration) peuvent être du texte brut.
+ * Cette fonction gère les deux cas et retourne TOUJOURS un objet normalisé.
+ */
+const parseHistoryMessage = (raw) => {
+  // Cas 1 : déjà un objet (Postgres JSONB ou driver qui auto-parse)
+  if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+    return sanitizeParsed(raw);
+  }
+
+  const str = typeof raw === 'string' ? raw : JSON.stringify(raw || '');
+
+  // Cas 2 : JSON stringifié par le workflow n8n v2
+  const trimmed = str.trim();
+  if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
     try {
-      // Respect tenant isolation provided by `tenantIsolation` middleware
-      const sessionId = (req.tenantFilter && req.tenantFilter.tenantId) ? req.tenantFilter.tenantId : req.user.tenantId;
-
-      // First, try reading from the primary ERP DB (Postgres) where n8n_chat_histories may live
-      const sqlPg = `SELECT id, session_id, message, sender, created_at FROM n8n_chat_histories WHERE session_id = :sessionId ORDER BY created_at ASC LIMIT 2000`;
-      try {
-        const [rows] = await sequelize.query(sqlPg, { replacements: { sessionId } });
-        const payload = (rows || []).map(r => {
-          const ts = r.created_at || r.createdAt || null;
-          const rawSender = (r.sender || r.session_sender || '').toString().toLowerCase();
-          const sender = (rawSender === 'user' || rawSender === 'human') ? 'user' : (rawSender === 'assistant' || rawSender === 'ai' || rawSender === 'bot' ? 'ai' : 'ai');
-          return {
-            id: r.id,
-            sender,
-            message: typeof r.message === 'string' ? r.message : JSON.stringify(r.message || ''),
-            metadata: {},
-            created_at: ts ? new Date(ts).toISOString() : null,
-            createdAt: ts ? new Date(ts).toISOString() : null
-          };
-        });
-        return res.status(200).json(payload);
-      } catch (pgErr) {
-        // If table not found in Postgres, fallback to the IA registry MySQL database
-        const isPgMissing = pgErr && pgErr.original && (pgErr.original.code === '42P01' || /does not exist/i.test(String(pgErr.message)));
-        // eslint-disable-next-line no-console
-        console.warn('[AI HISTORY] Postgres query failed, fallback?', isPgMissing, pgErr && pgErr.message);
-        if (!isPgMissing) throw pgErr;
-
-        // Fallback: attempt reading from the MySQL registry DB
-        const sqlMy = `SELECT id, session_id, message, sender, created_at FROM n8n_chat_histories WHERE session_id = :sessionId ORDER BY created_at ASC LIMIT 2000`;
-        const [rowsMy] = await sequelize.query(sqlMy, { replacements: { sessionId } });
-        const payload = (rowsMy || []).map(r => {
-          const ts = r.created_at || r.createdAt || null;
-          const rawSender = (r.sender || r.session_sender || '').toString().toLowerCase();
-          const sender = (rawSender === 'user' || rawSender === 'human') ? 'user' : (rawSender === 'assistant' || rawSender === 'ai' || rawSender === 'bot' ? 'ai' : 'ai');
-          return {
-            id: r.id,
-            sender,
-            message: typeof r.message === 'string' ? r.message : JSON.stringify(r.message || ''),
-            metadata: {},
-            created_at: ts ? new Date(ts).toISOString() : null,
-            createdAt: ts ? new Date(ts).toISOString() : null
-          };
-        });
-        return res.status(200).json(payload);
+      const parsed = JSON.parse(trimmed);
+      if (parsed && typeof parsed === 'object' && 'formattedResponse' in parsed) {
+        return sanitizeParsed(parsed);
       }
-    } catch (error) {
-      // Log full error server-side, but return a sanitized message to the client
-      // eslint-disable-next-line no-console
-      console.error('[AI HISTORY ERROR]:', error);
-      return res.status(500).json({ error: 'HistoryFetchError', message: 'Impossible de récupérer l\'historique des conversations.' });
+      if (Array.isArray(parsed)) {
+        return { formattedResponse: JSON.stringify(parsed), format: 'general', rawResults: null, metadata: null };
+      }
+      return sanitizeParsed(parsed);
+    } catch {
+      // Pas du JSON valide → texte brut
     }
   }
 
+  // Cas 3 : texte brut (anciens messages avant migration)
+  return { formattedResponse: str, format: 'general', rawResults: null, metadata: null, resultCount: 0 };
+};
+
+/**
+ * Nettoie un objet parsé de l'historique :
+ * - Si formattedResponse contient du CSS/HTML brut (bug historique pré-fix),
+ *   le remplace par un texte propre basé sur le titre du document.
+ * - Extrait documentData depuis metadata si absent au niveau racine.
+ */
+const sanitizeParsed = (obj) => {
+  if (!obj || typeof obj !== 'object') return obj;
+
+  const fr = String(obj.formattedResponse || '');
+  const looksLikeCssOrHtml = fr.startsWith(':root')
+    || fr.startsWith('<!DOCTYPE')
+    || fr.startsWith('<html')
+    || fr.includes('font-family:')
+    || fr.includes('border-collapse:')
+    || fr.includes('.items-table');
+
+  if (looksLikeCssOrHtml) {
+    // Remplace le contenu CSS/HTML par un titre lisible
+    const title = obj.metadata?.title || obj.documentTitle || 'Document';
+    obj = {
+      ...obj,
+      formattedResponse: `📄 **${title}** généré avec succès.`,
+    };
+  }
+
+  // S'assure que documentData est disponible au niveau racine
+  if (!obj.documentData && obj.metadata?.documentData) {
+    obj = { ...obj, documentData: obj.metadata.documentData };
+  }
+
+  return obj;
+};
+
+/**
+ * Normalise le sender depuis les différentes valeurs possibles en DB.
+ */
+const normalizeSender = (raw) => {
+  const s = String(raw || '').toLowerCase().trim();
+  if (s === 'user' || s === 'human') return 'user';
+  return 'ai'; // assistant / ai / bot → 'ai' pour le frontend
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Controller
+// ─────────────────────────────────────────────────────────────────────────────
+
+export class AIController {
+
   /**
-   * Récupère la bibliothèque de prompts prédéfinis
+   * GET /api/ai/history
+   * Récupère l'historique complet d'une session avec toutes les métadonnées
+   * nécessaires à la reconstruction des graphiques et tableaux.
+   */
+  static async getHistory(req, res) {
+    try {
+      // tenantId sert de sessionId — isolation multi-tenant garantie par le middleware
+      const sessionId = req.tenantFilter?.tenantId ?? req.user?.tenantId;
+      if (!sessionId) {
+        return res.status(400).json({ error: 'MissingSession', message: 'Session ID introuvable.' });
+      }
+
+      const sql = `
+        SELECT id, session_id, message, sender, created_at
+        FROM n8n_chat_histories
+        WHERE session_id = :sessionId
+        ORDER BY created_at ASC
+        LIMIT 500
+      `;
+
+      let rows;
+      try {
+        [rows] = await sequelize.query(sql, { replacements: { sessionId } });
+      } catch (pgErr) {
+        // Table absente → historique vide (premier usage)
+        const isMissing = pgErr?.original?.code === '42P01'
+          || /does not exist/i.test(String(pgErr?.message));
+        if (isMissing) {
+          console.warn('[AI HISTORY] n8n_chat_histories table not found, returning empty history.');
+          return res.status(200).json([]);
+        }
+        throw pgErr;
+      }
+
+      const payload = (rows || []).map(row => {
+        const parsed = parseHistoryMessage(row.message);
+        const ts = row.created_at ?? null;
+
+        return {
+          id: row.id,
+          sender: normalizeSender(row.sender),
+
+          // ── Texte affiché dans la bulle ──────────────────────────
+          message: parsed.formattedResponse ?? '',
+
+          // ── Données pour les visualisations (graphiques, tableaux, stats) ──
+          rawResults: parsed.rawResults ?? null,
+
+          // ── Données structurées DocumentPreview — rechargement de page ──
+          // Stockées dans metadata.documentData par le nœud n8n
+          documentData: parsed.documentData ?? parsed.metadata?.documentData ?? null,
+
+          // ── Métadonnées : chart_config, kpi_config, table_config, title… ──
+          // Critiques pour reconstruire les graphiques au rechargement
+          metadata: parsed.metadata
+            ? {
+                ...parsed.metadata,
+                // Garantit que format est toujours présent dans metadata
+                format: parsed.metadata.format ?? parsed.format ?? 'general',
+              }
+            : null,
+
+          // ── Format explicite (bar_chart, donut_chart, stats, table…) ──
+          format: parsed.format ?? 'general',
+
+          // ── Compteur de résultats ──
+          resultCount: parsed.resultCount
+            ?? (Array.isArray(parsed.rawResults) ? parsed.rawResults.length : 0),
+
+          // ── Timestamps ──
+          created_at: ts ? new Date(ts).toISOString() : null,
+          createdAt:  ts ? new Date(ts).toISOString() : null,
+        };
+      });
+
+      return res.status(200).json(payload);
+
+    } catch (error) {
+      console.error('[AI HISTORY ERROR]:', error);
+      return res.status(500).json({
+        error: 'HistoryFetchError',
+        message: 'Impossible de récupérer l\'historique des conversations.',
+      });
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /**
+   * GET /api/ai/templates
    */
   static async getTemplates(req, res) {
     try {
       const templates = await PromptTemplate.findAll({
         where: { isActive: true },
-        order: [['category', 'ASC'], ['title', 'ASC']]
+        order: [['category', 'ASC'], ['title', 'ASC']],
       });
       return res.status(200).json(templates);
     } catch (error) {
@@ -79,8 +198,11 @@ export class AIController {
     }
   }
 
+  // ─────────────────────────────────────────────────────────────────────────
+
   /**
-   * Insights pour le dashboard
+   * GET /api/ai/insights
+   * KPIs de rupture de stock pour le dashboard
    */
   static async getDashboardInsights(req, res) {
     try {
@@ -88,7 +210,7 @@ export class AIController {
       const lowStocks = await StockItem.findAll({
         where: { tenantId },
         order: [['currentLevel', 'ASC']],
-        limit: 5
+        limit: 5,
       });
 
       const insights = [];
@@ -101,21 +223,26 @@ export class AIController {
             sku: item.sku,
             message: `Risque de rupture dans ${prediction.daysRemaining} jours.`,
             severity: prediction.daysRemaining < 3 ? 'CRITICAL' : 'HIGH',
-            velocity: prediction.velocity.toFixed(2)
+            velocity: prediction.velocity.toFixed(2),
           });
         }
       }
 
       return res.status(200).json({
-        engine: 'Gemini-Flash-Native',
+        engine: 'GeStockPro-IA',
         timestamp: new Date(),
-        insights
+        insights,
       });
     } catch (error) {
       return res.status(500).json({ error: error.message });
     }
   }
 
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /**
+   * POST /api/ai/forecasts
+   */
   static async updateForecasts(req, res) {
     try {
       const tenantId = req.user.tenantId;
@@ -125,14 +252,14 @@ export class AIController {
         if (period) {
           preds = await AIService.generateForecasts(tenantId, period);
         } else {
-          return res.status(400).json({ error: 'BadRequest' });
+          return res.status(400).json({ error: 'BadRequest', message: 'predictions[] ou period requis.' });
         }
       }
       for (const pred of preds) {
-        if (!pred || !pred.sku) continue;
+        if (!pred?.sku) continue;
         await StockItem.update(
           { forecastedLevel: pred.forecastedLevel },
-          { where: { sku: pred.sku, tenantId } }
+          { where: { sku: pred.sku, tenantId } },
         );
       }
       return res.status(200).json({ status: 'SUCCESS', count: preds.length });
@@ -141,92 +268,107 @@ export class AIController {
     }
   }
 
+  // ─────────────────────────────────────────────────────────────────────────
+
   /**
-   * Proxy for external AI webhook to avoid CORS issues from browser
+   * POST /api/ai/bridge
+   * Proxy vers le webhook n8n — évite les problèmes CORS depuis le navigateur.
+   * Transmet le payload complet (message, id, planId) au workflow.
    */
   static async bridgeWebhook(req, res) {
-    const { chatInput, sessionId } = req.body || {};
-    // Allow request-level override: body `orchestratorUrl` or header `x-orchestrator-url`
-    const orchestratorOverride = (req.body && req.body.orchestratorUrl) ? req.body.orchestratorUrl : (req.headers['x-orchestrator-url'] || null);
-    // Build ordered webhook candidates: prefer explicit env, then local dev endpoints, then ngrok fallback
-    // Support multiple env var names used across deployments
-    const envWebhook = process.env.WEBHOOK_URL || process.env.N8N_WEBHOOK_URL || process.env.N8N_AI_ORCHESTRATOR_URL || null;
-    const envProd = process.env.PROD_WEBHOOK || process.env.N8N_PROD_WEBHOOK || process.env.N8N_AI_ORCHESTRATOR_URL || null;
-    const localProd = 'https://n8n.realtechprint.com/webhook/chat-ia';
-    const ngrokFallback = 'https://malvasian-pleonic-fatimah.ngrok-free.dev/webhook/chat-ia';
+    const { chatInput, sessionId, planId, message, id } = req.body || {};
+
+    // ── Résolution de l'URL cible ──────────────────────────────────────────
+    const orchestratorOverride =
+      req.body?.orchestratorUrl ?? req.headers['x-orchestrator-url'] ?? null;
+
+    const envWebhook  = process.env.WEBHOOK_URL || process.env.N8N_WEBHOOK_URL || process.env.N8N_AI_ORCHESTRATOR_URL || null;
+    const envProd     = process.env.PROD_WEBHOOK || process.env.N8N_PROD_WEBHOOK || null;
+    const prodUrl     = 'https://n8n.realtechprint.com/webhook/booba/gestock-ia';
+    const testUrl     = 'https://n8n.realtechprint.com/webhook/booba/gestock-ia';
 
     const isProd = (process.env.NODE_ENV || 'development') === 'production';
-    // If an orchestrator override is provided in the request, honor it as the highest priority
-    const targetWebhook = orchestratorOverride
-      ? orchestratorOverride
-      : (isProd
-        ? (envProd || envWebhook || localProd || ngrokFallback)
-        : (envWebhook || localTest || localProd || envProd || ngrokFallback));
-    // Track attempted URLs for diagnostics (include override if present)
-    const tried = [];
-    if (orchestratorOverride) tried.push(orchestratorOverride);
-    tried.push(targetWebhook);
-    // Log chosen target for debugging in prod
-    // eslint-disable-next-line no-console
-    console.info('[Bridge] chosen target webhook:', targetWebhook);
 
-    // Try primary target first
+    const primaryTarget = orchestratorOverride
+      ?? (isProd
+          ? (envProd ?? envWebhook ?? prodUrl)
+          : (envWebhook ?? testUrl ?? envProd ?? prodUrl));
+
+    console.info('[Bridge] target webhook:', primaryTarget, '| planId:', planId, '| isProd:', isProd);
+
+    // ── Payload normalisé ──────────────────────────────────────────────────
+    const payload = { chatInput, sessionId, message, id, planId };
+
+    // ── Tentative principale ───────────────────────────────────────────────
+    const tried = [primaryTarget];
     try {
-      const resp = await axios.post(targetWebhook, { chatInput, sessionId, message: req.body.message, id: req.body.id }, {
+      const resp = await axios.post(primaryTarget, payload, {
         headers: { 'Content-Type': 'application/json' },
-        timeout: 30000
+        timeout: 200_000, // 200s pour les requêtes SQL lourdes
       });
       return res.status(200).json(resp.data);
-    } catch (error) {
-      // Log full error details to server console for debugging
-      // eslint-disable-next-line no-console
-      console.error('Bridge webhook error:', {
-        message: error.message, stack: error.stack, responseStatus: error.response && error.response.status, responseData: error.response && error.response.data
+
+    } catch (primaryErr) {
+      console.error('[Bridge] primary webhook failed:', {
+        url: primaryTarget,
+        status: primaryErr?.response?.status,
+        message: primaryErr?.message,
       });
 
-      const remoteStatus = (error && error.response && error.response.status) ? error.response.status : 502;
-      const remoteData = (error && error.response && error.response.data) ? error.response.data : (error.message || String(error));
-      const isTimeout = error && error.code === 'ECONNABORTED';
+      const remoteStatus = primaryErr?.response?.status ?? 502;
+      const remoteData   = primaryErr?.response?.data   ?? primaryErr?.message ?? 'Unknown error';
+      const isTimeout    = primaryErr?.code === 'ECONNABORTED';
+      const isNetworkErr = !primaryErr?.response;
 
-      // Special-case: n8n returns 404 when the webhook name isn't registered
-      if (remoteStatus === 404 && remoteData && (typeof remoteData === 'object' ? (remoteData.message || '').toString().toLowerCase() : String(remoteData).toLowerCase())) {
-        const msg = (remoteData && remoteData.message) ? remoteData.message : 'Requested webhook not registered.';
-        const hint = (remoteData && remoteData.hint) ? remoteData.hint : 'Activez le workflow dans l\'éditeur n8n (cliquez sur "Execute workflow" si nécessaire).';
-        return res.status(404).json({ error: 'WebhookNotRegistered', message: msg, hint, attempted: targetWebhook });
+      // ── 404 : workflow n8n non activé ─────────────────────────────────
+      if (remoteStatus === 404) {
+        return res.status(404).json({
+          error: 'WebhookNotRegistered',
+          message: 'Le workflow n8n n\'est pas activé.',
+          hint: 'Cliquez sur "Execute workflow" dans l\'éditeur n8n pour activer le webhook.',
+          attempted: primaryTarget,
+        });
       }
 
-      // For timeouts, no response or gateway errors, try a sequence of fallbacks (local test/prod and env-specified)
-      if (isTimeout || !error.response || remoteStatus === 502) {
-        const fallbacks = [];
-        if (envWebhook && !tried.includes(envWebhook)) fallbacks.push(envWebhook);
-        if (envProd && !tried.includes(envProd)) fallbacks.push(envProd);
-        //if (localTest !== targetWebhook) fallbacks.push(localTest);
-        if (localProd !== targetWebhook) fallbacks.push(localProd);
-        if (ngrokFallback !== targetWebhook) fallbacks.push(ngrokFallback);
+      // ── Fallbacks sur timeout / erreur réseau / 502 ───────────────────
+      if (isTimeout || isNetworkErr || remoteStatus === 502) {
+        const fallbacks = [prodUrl, testUrl, envWebhook, envProd]
+          .filter(Boolean)
+          .filter(u => u !== primaryTarget && !tried.includes(u));
 
         for (const fb of fallbacks) {
+          tried.push(fb);
           try {
-            // eslint-disable-next-line no-console
-            console.info('[Bridge] attempting fallback webhook:', fb);
-            tried.push(fb);
-            const retry = await axios.post(fb, { chatInput, sessionId, message: req.body.message, id: req.body.id }, { headers: { 'Content-Type': 'application/json' }, timeout: 15000 });
+            console.info('[Bridge] trying fallback:', fb);
+            const retry = await axios.post(fb, payload, {
+              headers: { 'Content-Type': 'application/json' },
+              timeout: 30_000,
+            });
             return res.status(200).json({ fromFallback: true, fallbackUrl: fb, data: retry.data });
           } catch (retryErr) {
-            // eslint-disable-next-line no-console
-            console.warn('[Bridge] fallback attempt failed for', fb, retryErr && retryErr.message);
-            // try next
+            console.warn('[Bridge] fallback failed:', fb, retryErr?.message);
           }
         }
       }
 
-      // If the remote returned an HTML page (ngrok offline, proxy page), convert to a clear JSON error
-      if (typeof remoteData === 'string' && (remoteData.includes('<!DOCTYPE') || /ngrok/i.test(remoteData) || remoteData.includes('The endpoint') || remoteData.includes('is not registered'))) {
-        const hint = 'La cible n8n semble indisponible ou le workflow de production n\'est pas activé. Activez le workflow dans l\'éditeur n8n ou utilisez l\'URL de test (webhook-test) pendant le développement.';
-        return res.status(remoteStatus).json({ error: 'WebhookUnavailable', message: 'External webhook unreachable or returned non-JSON HTML response', hint, details: String(remoteData).slice(0, 2000) });
+      // ── Page HTML ngrok / proxy hors-ligne ────────────────────────────
+      const remoteStr = typeof remoteData === 'string' ? remoteData : '';
+      if (remoteStr.includes('<!DOCTYPE') || /ngrok/i.test(remoteStr) || remoteStr.includes('not registered')) {
+        return res.status(503).json({
+          error: 'WebhookUnavailable',
+          message: 'Le serveur n8n semble indisponible.',
+          hint: 'Vérifiez que n8n est démarré et que le workflow est activé.',
+          attempted: tried,
+        });
       }
 
-      // Forward other remote errors as-is, include attempted URLs to help debugging
-      return res.status(remoteStatus).json({ error: 'BridgeError', message: 'Failed to call external webhook', details: remoteData, attempted: tried });
+      // ── Erreur générique ──────────────────────────────────────────────
+      return res.status(remoteStatus).json({
+        error: 'BridgeError',
+        message: 'Impossible de contacter le webhook n8n.',
+        details: remoteData,
+        attempted: tried,
+      });
     }
   }
 }
