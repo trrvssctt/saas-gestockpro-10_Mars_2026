@@ -1,0 +1,329 @@
+import express from 'express';
+import rateLimit from 'express-rate-limit';
+import { checkPermission } from '../middlewares/rbac.js';
+import { ContactMessage } from '../models/ContactMessage.js';
+import { Op } from 'sequelize';
+
+// Router principal pour les routes contact
+const router = express.Router();
+
+// Router pour les routes publiques (sans authentification)
+const publicRouter = express.Router();
+
+// Router pour les routes admin (avec authentification)
+const adminRouter = express.Router();
+
+// Rate limiting pour éviter le spam sur le formulaire de contact
+const contactRateLimit = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 3, // Maximum 3 messages par IP toutes les 15 minutes
+  message: {
+    error: "Trop de messages envoyés. Veuillez patienter avant de renvoyer un message.",
+    retryAfter: 15 * 60 // en secondes
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// Middleware de validation pour les messages de contact
+const validateContactMessage = (req, res, next) => {
+  const { fullName, email, message } = req.body;
+  
+  if (!fullName || fullName.trim().length < 2) {
+    return res.status(400).json({ 
+      error: 'Le nom complet est requis et doit contenir au moins 2 caractères.' 
+    });
+  }
+  
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return res.status(400).json({ 
+      error: 'Une adresse email valide est requise.' 
+    });
+  }
+  
+  if (!message || message.trim().length < 10) {
+    return res.status(400).json({ 
+      error: 'Le message doit contenir au moins 10 caractères.' 
+    });
+  }
+  
+  // Sanitiser les données
+  req.body.fullName = fullName.trim();
+  req.body.email = email.trim().toLowerCase();
+  req.body.message = message.trim();
+  if (req.body.phone) {
+    req.body.phone = req.body.phone.trim();
+  }
+  
+  next();
+};
+
+/**
+ * @route POST /api/contact
+ * @desc Envoie un nouveau message de contact depuis la landing page
+ * @access Public
+ */
+publicRouter.post('/', contactRateLimit, validateContactMessage, async (req, res) => {
+  try {
+    const { fullName, email, phone, message } = req.body;
+    
+    // Récupération des métadonnées de la requête
+    const ipAddress = req.ip || req.connection.remoteAddress || req.headers['x-forwarded-for'];
+    const userAgent = req.get('User-Agent') || '';
+    
+    // Création du message avec Sequelize
+    const newMessage = await ContactMessage.create({
+      fullName,
+      email,
+      phone: phone || null,
+      message,
+      ipAddress,
+      userAgent,
+      status: 'non_lus',
+      source: 'landing_page'
+    });
+    
+    // Log de l'action pour audit
+    console.log(`[CONTACT] Nouveau message reçu de ${email} (IP: ${ipAddress})`);
+    
+    res.status(201).json({
+      success: true,
+      message: 'Votre message a été envoyé avec succès. Nous vous répondrons dans les plus brefs délais.',
+      messageId: newMessage.id
+    });
+    
+  } catch (error) {
+    console.error('[CONTACT ERROR]', error);
+    res.status(500).json({
+      error: 'Erreur lors de l\'envoi du message. Veuillez réessayer.',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+/**
+ * @route GET /api/admin/contact/messages
+ * @desc Récupère tous les messages de contact (admin seulement)
+ * @access Admin
+ */
+adminRouter.get('/messages', async (req, res) => {
+  try {
+    const { status, page = 1, limit = 20, search } = req.query;
+    const offset = (parseInt(page) - 1) * parseInt(limit);
+    
+    // Construction des filtres Sequelize
+    const whereClause = {};
+    
+    if (status && ['non_lus', 'lus'].includes(status)) {
+      whereClause.status = status;
+    }
+    
+    if (search && search.trim()) {
+      const searchTerm = `%${search.trim()}%`;
+      whereClause[Op.or] = [
+        { fullName: { [Op.iLike]: searchTerm } },
+        { email: { [Op.iLike]: searchTerm } },
+        { message: { [Op.iLike]: searchTerm } }
+      ];
+    }
+    
+    // Requête principale avec pagination
+    const { rows: messages, count: total } = await ContactMessage.findAndCountAll({
+      where: whereClause,
+      order: [
+        ['status', 'ASC'], // non_lus en premier
+        ['createdAt', 'DESC'] // Utiliser le nom d'attribut Sequelize
+      ],
+      limit: parseInt(limit),
+      offset: offset,
+      attributes: [
+        'id', 'fullName', 'email', 'phone', 'message', 'status',
+        'ipAddress', 'userAgent', 'adminNotes', 'repliedAt', 'repliedBy',
+        'createdAt', 'updatedAt'
+      ]
+    });
+    
+    const totalPages = Math.ceil(total / parseInt(limit));
+    
+    // Statistiques rapides
+    const stats = await ContactMessage.findAll({
+      attributes: [
+        [ContactMessage.sequelize.fn('COUNT', '*'), 'total_messages'],
+        [ContactMessage.sequelize.fn('COUNT', ContactMessage.sequelize.literal("CASE WHEN status = 'non_lus' THEN 1 END")), 'non_lus'],
+        [ContactMessage.sequelize.fn('COUNT', ContactMessage.sequelize.literal("CASE WHEN status = 'lus' THEN 1 END")), 'lus'],
+        [ContactMessage.sequelize.fn('COUNT', ContactMessage.sequelize.literal('DISTINCT email')), 'unique_contacts']
+      ],
+      raw: true
+    });
+    
+    res.json({
+      success: true,
+      data: {
+        messages: messages,
+        pagination: {
+          currentPage: parseInt(page),
+          totalPages,
+          totalItems: total,
+          itemsPerPage: parseInt(limit),
+          hasNext: parseInt(page) < totalPages,
+          hasPrev: parseInt(page) > 1
+        },
+        stats: stats[0] || {
+          total_messages: 0,
+          non_lus: 0,
+          lus: 0,
+          unique_contacts: 0
+        }
+      }
+    });
+    
+  } catch (error) {
+    console.error('[CONTACT MESSAGES ERROR]', error);
+    res.status(500).json({
+      error: 'Erreur lors de la récupération des messages.',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+/**
+ * @route PUT /api/admin/contact/messages/:id/status
+ * @desc Met à jour le statut d'un message (marquer comme lu/non lu)
+ * @access Admin
+ */
+adminRouter.put('/messages/:id/status', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status, adminNotes } = req.body;
+    
+    if (!['non_lus', 'lus'].includes(status)) {
+      return res.status(400).json({
+        error: 'Statut invalide. Utilisez "non_lus" ou "lus".'
+      });
+    }
+    
+    // Mise à jour du message
+    const [updatedRowsCount] = await ContactMessage.update(
+      { 
+        status, 
+        adminNotes: adminNotes || undefined
+      },
+      { 
+        where: { id },
+        returning: true // Pour PostgreSQL
+      }
+    );
+    
+    if (updatedRowsCount === 0) {
+      return res.status(404).json({
+        error: 'Message non trouvé.'
+      });
+    }
+    
+    // Récupération du message mis à jour
+    const updatedMessage = await ContactMessage.findByPk(id);
+    
+    res.json({
+      success: true,
+      message: `Message marqué comme ${status === 'lus' ? 'lu' : 'non lu'}.`,
+      data: updatedMessage
+    });
+    
+  } catch (error) {
+    console.error('[UPDATE MESSAGE STATUS ERROR]', error);
+    res.status(500).json({
+      error: 'Erreur lors de la mise à jour du statut.',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+/**
+ * @route DELETE /api/admin/contact/messages/:id
+ * @desc Supprime un message de contact
+ * @access Admin
+ */
+adminRouter.delete('/messages/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    // Récupération du message avant suppression
+    const existingMessage = await ContactMessage.findByPk(id, {
+      attributes: ['id', 'fullName', 'email']
+    });
+    
+    if (!existingMessage) {
+      return res.status(404).json({
+        error: 'Message non trouvé.'
+      });
+    }
+    
+    // Suppression du message
+    await ContactMessage.destroy({
+      where: { id }
+    });
+    
+    console.log(`[CONTACT] Message supprimé: ${existingMessage.email} (ID: ${id})`);
+    
+    res.json({
+      success: true,
+      message: 'Message supprimé avec succès.'
+    });
+    
+  } catch (error) {
+    console.error('[DELETE MESSAGE ERROR]', error);
+    res.status(500).json({
+      error: 'Erreur lors de la suppression du message.',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+/**
+ * @route POST /api/admin/contact/messages/:id/reply
+ * @desc Marque un message comme ayant une réponse
+ * @access Admin
+ */
+adminRouter.post('/messages/:id/reply', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { repliedBy, notes } = req.body;
+    
+    const [updatedRowsCount] = await ContactMessage.update(
+      { 
+        status: 'lus',
+        repliedAt: new Date(),
+        repliedBy: repliedBy || 'Admin',
+        adminNotes: notes || undefined
+      },
+      { 
+        where: { id }
+      }
+    );
+    
+    if (updatedRowsCount === 0) {
+      return res.status(404).json({
+        error: 'Message non trouvé.'
+      });
+    }
+    
+    res.json({
+      success: true,
+      message: 'Message marqué comme répondu.'
+    });
+    
+  } catch (error) {
+    console.error('[REPLY MESSAGE ERROR]', error);
+    res.status(500).json({
+      error: 'Erreur lors de la mise à jour.',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+// Configure the main router
+router.use('/', publicRouter);
+
+// Export both public and admin routers
+export default router;
+export { adminRouter };

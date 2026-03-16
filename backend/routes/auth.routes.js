@@ -100,4 +100,10 @@ router.delete('/users/:id', checkRole(['ADMIN']), AuthController.deleteUser);
 router.post('/users/:id/reset-password', checkRole(['ADMIN']), AuthController.resetUserPassword);
 router.post('/users/:id/toggle-mfa', checkRole(['ADMIN']), AuthController.toggleMFA);
 
+// --- ROUTES DE GESTION DE SESSION ---
+router.post('/logout', AuthController.logout);
+router.post('/logout-all', AuthController.logoutAll);
+router.get('/sessions', AuthController.getActiveSessions);
+router.post('/validate-session', AuthController.validateSession);
+
 export default router;

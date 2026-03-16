@@ -23,6 +23,7 @@ import { TenantController } from '../controllers/TenantController.js';
 import { SubscriptionController } from '../controllers/SubscriptionController.js';
 import { PaymentController } from '../controllers/PaymentController.js';
 import hrRoutes from './hr.routes.js';
+import contactRoutes, { adminRouter as contactAdminRoutes } from './contact.routes.js';
 
 const router = Router();
 
@@ -32,6 +33,8 @@ router.use('/auth', authRoutes);
 router.get('/plans', SubscriptionController.listPlans); 
 // Expose bridge as public to allow server-side forwarding from clients without requiring JWT
 router.post('/ai/bridge', AIController.bridgeWebhook);
+// Route publique pour l'envoi de messages de contact depuis la landing page
+router.use('/contact', contactRoutes);
 
 // --- PROTECTION JWT ---
 router.use(authenticateJWT);
@@ -50,6 +53,20 @@ router.use('/resilience', tenantIsolation, resilienceRoutes);
 router.use('/recovery', tenantIsolation, recoveryRoutes);
 router.use('/services', tenantIsolation, servicesRoutes);
 router.use('/hr', tenantIsolation, hrRoutes);
+
+// Routes admin pour la gestion des messages de contact (après JWT)
+router.use('/admin/contact', contactAdminRoutes);
+
+// Routes temporaires pour les alertes de billing (à implémenter dans admin.routes.js)
+router.get('/admin/billing/overdue', checkPermission(['ADMIN']), (req, res) => {
+  // TODO: Implémenter la logique pour récupérer les comptes en retard de paiement
+  res.json([]);
+});
+
+router.get('/admin/billing/upcoming', checkPermission(['ADMIN']), (req, res) => {
+  // TODO: Implémenter la logique pour récupérer les facturations à venir
+  res.json([]);
+});
 
 router.get('/settings', tenantIsolation, checkPermission(['ADMIN', 'SALES', 'STOCK_MANAGER', 'ACCOUNTANT']), TenantController.getSettings);
 router.put('/settings', tenantIsolation, checkPermission(['ADMIN']), TenantController.updateSettings);
