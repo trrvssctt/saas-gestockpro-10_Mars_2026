@@ -1,27 +1,43 @@
 
 import { authBridge } from './authBridge';
 
-// Use Vite env var when available; fallback to runtime detection or localhost
-// Ensure the base URL ends with `/api` so frontend requests target the API routes.
+// Configuration de l'URL du backend
+// En développement: forcer localhost:3000
+// En production: utiliser la variable d'environnement ou l'origin courant
 const buildTimeBackend = (import.meta as any).env?.VITE_BACKEND_URL;
-let rawBackend = buildTimeBackend || '';
-if (!rawBackend) {
+let rawBackend: string;
+
+if (buildTimeBackend) {
+  // Variable d'environnement explicite définie
+  rawBackend = buildTimeBackend;
+} else {
   try {
     const origin = (typeof window !== 'undefined' && window.location && window.location.origin) ? window.location.origin : '';
-    // If served from a real host (not localhost) assume API is co-located under the same origin
-    if (origin && !/localhost|127\.0\.0\.1/.test(origin)) {
+    // En développement avec Vite (localhost:5173-5179), pointer vers le backend sur port 3000
+    if (origin && /localhost:517[3-9]/.test(origin)) {
+      rawBackend = 'https://gestock.realtechprint.com';
+    } else if (origin && !/localhost|127\.0\.0\.1/.test(origin)) {
+      // Production: API co-localisée sous la même origine
       rawBackend = origin;
     } else {
-      rawBackend = 'https://gestockpro.realtechprint.com';
-      //rawBackend = 'http://localhost:3000'; // During development, point to local backend
+      // Fallback pour développement
+      rawBackend = 'https://gestock.realtechprint.com';
     }
   } catch (e) {
-    //rawBackend = 'http://localhost:3000';
-    rawBackend = 'https://gestockpro.realtechprint.com';
+    rawBackend = 'https://gestock.realtechprint.com';
   }
 }
-//const rawBackend = (import.meta as any).env?.VITE_BACKEND_URL || 'https://gestockprov1-1-9-fevrier.onrender.com';
+
 const BACKEND_URL = rawBackend.endsWith('/api') ? rawBackend : `${rawBackend.replace(/\/+$/, '')}/api`;
+
+// Debug en développement
+if (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
+  console.log('🔧 API Configuration Debug:', {
+    origin: window.location.origin,
+    rawBackend,
+    finalBackendURL: BACKEND_URL
+  });
+}
 
 export interface ApiError {
   error: string;
@@ -32,12 +48,14 @@ export interface ApiError {
 export const apiClient = {
   async request(endpoint: string, options: RequestInit = {}) {
     const session = authBridge.getSession();
+    const sessionToken = authBridge.getSessionToken();
     
     // Ne pas définir Content-Type si headers est un objet vide (pour FormData)
     const isFormData = options.body instanceof FormData;
     const headers = {
       ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
       ...(session?.token ? { 'Authorization': `Bearer ${session.token}` } : {}),
+      ...(sessionToken ? { 'x-session-token': sessionToken } : {}),
       ...options.headers,
     };
 
@@ -55,7 +73,7 @@ export const apiClient = {
         
         // Gestion spécifique des sessions expirées
         if (response.status === 401 || response.status === 403) {
-          if (data.message?.toLowerCase().includes('expirée')) {
+          if (data.message?.toLowerCase().includes('expirée') || data.shouldLogout) {
             authBridge.clearSession();
             window.location.reload();
           }
@@ -87,8 +105,10 @@ export const apiClient = {
 // Compatibility helper: returns the raw fetch Response so existing components can call `res.json()`
 export async function fetchWithToken(endpoint: string, options: RequestInit = {}) {
   const session = authBridge.getSession();
+  const sessionToken = authBridge.getSessionToken();
   const headers: any = {
     ...(session?.token ? { Authorization: `Bearer ${session.token}` } : {}),
+    ...(sessionToken ? { 'x-session-token': sessionToken } : {}),
     ...options.headers,
   };
 
