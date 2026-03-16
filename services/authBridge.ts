@@ -1,6 +1,7 @@
 import { User, UserRole } from '../types';
 
 const AUTH_STORAGE_KEY = 'gsp_session_vault';
+const SESSION_TOKEN_KEY = 'gsp_session_token';
 
 /**
  * Définition stricte des plans
@@ -40,7 +41,7 @@ const PLAN_RULES = {
       'governance',
       'subscription',
       'settings',
-      'security',
+      //'security',
       'recovery',
       'movements',
     ],
@@ -63,7 +64,7 @@ const PLAN_RULES = {
       'governance',
       'subscription',
       'settings',
-      'security',
+      //'security',
       'recovery',
       'movements',
       'inventorycampaigns',
@@ -75,7 +76,7 @@ const PLAN_RULES = {
 };
 
 export const authBridge = {
-  saveSession: (user: User, token: string) => {
+  saveSession: (user: User, token: string, sessionToken?: string) => {
     let roles: UserRole[] = [];
 
     if (Array.isArray(user.roles) && user.roles.length > 0) {
@@ -89,8 +90,13 @@ export const authBridge = {
     const sessionUser = { ...user, roles };
     sessionStorage.setItem(
       AUTH_STORAGE_KEY,
-      JSON.stringify({ user: sessionUser, token, timestamp: Date.now() })
+      JSON.stringify({ user: sessionUser, token, sessionToken, timestamp: Date.now() })
     );
+
+    // Sauvegarder également le token de session séparément pour les requêtes API
+    if (sessionToken) {
+      sessionStorage.setItem(SESSION_TOKEN_KEY, sessionToken);
+    }
     // Apply tenant UI preferences immediately so login shows correct look
     try {
       const tenant = (sessionUser as any).tenant || (sessionUser as any).tenantData || null;
@@ -120,7 +126,7 @@ export const authBridge = {
     }
   },
 
-  getSession: (): { user: User; token: string } | null => {
+  getSession: (): { user: User; token: string; sessionToken?: string } | null => {
     const raw = sessionStorage.getItem(AUTH_STORAGE_KEY);
     if (!raw) return null;
 
@@ -140,7 +146,7 @@ export const authBridge = {
   fetchMe: async (token: string): Promise<User | null> => {
     try {
       //const response = await fetch('http://localhost:3000/api/auth/me', {
-       const response = await fetch('https://gestockpro.realtechprint.com/api/auth/me', {
+       const response = await fetch('https://gestock.realtechprint.com/api/auth/me', {
         headers: { Authorization: `Bearer ${token}` }
       });
       if (!response.ok) return null;
@@ -155,7 +161,104 @@ export const authBridge = {
     }
   },
 
-  clearSession: () => sessionStorage.removeItem(AUTH_STORAGE_KEY),
+  clearSession: () => {
+    sessionStorage.removeItem(AUTH_STORAGE_KEY);
+    sessionStorage.removeItem(SESSION_TOKEN_KEY);
+  },
+
+  /**
+   * Récupère le token de session actuel
+   */
+  getSessionToken: (): string | null => {
+    return sessionStorage.getItem(SESSION_TOKEN_KEY);
+  },
+
+  /**
+   * Valide la session en cours côté serveur
+   */
+  validateCurrentSession: async (): Promise<boolean> => {
+    const sessionToken = authBridge.getSessionToken();
+    if (!sessionToken) {
+      console.warn('Pas de token de session trouvé pour la validation');
+      return false;
+    }
+
+    try {
+      const response = await fetch('http://localhost:3000/api/auth/validate-session', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-session-token': sessionToken
+        },
+        body: JSON.stringify({ sessionToken })
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        const isValid = data.valid === true;
+        if (!isValid) {
+          console.warn('Session invalide selon le serveur:', data);
+        }
+        return isValid;
+      }
+      
+      // Si la requête échoue mais que nous avons un token, considérer comme valide temporairement
+      // pour éviter les déconnexions intempestives dues à des problèmes réseau
+      console.warn('Erreur de validation de session (réseau?), gardons la session:', response.status);
+      return true; // Plus tolérant aux erreurs réseau
+      
+    } catch (error) {
+      console.error('Erreur lors de la validation de session (réseau/serveur):', error);
+      // En cas d'erreur réseau, ne pas déconnecter immédiatement
+      return true; // Plus tolérant aux erreurs réseau
+    }
+  },
+
+  /**
+   * Déconnecte l'utilisateur et termine la session côté serveur
+   */
+  logout: async (): Promise<boolean> => {
+    const sessionToken = authBridge.getSessionToken();
+    
+    try {
+      if (sessionToken) {
+        await fetch('http://localhost:3000/api/auth/logout', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-session-token': sessionToken
+          },
+          body: JSON.stringify({ sessionToken })
+        });
+      }
+      
+      // Nettoyer la session locale même si l'appel serveur échoue
+      authBridge.clearSession();
+      return true;
+    } catch (error) {
+      console.error('Erreur lors de la déconnexion:', error);
+      // Nettoyer quand même la session locale
+      authBridge.clearSession();
+      return false;
+    }
+  },
+
+  /**
+   * Vérifie périodiquement la validité de la session
+   */
+  startSessionMonitoring: (onSessionExpired: () => void, intervalMs: number = 300000) => {
+    const intervalId = setInterval(async () => {
+      const isValid = await authBridge.validateCurrentSession();
+      
+      if (!isValid) {
+        clearInterval(intervalId);
+        authBridge.clearSession();
+        onSessionExpired();
+      }
+    }, intervalMs); // Vérification toutes les 5 minutes par défaut
+
+    return intervalId;
+  },
 
   /**
    * 🔐 Gouvernance des accès par PLAN + RÔLE
