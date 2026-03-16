@@ -98,7 +98,7 @@ const Subscription: React.FC<SubscriptionProps> = ({ user, currency }) => {
   const plansSection = useMemo(() => {
     if (!filteredPlans || filteredPlans.length === 0) {
       return (
-        <div className="bg-white rounded-[3rem] p-12 border border-slate-100 shadow-sm text-center">
+        <div className="bg-white rounded-[3rem] p-6 md:p-12 border border-slate-100 shadow-sm text-center">
           <div className="flex flex-col items-center justify-center py-12">
             <Sparkles size={64} className="text-amber-400 animate-bounce" />
             <h3 className="text-2xl font-black text-slate-900 mt-6">Votre entreprise est au sommet de la chaîne humanitaire 🎉</h3>
@@ -111,7 +111,7 @@ const Subscription: React.FC<SubscriptionProps> = ({ user, currency }) => {
     return (
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
         {filteredPlans.map((plan) => (
-          <div key={plan.id} className="bg-white rounded-[3rem] border-2 border-slate-100 p-10 hover:border-indigo-600 transition-all group relative overflow-hidden flex flex-col shadow-sm hover:shadow-2xl">
+          <div key={plan.id} className="bg-white rounded-[3rem] border-2 border-slate-100 p-5 md:p-10 hover:border-indigo-600 transition-all group relative overflow-hidden flex flex-col shadow-sm hover:shadow-2xl">
             {plan.isPopular && (
               <div className="absolute top-6 right-6 bg-indigo-600 text-white px-3 py-1 rounded-full text-[8px] font-black uppercase tracking-widest">RECOMMANDÉ</div>
             )}
@@ -282,8 +282,8 @@ const Subscription: React.FC<SubscriptionProps> = ({ user, currency }) => {
     <div className="space-y-12 animate-in fade-in duration-700 pb-20">
       
       {/* SECTION 1: ABONNEMENT ACTUEL */}
-      <div className="bg-slate-900 rounded-[3.5rem] p-12 text-white relative overflow-hidden shadow-2xl border border-slate-800">
-        <div className="absolute top-0 right-0 p-12 opacity-5">
+      <div className="bg-slate-900 rounded-[3.5rem] p-6 md:p-12 text-white relative overflow-hidden shadow-2xl border border-slate-800">
+        <div className="absolute top-0 right-0 p-6 md:p-12 opacity-5">
           <Zap size={300} className="text-indigo-500" />
         </div>
         
@@ -293,7 +293,7 @@ const Subscription: React.FC<SubscriptionProps> = ({ user, currency }) => {
               <ShieldCheck size={18} className="text-indigo-400" />
               <span className="text-[10px] font-black uppercase tracking-widest text-indigo-100">Contrat Instance Actif</span>
             </div>
-            <h1 className="text-5xl font-black tracking-tighter uppercase leading-none">
+            <h1 className="text-3xl md:text-5xl font-black tracking-tighter uppercase leading-none">
               Plan <span className="text-indigo-400">{currentPlan?.name || 'INITIAL'}</span>
             </h1>
             
@@ -324,11 +324,11 @@ const Subscription: React.FC<SubscriptionProps> = ({ user, currency }) => {
 
       {/* SECTION 2: HISTORIQUE DES PAIEMENTS */}
       <div className="space-y-6">
-         <div className="flex items-center justify-between">
-            <h2 className="text-2xl font-black text-slate-900 uppercase tracking-tight flex items-center gap-3">
+         <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
+            <h2 className="text-xl md:text-2xl font-black text-slate-900 uppercase tracking-tight flex items-center gap-3">
               <History className="text-indigo-600" /> Historique des règlements
             </h2>
-            <div className="flex items-center gap-4">
+            <div className="flex flex-wrap items-center gap-4">
               <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{paymentHistory.length} Transactions</span>
               <label className="flex items-center gap-2 text-[10px] font-black text-slate-500 uppercase">
                 Afficher
@@ -343,8 +343,8 @@ const Subscription: React.FC<SubscriptionProps> = ({ user, currency }) => {
             </div>
          </div>
 
-         <div className="bg-white rounded-[3rem] border border-slate-100 shadow-sm overflow-hidden">
-            <table className="w-full text-left">
+         <div className="bg-white rounded-[3rem] border border-slate-100 shadow-sm overflow-x-auto">
+            <table className="w-full text-left min-w-[600px]">
                <thead>
                   <tr className="bg-slate-50/50 text-[9px] font-black text-slate-400 uppercase tracking-widest border-b">
                      <th className="px-10 py-6">Date de transaction</th>
@@ -412,8 +412,8 @@ const Subscription: React.FC<SubscriptionProps> = ({ user, currency }) => {
       {/* APERÇU FACTURE ABONNEMENT */}
       {showDocGenerator && (
         <div className="fixed inset-0 z-[900] flex flex-col items-center justify-center p-6 bg-slate-950/95 backdrop-blur-xl animate-in fade-in duration-300">
-           <div className="w-full max-w-5xl h-[90vh] bg-white rounded-[3rem] overflow-hidden flex flex-col shadow-2xl relative animate-in zoom-in-95 duration-500">
-              <div className="px-10 py-6 bg-slate-900 text-white flex justify-between items-center shrink-0 print:hidden">
+           <div className="w-full max-w-5xl mx-4 md:mx-auto h-[90vh] bg-white rounded-[3rem] overflow-hidden flex flex-col shadow-2xl relative animate-in zoom-in-95 duration-500">
+              <div className="px-4 md:px-10 py-6 bg-slate-900 text-white flex justify-between items-center shrink-0 print:hidden">
                  <div className="flex items-center gap-4"><FileText size={24} className="text-indigo-400"/><h3 className="text-lg font-black uppercase tracking-tight">Facture SaaS GeStocPro</h3></div>
                  <div className="flex gap-4">
                    <div className="flex items-center justify-end gap-3 mb-2">
@@ -465,7 +465,7 @@ const Subscription: React.FC<SubscriptionProps> = ({ user, currency }) => {
                    <button onClick={() => setShowDocGenerator(null)} className="p-2.5 hover:bg-white/10 rounded-xl transition-all"><X size={20}/></button>
                  </div>
               </div>
-              <div className="flex-1 overflow-y-auto bg-slate-100/50 p-10 print:p-0 print:bg-white">
+              <div className="flex-1 overflow-y-auto bg-slate-100/50 p-5 md:p-10 print:p-0 print:bg-white">
                  <DocumentPreview 
                     type={showDocGenerator.mode} 
                     sale={showDocGenerator.sale} 
@@ -480,7 +480,7 @@ const Subscription: React.FC<SubscriptionProps> = ({ user, currency }) => {
       {/* SECTION 3: PLANS D'UPGRADE */}
       <div className="space-y-8">
         <div>
-          <h2 className="text-2xl font-black text-slate-900 uppercase tracking-tight flex items-center gap-3">
+          <h2 className="text-xl md:text-2xl font-black text-slate-900 uppercase tracking-tight flex items-center gap-3">
             <TrendingUp className="text-emerald-500" /> Upgrades du Kernel
           </h2>
           <p className="text-slate-400 text-xs font-bold uppercase tracking-widest mt-1">Boostez les capacités de votre écosystème</p>
@@ -492,18 +492,18 @@ const Subscription: React.FC<SubscriptionProps> = ({ user, currency }) => {
       {/* MODAL DE PAIEMENT */}
       {showPaymentModal && (
         <div className="fixed inset-0 z-[800] flex items-center justify-center p-6 bg-slate-950/90 backdrop-blur-xl animate-in fade-in duration-300">
-          <div className="bg-white w-full max-w-2xl rounded-[4rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-500 flex flex-col max-h-[90vh]">
+          <div className="bg-white w-full max-w-2xl mx-4 md:mx-auto rounded-[4rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-500 flex flex-col max-h-[90vh]">
             {success ? (
-              <div className="p-20 text-center space-y-8 animate-in zoom-in-90">
+              <div className="p-10 md:p-20 text-center space-y-8 animate-in zoom-in-90">
                 <div className="w-24 h-24 bg-emerald-500 text-white rounded-[2.5rem] flex items-center justify-center mx-auto shadow-2xl animate-bounce">
                   <CheckCircle2 size={48} />
                 </div>
-                <h3 className="text-3xl font-black uppercase tracking-tight">Paiement enregistré</h3>
+                <h3 className="text-xl md:text-3xl font-black uppercase tracking-tight">Paiement enregistré</h3>
                 <p className="text-slate-400 text-xs font-bold uppercase">Le paiement a bien été enregistré et est en attente de validation par l'administrateur.</p>
               </div>
             ) : (
               <>
-                <div className="px-10 py-8 bg-slate-900 text-white flex justify-between items-center shrink-0">
+                <div className="px-4 md:px-10 py-8 bg-slate-900 text-white flex justify-between items-center shrink-0">
                   <div className="flex items-center gap-4">
                     <div className="w-12 h-12 bg-indigo-600 rounded-2xl flex items-center justify-center shadow-lg"><RefreshCw size={24}/></div>
                     <div>
@@ -514,14 +514,14 @@ const Subscription: React.FC<SubscriptionProps> = ({ user, currency }) => {
                   <button onClick={() => setShowPaymentModal(false)} className="p-3 hover:bg-white/10 rounded-2xl transition-all"><X size={24}/></button>
                 </div>
 
-                <div className="flex-1 overflow-y-auto p-12 space-y-10 custom-scrollbar">
-                   <div className="p-8 bg-indigo-50 border border-indigo-100 rounded-[2.5rem] flex justify-between items-center">
+                <div className="flex-1 overflow-y-auto p-6 md:p-12 space-y-10 custom-scrollbar">
+                   <div className="p-4 md:p-8 bg-indigo-50 border border-indigo-100 rounded-[2.5rem] flex justify-between items-center">
                       <div>
                         <p className="text-[9px] font-black text-indigo-400 uppercase tracking-widest mb-1">Nouveau montant mensuel</p>
                         <p className="text-xs text-indigo-900 font-bold uppercase tracking-widest">{selectedPlan?.name}</p>
                       </div>
                       <div className="text-right">
-                         <span className="text-3xl font-black text-indigo-600">{selectedPlan?.price.toLocaleString()}</span>
+                         <span className="text-xl md:text-3xl font-black text-indigo-600">{selectedPlan?.price.toLocaleString()}</span>
                          <span className="text-sm font-black text-indigo-400 ml-2">{currency}</span>
                       </div>
                    </div>
@@ -557,8 +557,8 @@ const Subscription: React.FC<SubscriptionProps> = ({ user, currency }) => {
       {/* MODAL PAYER ABONNEMENT COURANT */}
       {showPayCurrentModal && (
         <div className="fixed inset-0 z-[850] flex items-center justify-center p-6 bg-slate-950/90 backdrop-blur-xl animate-in fade-in duration-300">
-          <div className="bg-white w-full max-w-2xl rounded-[4rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-500 flex flex-col max-h-[90vh]">
-            <div className="px-10 py-8 bg-slate-900 text-white flex justify-between items-center shrink-0">
+          <div className="bg-white w-full max-w-2xl mx-4 md:mx-auto rounded-[4rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-500 flex flex-col max-h-[90vh]">
+            <div className="px-4 md:px-10 py-8 bg-slate-900 text-white flex justify-between items-center shrink-0">
               <div className="flex items-center gap-4">
                 <div className="w-12 h-12 bg-indigo-600 rounded-2xl flex items-center justify-center shadow-lg"><RefreshCw size={24}/></div>
                 <div>
@@ -569,21 +569,21 @@ const Subscription: React.FC<SubscriptionProps> = ({ user, currency }) => {
               <button onClick={() => setShowPayCurrentModal(false)} className="p-3 hover:bg-white/10 rounded-2xl transition-all"><X size={24}/></button>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-12 space-y-6 custom-scrollbar">
+            <div className="flex-1 overflow-y-auto p-6 md:p-12 space-y-6 custom-scrollbar">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-center">
                 <div className="flex flex-col items-center gap-4">
                   <img src={waveQr} alt="Wave QR" className="w-48 h-48 object-contain rounded-xl shadow-md border" />
                   <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest text-center">Scannez le QR avec l'application Wave puis renseignez la référence de transaction ci-dessous.</p>
                 </div>
                 <div className="space-y-4">
-                  <div className="p-8 bg-indigo-50 border border-indigo-100 rounded-[2.5rem] flex justify-between items-center">
+                  <div className="p-4 md:p-8 bg-indigo-50 border border-indigo-100 rounded-[2.5rem] flex justify-between items-center">
                     <div>
                       <p className="text-[9px] font-black text-indigo-400 uppercase tracking-widest mb-1">Période</p>
                       <p className="text-sm font-black uppercase tracking-widest">{currentSubscription?.nextBillingDate ? new Date(currentSubscription.nextBillingDate).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' }) : new Date().toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })}</p>
                     </div>
                     <div className="text-right">
                       <p className="text-[9px] font-black text-indigo-400 uppercase tracking-widest mb-1">Montant à payer</p>
-                      <p className="text-3xl font-black text-indigo-600">{currentPlan?.price?.toLocaleString()} {currency}</p>
+                      <p className="text-xl md:text-3xl font-black text-indigo-600">{currentPlan?.price?.toLocaleString()} {currency}</p>
                     </div>
                   </div>
 

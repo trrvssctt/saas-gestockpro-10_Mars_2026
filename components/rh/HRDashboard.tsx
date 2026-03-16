@@ -209,7 +209,7 @@ const HRDashboard: React.FC<HRDashboardProps> = ({ onNavigate }) => {
               initial={{ scale: 0.9, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.9, opacity: 0 }}
-              className="bg-white rounded-[3rem] p-10 max-w-2xl w-full shadow-2xl relative"
+              className="bg-white rounded-[3rem] p-5 md:p-10 max-w-2xl w-full mx-4 md:mx-auto shadow-2xl relative"
             >
               <div className="text-center space-y-8">
                 <div className="w-20 h-20 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-[2rem] flex items-center justify-center mx-auto">
@@ -298,7 +298,7 @@ const HRDashboard: React.FC<HRDashboardProps> = ({ onNavigate }) => {
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-black text-slate-900 tracking-tighter uppercase">Module RH & Paie</h1>
+          <h1 className="text-xl md:text-3xl font-black text-slate-900 tracking-tighter uppercase">Module RH & Paie</h1>
           <div className="flex items-center gap-3">
             <p className="text-slate-500 font-medium uppercase text-[10px] tracking-[0.3em]">Gestion du capital humain - Enterprise Edition</p>
             {!companyConfigured && !checkingConfig && (
@@ -334,7 +334,7 @@ const HRDashboard: React.FC<HRDashboardProps> = ({ onNavigate }) => {
 
       {/* Stats Grid */}
       {error ? (
-        <div className="bg-red-50 border border-red-200 rounded-3xl p-8 text-center">
+        <div className="bg-red-50 border border-red-200 rounded-3xl p-4 md:p-8 text-center">
           <AlertCircle className="w-12 h-12 text-red-500 mx-auto mb-4" />
           <h3 className="text-lg font-bold text-red-800 mb-2">Erreur de chargement des statistiques</h3>
           <p className="text-red-600 text-sm mb-4">{error}</p>
@@ -363,7 +363,7 @@ const HRDashboard: React.FC<HRDashboardProps> = ({ onNavigate }) => {
                 </span>
               </div>
               <p className="text-slate-400 font-black uppercase text-[10px] tracking-widest mb-1">{stat.label}</p>
-              <p className="text-3xl font-black text-slate-900 tracking-tighter">
+              <p className="text-xl md:text-3xl font-black text-slate-900 tracking-tighter">
                 {loading ? <Loader2 className="animate-spin" size={24} /> : stat.value}
               </p>
             </div>
@@ -375,13 +375,13 @@ const HRDashboard: React.FC<HRDashboardProps> = ({ onNavigate }) => {
       <div className="flex items-center gap-2 bg-slate-100 p-1.5 rounded-[2rem] w-fit">
         <button 
           onClick={() => setActiveSection('admin')}
-          className={`px-8 py-3 rounded-full font-black text-[10px] uppercase tracking-widest transition-all ${activeSection === 'admin' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+          className={`px-4 md:px-8 py-3 rounded-full font-black text-[10px] uppercase tracking-widest transition-all ${activeSection === 'admin' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
         >
           Administration RH
         </button>
         <button 
           onClick={() => setActiveSection('payroll')}
-          className={`px-8 py-3 rounded-full font-black text-[10px] uppercase tracking-widest transition-all ${activeSection === 'payroll' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+          className={`px-4 md:px-8 py-3 rounded-full font-black text-[10px] uppercase tracking-widest transition-all ${activeSection === 'payroll' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
         >
           Gestion de la Paie
         </button>
@@ -398,7 +398,7 @@ const HRDashboard: React.FC<HRDashboardProps> = ({ onNavigate }) => {
             onClick={() => handleModuleClick(module.id)}
             className={`group cursor-pointer ${!companyConfigured ? 'opacity-60 pointer-events-none' : ''}`}
           >
-            <div className="bg-white p-8 rounded-[3rem] border border-slate-100 shadow-sm hover:shadow-2xl hover:-translate-y-2 transition-all duration-500 relative overflow-hidden h-full flex flex-col">
+            <div className="bg-white p-4 md:p-8 rounded-[3rem] border border-slate-100 shadow-sm hover:shadow-2xl hover:-translate-y-2 transition-all duration-500 relative overflow-hidden h-full flex flex-col">
               {!companyConfigured && (
                 <div className="absolute inset-0 bg-slate-100/50 backdrop-blur-[1px] rounded-[3rem] flex items-center justify-center z-10">
                   <div className="text-center">

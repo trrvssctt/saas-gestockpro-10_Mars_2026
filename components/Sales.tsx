@@ -174,6 +174,12 @@ const Sales = ({ currency, user, tenantSettings, plan }: { currency: string, use
     setSaleForm({ ...saleForm, items: newItems });
   };
 
+  const updateCartQtyDirect = (idx: number, newQuantity: number) => {
+    const newItems = [...saleForm.items];
+    newItems[idx].quantity = Math.max(1, newQuantity || 1);
+    setSaleForm({ ...saleForm, items: newItems });
+  };
+
   const removeFromCart = (idx: number) => {
     setSaleForm({ ...saleForm, items: saleForm.items.filter((_, i) => i !== idx) });
   };
@@ -306,7 +312,7 @@ const Sales = ({ currency, user, tenantSettings, plan }: { currency: string, use
         </div>
       )}
 
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 bg-white p-8 rounded-[3rem] border border-slate-100 shadow-sm">
+      <div className="flex flex-col sm:flex-row gap-3 flex-wrap items-start sm:items-center justify-between bg-white p-4 md:p-8 rounded-[3rem] border border-slate-100 shadow-sm">
         <div>
           <h2 className="text-3xl font-black text-slate-900 tracking-tighter uppercase flex items-center gap-3">
             <ShoppingCart className="text-indigo-600" size={32} /> Registre des Ventes
@@ -333,14 +339,14 @@ const Sales = ({ currency, user, tenantSettings, plan }: { currency: string, use
              <RefreshCw size={20} className={loading ? 'animate-spin' : ''} />
           </button>
           {isLimitReached ? (
-             <div className="flex items-center gap-3 px-6 py-4 bg-rose-50 text-rose-600 rounded-2xl border border-rose-100 text-[10px] font-black uppercase tracking-widest shadow-sm">
+             <div className="flex items-center gap-3 px-4 md:px-6 py-3 md:py-4 bg-rose-50 text-rose-600 rounded-2xl border border-rose-100 text-[10px] font-black uppercase tracking-widest shadow-sm">
                 <Lock size={16} /> Limite {limit} ventes atteinte
              </div>
           ) : (
-            <button 
-              onClick={() => { if (activeInventory) return; setEditModeId(null); setSaleForm({ customerId: '', paymentMethod: 'CASH', amountPaid: 0, items: [] }); setShowCreateModal(true); }} 
+            <button
+              onClick={() => { if (activeInventory) return; setEditModeId(null); setSaleForm({ customerId: '', paymentMethod: 'CASH', amountPaid: 0, items: [] }); setShowCreateModal(true); }}
               disabled={!!activeInventory}
-              className={`px-10 py-5 rounded-[1.5rem] font-black transition-all shadow-xl flex items-center gap-3 text-xs uppercase tracking-widest active:scale-95 ${activeInventory ? 'bg-slate-100 text-slate-300' : 'bg-slate-900 text-white hover:bg-indigo-600'}`}
+              className={`px-4 md:px-10 py-3 md:py-5 rounded-[1.5rem] font-black transition-all shadow-xl flex items-center gap-3 text-xs uppercase tracking-widest active:scale-95 ${activeInventory ? 'bg-slate-100 text-slate-300' : 'bg-slate-900 text-white hover:bg-indigo-600'}`}
             >
               <Plus size={18} /> CRÉER UNE VENTE
             </button>
@@ -350,8 +356,8 @@ const Sales = ({ currency, user, tenantSettings, plan }: { currency: string, use
 
       {/* ZONE FILTRES AVANCÉS */}
       {showFilters && (
-        <div className="bg-white p-8 rounded-[3rem] border border-slate-100 shadow-xl animate-in slide-in-from-top-4 duration-300 space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+        <div className="bg-white p-4 md:p-8 rounded-[3rem] border border-slate-100 shadow-xl animate-in slide-in-from-top-4 duration-300 space-y-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-6">
             <div className="space-y-2">
               <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest px-2">Recherche libre</label>
               <div className="relative">
@@ -385,7 +391,7 @@ const Sales = ({ currency, user, tenantSettings, plan }: { currency: string, use
               </select>
             </div>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6">
             <div className="space-y-2">
               <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest px-2">Période (Du)</label>
               <div className="relative">
@@ -409,15 +415,15 @@ const Sales = ({ currency, user, tenantSettings, plan }: { currency: string, use
 
       <div className="bg-white rounded-[3.5rem] border border-slate-100 shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-left">
+          <table className="w-full min-w-[600px] text-left">
             <thead>
               <tr className="bg-slate-50/80 text-slate-400 text-[9px] font-black uppercase tracking-widest border-b">
-                <th className="px-8 py-6">Référence</th>
-                <th className="px-8 py-6">Client</th>
-                <th className="px-8 py-6 text-center">Taux Paiement</th>
-                <th className="px-8 py-6 text-center">Taux Livraison</th>
-                <th className="px-8 py-6 text-right">Montant TTC</th>
-                <th className="px-8 py-6 text-right">Actions</th>
+                <th className="px-3 md:px-8 py-3 md:py-5">Référence</th>
+                <th className="px-3 md:px-8 py-3 md:py-5">Client</th>
+                <th className="px-3 md:px-8 py-3 md:py-5 text-center">Taux Paiement</th>
+                <th className="px-3 md:px-8 py-3 md:py-5 text-center">Taux Livraison</th>
+                <th className="px-3 md:px-8 py-3 md:py-5 text-right">Montant TTC</th>
+                <th className="px-3 md:px-8 py-3 md:py-5 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50">
@@ -430,11 +436,11 @@ const Sales = ({ currency, user, tenantSettings, plan }: { currency: string, use
                 const isAnnule = sale.status === 'ANNULE';
                 return (
                   <tr key={sale.id} className={`hover:bg-slate-50/50 transition-all group ${isAnnule ? 'bg-rose-50/20 opacity-60' : ''}`}>
-                    <td className="px-8 py-6">
+                    <td className="px-3 md:px-8 py-3 md:py-5">
                       <p className={`font-mono text-xs font-black ${isAnnule ? 'text-rose-400 line-through' : 'text-indigo-600'}`}>#{sale.reference}</p>
                       <p className="text-[9px] text-slate-400 font-bold mt-1">{new Date(sale.createdAt).toLocaleDateString()}</p>
                     </td>
-                    <td className="px-8 py-6">
+                    <td className="px-3 md:px-8 py-3 md:py-5">
                       <div className="flex items-center gap-2">
                         <p className={`font-black text-slate-800 text-sm uppercase truncate max-w-[150px] ${isAnnule ? 'text-slate-400' : ''}`}>
                           {sale.customer?.companyName || 'VENTE DIRECTE'}
@@ -442,28 +448,28 @@ const Sales = ({ currency, user, tenantSettings, plan }: { currency: string, use
                         {isAnnule && <span className="bg-rose-600 text-white text-[7px] font-black px-1.5 py-0.5 rounded uppercase tracking-widest">ANNULÉ</span>}
                       </div>
                     </td>
-                      <td className="px-8 py-6">
+                      <td className="px-3 md:px-8 py-3 md:py-5">
                         <div className="flex flex-col items-center gap-1.5">
-                          <div className="w-24 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                          <div className="w-16 md:w-24 h-1.5 bg-slate-100 rounded-full overflow-hidden">
                             <div className={`h-full transition-all duration-700 ${isAnnule ? 'bg-slate-300' : payRate === 100 ? 'bg-emerald-500' : 'bg-amber-500'}`} style={{ width: `${payRate}%` }}></div>
                           </div>
                           <span className={`text-[8px] font-black ${isAnnule ? 'text-slate-400' : payRate === 100 ? 'text-emerald-600' : 'text-amber-600'}`}>{payRate}% PAYÉ</span>
                           <span className="text-[9px] font-black text-slate-400 mt-1">{(parseFloat(sale.amountPaid || 0)).toLocaleString()} {currency} réglés</span>
                         </div>
                       </td>
-                      <td className="px-8 py-6">
+                      <td className="px-3 md:px-8 py-3 md:py-5">
                         <div className="flex flex-col items-center gap-1.5">
-                          <div className="w-24 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                          <div className="w-16 md:w-24 h-1.5 bg-slate-100 rounded-full overflow-hidden">
                             <div className={`h-full transition-all duration-700 ${isAnnule ? 'bg-slate-300' : delivRate === 100 ? 'bg-emerald-500' : 'bg-indigo-500'}`} style={{ width: `${delivRate}%` }}></div>
                           </div>
                           <span className={`text-[8px] font-black ${isAnnule ? 'text-slate-400' : delivRate === 100 ? 'text-emerald-600' : 'text-indigo-600'}`}>{delivRate}% LIVRÉ</span>
                           <span className="text-[9px] font-black text-slate-400 mt-1">{deliveredQty}/{totalQty} articles livrés</span>
                         </div>
                       </td>
-                    <td className={`px-8 py-6 text-right font-black ${isAnnule ? 'text-slate-400' : 'text-slate-900'}`}>
+                    <td className={`px-3 md:px-8 py-3 md:py-5 text-right font-black ${isAnnule ? 'text-slate-400' : 'text-slate-900'}`}>
                       {parseFloat(sale.totalTtc).toLocaleString()} {currency}
                     </td>
-                    <td className="px-8 py-6 text-right">
+                    <td className="px-3 md:px-8 py-3 md:py-5 text-right">
                        <button onClick={() => setSelectedSaleDetails(sale)} className={`p-2.5 bg-white border border-slate-100 rounded-xl shadow-sm transition-all ${isAnnule ? 'text-rose-400 hover:text-rose-600' : 'text-slate-400 hover:text-indigo-600'}`}><Eye size={16}/></button>
                     </td>
                   </tr>
@@ -477,9 +483,9 @@ const Sales = ({ currency, user, tenantSettings, plan }: { currency: string, use
       {/* MODAL CRÉATION / ÉDITION DE VENTE */}
       {showCreateModal && (
         <div className="fixed inset-0 z-[1000] flex items-center justify-center p-6 bg-slate-950/90 backdrop-blur-md animate-in fade-in duration-300">
-          <div className="bg-white w-full max-w-6xl rounded-[4rem] shadow-2xl overflow-hidden flex h-[85vh] animate-in zoom-in-95 duration-500">
-             <div className="w-2/3 border-r border-slate-100 flex flex-col bg-slate-50/50">
-                <div className="p-8 space-y-6">
+          <div className="bg-white w-full max-w-6xl mx-2 md:mx-4 rounded-[2.5rem] md:rounded-[4rem] shadow-2xl overflow-hidden flex flex-col lg:flex-row max-h-[90dvh] animate-in zoom-in-95 duration-500">
+             <div className="w-full lg:w-2/3 border-b lg:border-b-0 lg:border-r border-slate-100 flex flex-col bg-slate-50/50 min-h-0">
+                <div className="p-4 md:p-8 space-y-4 md:space-y-6">
                    <div className="flex gap-2 p-1.5 bg-white rounded-2xl border border-slate-100 w-fit">
                       <button onClick={() => setCartTab('PRODUCT')} className={`px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${cartTab === 'PRODUCT' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-400 hover:bg-slate-50'}`}><Package size={14} className="inline mr-2"/> Articles</button>
                       <button onClick={() => setCartTab('SERVICE')} className={`px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${cartTab === 'SERVICE' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-400 hover:bg-slate-50'}`}><Sparkles size={14} className="inline mr-2"/> Services</button>
@@ -489,7 +495,7 @@ const Sales = ({ currency, user, tenantSettings, plan }: { currency: string, use
                       <input type="text" placeholder="Rechercher..." className="w-full bg-white border border-slate-100 rounded-2xl pl-14 pr-6 py-4 text-sm font-bold focus:ring-4 focus:ring-indigo-500/10 outline-none shadow-sm" />
                    </div>
                 </div>
-                <div className="flex-1 overflow-y-auto p-8 pt-0 grid grid-cols-2 gap-6 custom-scrollbar">
+                <div className="flex-1 overflow-y-auto p-4 md:p-8 pt-0 grid grid-cols-1 md:grid-cols-2 gap-6 custom-scrollbar">
                    {cartTab === 'PRODUCT' ? (
                      stocks.map(item => (
                        <button key={item.id} onClick={() => addToCart(item, 'PRODUCT')} disabled={item.currentLevel <= 0} className={`p-6 bg-white rounded-[2rem] border border-slate-100 shadow-sm hover:shadow-xl hover:border-indigo-500 transition-all text-left flex flex-col justify-between group active:scale-95 ${item.currentLevel <= 0 ? 'opacity-50 grayscale cursor-not-allowed' : ''}`}>
@@ -517,8 +523,8 @@ const Sales = ({ currency, user, tenantSettings, plan }: { currency: string, use
                 </div>
              </div>
 
-             <div className="w-1/3 flex flex-col bg-white overflow-hidden relative">
-                <div className="p-8 border-b border-slate-100 flex justify-between items-center bg-slate-50/30">
+             <div className="w-full lg:w-1/3 flex flex-col bg-white overflow-hidden relative shrink-0">
+                <div className="p-4 md:p-8 border-b border-slate-100 flex justify-between items-center bg-slate-50/30">
                    <h3 className="text-lg font-black uppercase tracking-tight">{editModeId ? 'Révision Commande' : 'Panier Actif'}</h3>
                    <button onClick={() => setShowCreateModal(false)} className="p-2 hover:bg-slate-200 rounded-xl transition-all"><X size={20}/></button>
                 </div>
@@ -534,7 +540,13 @@ const Sales = ({ currency, user, tenantSettings, plan }: { currency: string, use
                          </div>
                          <div className="flex items-center gap-3">
                             <button onClick={() => updateCartQty(i, -1)} className="p-1 bg-white text-slate-400 hover:text-rose-500 rounded-lg shadow-sm"><MinusSmall size={14}/></button>
-                            <span className="text-sm font-black w-4 text-center">{item.quantity}</span>
+                            <input 
+                              type="number" 
+                              min="1" 
+                              value={item.quantity} 
+                              onChange={(e) => updateCartQtyDirect(i, parseInt(e.target.value))}
+                              className="w-12 text-sm font-black text-center bg-white border border-slate-200 rounded-lg px-1 py-1 outline-none focus:ring-2 focus:ring-indigo-500/20"
+                            />
                             <button onClick={() => updateCartQty(i, 1)} className="p-1 bg-white text-slate-400 hover:text-indigo-600 rounded-lg shadow-sm"><PlusSmall size={14}/></button>
                             <button onClick={() => removeFromCart(i)} className="p-1.5 ml-2 text-slate-300 hover:text-rose-500 transition-colors"><Trash2 size={14}/></button>
                          </div>
@@ -542,7 +554,7 @@ const Sales = ({ currency, user, tenantSettings, plan }: { currency: string, use
                    ))}
                 </div>
 
-                <div className="p-8 bg-slate-900 text-white space-y-6">
+                <div className="p-4 md:p-8 bg-slate-900 text-white space-y-4 md:space-y-6">
                    <div className="space-y-4">
                       <select required value={saleForm.customerId} onChange={e => setSaleForm({...saleForm, customerId: e.target.value})} className="w-full bg-white/10 border border-white/10 rounded-2xl px-5 py-4 text-xs font-black outline-none focus:ring-2 focus:ring-indigo-500 transition-all text-white">
                          <option value="" className="text-slate-900">VENTE DIRECTE (PASSAGE)</option>
@@ -581,28 +593,28 @@ const Sales = ({ currency, user, tenantSettings, plan }: { currency: string, use
       {/* MODAL DÉTAILS DE VENTE */}
       {selectedSaleDetails && (
         <div className="fixed inset-0 z-[1000] flex items-center justify-center p-6 bg-slate-950/95 backdrop-blur-md animate-in fade-in duration-300">
-           <div className="bg-white w-full max-w-5xl rounded-[4rem] shadow-2xl overflow-hidden flex flex-col h-[90vh] animate-in zoom-in-95 duration-500">
-              <div className="px-10 py-8 bg-slate-900 text-white flex justify-between items-center shrink-0">
-                 <div className="flex items-center gap-6">
+           <div className="bg-white w-full max-w-5xl mx-2 md:mx-4 rounded-[2.5rem] md:rounded-[4rem] shadow-2xl overflow-hidden flex flex-col max-h-[90dvh] animate-in zoom-in-95 duration-500">
+              <div className="px-4 md:px-10 py-6 md:py-8 bg-slate-900 text-white flex justify-between items-center shrink-0">
+                 <div className="flex items-center gap-3 md:gap-6">
                     <div className={`w-16 h-16 rounded-[1.5rem] flex items-center justify-center shadow-xl ${selectedSaleDetails.status === 'ANNULE' ? 'bg-rose-600' : 'bg-indigo-600'}`}><FileText size={32}/></div>
                     <div>
-                      <h3 className="text-2xl font-black uppercase tracking-tighter leading-none">Détail Vente #{selectedSaleDetails.reference}</h3>
+                      <h3 className="text-base md:text-2xl font-black uppercase tracking-tighter leading-none">Détail Vente #{selectedSaleDetails.reference}</h3>
                       <div className="flex items-center gap-3 mt-2">
                         <p className="text-[10px] text-indigo-400 font-bold uppercase tracking-widest">{new Date(selectedSaleDetails.createdAt).toLocaleString('fr-FR')}</p>
                         {selectedSaleDetails.status === 'ANNULE' && <span className="px-2 py-0.5 bg-rose-500 text-white text-[8px] font-black rounded uppercase">ANNULÉE</span>}
                       </div>
                     </div>
                  </div>
-                 <div className="flex gap-3">
+                 <div className="flex flex-wrap gap-2 md:gap-3">
                     <button onClick={() => setShowDocGenerator({ sale: selectedSaleDetails, mode: 'FACTURE' })} className="p-3 bg-white/5 hover:bg-white/10 rounded-2xl transition-all" title="Facture"><Printer size={24}/></button>
                     <button onClick={() => setShowDocGenerator({ sale: selectedSaleDetails, mode: 'BON_SORTIE' })} className="p-3 bg-white/5 hover:bg-white/10 rounded-2xl transition-all text-amber-400" title="Bon de Livraison"><ClipboardList size={24}/></button>
                     <button onClick={() => setSelectedSaleDetails(null)} className="p-3 bg-white/5 hover:bg-white/10 rounded-2xl transition-all"><X size={24}/></button>
                  </div>
               </div>
 
-              <div className="flex-1 overflow-y-auto p-12 bg-slate-50/30 custom-scrollbar grid grid-cols-1 lg:grid-cols-12 gap-10">
+              <div className="flex-1 overflow-y-auto p-4 md:p-12 bg-slate-50/30 custom-scrollbar grid grid-cols-1 lg:grid-cols-12 gap-6 md:gap-10">
                  <div className="lg:col-span-8 space-y-8">
-                    <div className="bg-white p-8 rounded-[3rem] border border-slate-100 shadow-sm">
+                    <div className="bg-white p-4 md:p-8 rounded-[2rem] md:rounded-[3rem] border border-slate-100 shadow-sm">
                        <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-6 border-b pb-4">Articles & Prestations</h4>
                        <div className="divide-y divide-slate-50">
                           {selectedSaleDetails.items.map((item: any, i: number) => (
@@ -632,7 +644,7 @@ const Sales = ({ currency, user, tenantSettings, plan }: { currency: string, use
                  </div>
 
                  <div className="lg:col-span-4 space-y-8">
-                    <div className={`p-8 rounded-[3rem] text-white shadow-xl space-y-6 ${selectedSaleDetails.status === 'ANNULE' ? 'bg-rose-900' : 'bg-slate-900'}`}>
+                    <div className={`p-4 md:p-8 rounded-[2rem] md:rounded-[3rem] text-white shadow-xl space-y-4 md:space-y-6 ${selectedSaleDetails.status === 'ANNULE' ? 'bg-rose-900' : 'bg-slate-900'}`}>
                        <div className="flex justify-between items-center"><span className="text-[10px] font-black text-indigo-400 uppercase">Statut Transaction</span><span className={`px-3 py-1 rounded-full text-[8px] font-black uppercase ${selectedSaleDetails.status === 'TERMINE' ? 'bg-emerald-500/20 text-emerald-400' : selectedSaleDetails.status === 'ANNULE' ? 'bg-white/10 text-white' : 'bg-amber-500/20 text-amber-400'}`}>{selectedSaleDetails.status}</span></div>
                        <div className="space-y-1"><p className={`text-3xl font-black ${selectedSaleDetails.status === 'ANNULE' ? 'line-through opacity-50' : ''}`}>{parseFloat(selectedSaleDetails.totalTtc).toLocaleString()} {currency}</p><p className="text-[10px] font-bold text-slate-500 uppercase">Total Net à Payer</p></div>
                        <div className="space-y-4 pt-6 border-t border-white/10">
@@ -672,12 +684,12 @@ const Sales = ({ currency, user, tenantSettings, plan }: { currency: string, use
       {/* MODAL PAIEMENT */}
       {showPaymentModal && (
         <div className="fixed inset-0 z-[1100] flex items-center justify-center p-6 bg-slate-950/90 backdrop-blur-md animate-in fade-in duration-300">
-           <div className="bg-white w-full max-w-md rounded-[3.5rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-500">
-              <div className="px-10 py-8 bg-emerald-600 text-white flex justify-between items-center">
+           <div className="bg-white w-full max-w-md mx-4 md:mx-auto rounded-[3.5rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-500">
+              <div className="px-6 md:px-10 py-6 md:py-8 bg-emerald-600 text-white flex justify-between items-center">
                  <h3 className="text-xl font-black uppercase tracking-tight">Règlement Facture</h3>
                  <button onClick={() => setShowPaymentModal(null)} className="p-2 hover:bg-white/10 rounded-xl transition-all"><X size={24}/></button>
               </div>
-              <div className="p-10 space-y-6">
+              <div className="p-5 md:p-10 space-y-6">
                  {(() => {
                    const remainingAmount = parseFloat(showPaymentModal.totalTtc) - parseFloat(showPaymentModal.amountPaid);
                    const isAmountExceeded = paymentForm.amount > remainingAmount;
@@ -738,12 +750,12 @@ const Sales = ({ currency, user, tenantSettings, plan }: { currency: string, use
       {/* MODAL LIVRAISON */}
       {showDeliveryModal && (
         <div className="fixed inset-0 z-[1100] flex items-center justify-center p-6 bg-slate-950/90 backdrop-blur-md animate-in fade-in duration-300">
-           <div className="bg-white w-full max-w-2xl rounded-[3.5rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-500 flex flex-col">
-              <div className="px-10 py-8 bg-indigo-600 text-white flex justify-between items-center">
+           <div className="bg-white w-full max-w-2xl mx-4 md:mx-auto rounded-[3.5rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-500 flex flex-col">
+              <div className="px-6 md:px-10 py-6 md:py-8 bg-indigo-600 text-white flex justify-between items-center">
                  <h3 className="text-xl font-black uppercase tracking-tight">Sortie Logistique</h3>
                  <button onClick={() => setShowDeliveryModal(null)} className="p-2 hover:bg-white/10 rounded-xl transition-all"><X size={24}/></button>
               </div>
-              <div className="p-10 space-y-6 overflow-y-auto max-h-[60vh] custom-scrollbar">
+              <div className="p-5 md:p-10 space-y-6 overflow-y-auto max-h-[60vh] custom-scrollbar">
                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest border-b pb-4">Validation du retrait physique</p>
                  {showDeliveryModal.items.filter((i:any) => !i.service_id && ((i.quantityDelivered || 0) < i.quantity)).map((item: any) => (
                     <div key={item.id} className="p-5 bg-slate-50 rounded-2xl border border-slate-100 flex items-center justify-between">
@@ -765,7 +777,7 @@ const Sales = ({ currency, user, tenantSettings, plan }: { currency: string, use
                    <div className="p-10 text-center text-[10px] font-black uppercase text-slate-400">Tous les produits ont été livrés.</div>
                  )}
               </div>
-              <div className="p-10 border-t border-slate-100">
+              <div className="p-5 md:p-10 border-t border-slate-100">
                  <button onClick={handleDelivery} disabled={actionLoading} className="w-full py-5 bg-indigo-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-xl flex items-center justify-center gap-3">
                     {actionLoading ? <Loader2 className="animate-spin" /> : <><Truck size={18}/> SCELLER LA SORTIE DE STOCK</>}
                  </button>
@@ -777,12 +789,12 @@ const Sales = ({ currency, user, tenantSettings, plan }: { currency: string, use
       {/* MODAL ANNULATION */}
       {showCancelModal && (
         <div className="fixed inset-0 z-[1100] flex items-center justify-center p-6 bg-slate-950/90 backdrop-blur-md animate-in fade-in duration-300">
-           <div className="bg-white w-full max-w-2xl rounded-[3.5rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-500">
-              <div className="px-10 py-8 bg-rose-600 text-white flex justify-between items-center">
+           <div className="bg-white w-full max-w-2xl mx-4 md:mx-auto rounded-[3.5rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-500">
+              <div className="px-6 md:px-10 py-6 md:py-8 bg-rose-600 text-white flex justify-between items-center">
                  <h3 className="text-xl font-black uppercase tracking-tight">Annulation Transaction</h3>
                  <button onClick={() => setShowCancelModal(null)} className="p-2 hover:bg-white/10 rounded-xl transition-all"><X size={24}/></button>
               </div>
-              <div className="p-10 space-y-8">
+              <div className="p-5 md:p-10 space-y-8">
                  <div className="space-y-4">
                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-2">Motif de l'annulation <span className="text-rose-600">*</span></label>
                     <textarea 
@@ -829,8 +841,8 @@ const Sales = ({ currency, user, tenantSettings, plan }: { currency: string, use
       {/* DOCUMENT PREVIEW WRAPPER */}
       {showDocGenerator && (
         <div className="fixed inset-0 z-[1200] flex flex-col items-center justify-center p-6 bg-slate-950/95 backdrop-blur-xl animate-in fade-in duration-300">
-           <div className="w-full max-w-5xl h-[90vh] bg-white rounded-[3rem] overflow-hidden flex flex-col shadow-2xl relative animate-in zoom-in-95 duration-500">
-              <div className="px-10 py-6 bg-slate-900 text-white flex justify-between items-center shrink-0 print:hidden">
+           <div className="w-full max-w-5xl mx-2 md:mx-4 max-h-[90dvh] bg-white rounded-[2rem] md:rounded-[3rem] overflow-hidden flex flex-col shadow-2xl relative animate-in zoom-in-95 duration-500">
+              <div className="px-4 md:px-10 py-4 md:py-6 bg-slate-900 text-white flex justify-between items-center shrink-0 print:hidden">
                  <h3 className="text-lg font-black uppercase tracking-tight">Générateur Documentaire</h3>
                  <div className="flex gap-4">
                     <div className="flex items-center justify-end gap-3 mb-2">
@@ -882,7 +894,7 @@ const Sales = ({ currency, user, tenantSettings, plan }: { currency: string, use
                     <button onClick={() => setShowDocGenerator(null)} className="p-2.5 hover:bg-white/10 rounded-xl transition-all"><X size={20}/></button>
                  </div>
               </div>
-              <div className="flex-1 overflow-y-auto bg-slate-100/50 p-10 print:p-0 print:bg-white">
+              <div className="flex-1 overflow-y-auto bg-slate-100/50 p-4 md:p-10 print:p-0 print:bg-white">
                  <div id="document-render">
                    <DocumentPreview 
                       type={showDocGenerator.mode} 

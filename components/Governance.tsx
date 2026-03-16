@@ -3,7 +3,8 @@ import React, { useState, useEffect } from 'react';
 import { 
   Shield, Users, Key, Plus, X, Search, 
   ShieldCheck, UserPlus, Check, ArrowRight,
-  RefreshCw, Trash2, Edit3, AlertCircle, Lock
+  RefreshCw, Trash2, Edit3, AlertCircle, Lock,
+  Copy, Dices, Eye, EyeOff
 } from 'lucide-react';
 import { User, UserRole, SubscriptionPlan } from '../types';
 import { authBridge } from '../services/authBridge';
@@ -43,6 +44,8 @@ const Governance: React.FC<GovernanceProps> = ({ tenantId, plan }) => {
   const [error, setError] = useState<string | null>(null);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [targetUserToToggle, setTargetUserToToggle] = useState<User | null>(null);
+  const [showPassword, setShowPassword] = useState(false);
+  const [passwordStrength, setPasswordStrength] = useState({ score: 0, label: '', color: '' });
   
   const [userData, setUserData] = useState({ 
     name: '', 
@@ -74,6 +77,86 @@ const Governance: React.FC<GovernanceProps> = ({ tenantId, plan }) => {
   };
 
   useEffect(() => { fetchUsers(); }, []);
+
+  // Générateur de mot de passe fort
+  const generateStrongPassword = () => {
+    const chars = {
+      upper: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ',
+      lower: 'abcdefghijklmnopqrstuvwxyz', 
+      numbers: '0123456789',
+      symbols: '!@#$%^&*()_+-=[]{}|;:,.<>?'
+    };
+    
+    let password = '';
+    // Au moins un caractère de chaque type
+    password += chars.upper[Math.floor(Math.random() * chars.upper.length)];
+    password += chars.lower[Math.floor(Math.random() * chars.lower.length)];
+    password += chars.numbers[Math.floor(Math.random() * chars.numbers.length)];
+    password += chars.symbols[Math.floor(Math.random() * chars.symbols.length)];
+    
+    // Compléter avec 8 caractères aléatoires
+    const allChars = chars.upper + chars.lower + chars.numbers + chars.symbols;
+    for (let i = 0; i < 8; i++) {
+      password += allChars[Math.floor(Math.random() * allChars.length)];
+    }
+    
+    // Mélanger le mot de passe
+    password = password.split('').sort(() => Math.random() - 0.5).join('');
+    
+    setUserData({...userData, password});
+    evaluatePasswordStrength(password);
+  };
+
+  // Évaluation de la force du mot de passe
+  const evaluatePasswordStrength = (password: string) => {
+    let score = 0;
+    const checks = {
+      length: password.length >= 8,
+      lengthGood: password.length >= 12,
+      hasUpper: /[A-Z]/.test(password),
+      hasLower: /[a-z]/.test(password),
+      hasNumber: /\d/.test(password),
+      hasSymbol: /[!@#$%^&*()_+\-=\[\]{}|;:,.<>?]/.test(password),
+      noRepeating: !/(..).*\1/.test(password)
+    };
+    
+    if (checks.length) score += 1;
+    if (checks.lengthGood) score += 1;
+    if (checks.hasUpper) score += 1;
+    if (checks.hasLower) score += 1;
+    if (checks.hasNumber) score += 1;
+    if (checks.hasSymbol) score += 1;
+    if (checks.noRepeating) score += 1;
+    
+    let label = 'Très Faible';
+    let color = 'bg-red-500';
+    
+    if (score >= 6) {
+      label = 'Très Fort';
+      color = 'bg-emerald-500';
+    } else if (score >= 5) {
+      label = 'Fort';
+      color = 'bg-green-500';
+    } else if (score >= 4) {
+      label = 'Moyen';
+      color = 'bg-yellow-500';
+    } else if (score >= 2) {
+      label = 'Faible';
+      color = 'bg-orange-500';
+    }
+    
+    setPasswordStrength({ score, label, color });
+  };
+
+  // Copier le mot de passe dans le presse-papier
+  const copyPasswordToClipboard = async () => {
+    try {
+      await navigator.clipboard.writeText(userData.password);
+      // Optionnel: ajouter une notification de succès
+    } catch (err) {
+      console.error('Erreur lors de la copie:', err);
+    }
+  };
 
   const planId = String(plan?.id || plan?.name || plan?.plan || '').toUpperCase() || 'BASIC';
   const isUserCreationAllowed = authBridge.isCreationAllowed({ planId } as any, 'users', users.length);
@@ -157,6 +240,8 @@ const Governance: React.FC<GovernanceProps> = ({ tenantId, plan }) => {
     setUserData({ name: '', email: '', password: '', roles: [], employeeId: '' });
     setAvailableEmployees([]);
     setError(null);
+    setPasswordStrength({ score: 0, label: '', color: '' });
+    setShowPassword(false);
   };
 
   // Open confirmation modal before toggling active status
@@ -202,7 +287,7 @@ const Governance: React.FC<GovernanceProps> = ({ tenantId, plan }) => {
     <div className="space-y-12 animate-in fade-in duration-500 pb-20">
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
         <div>
-          <h2 className="text-3xl font-black text-slate-900 tracking-tighter uppercase flex items-center gap-3">
+          <h2 className="text-xl md:text-3xl font-black text-slate-900 tracking-tighter uppercase flex items-center gap-3">
             <Shield className="text-indigo-600" size={32} /> Gouvernance & IAM
           </h2>
           <p className="text-slate-500 text-[10px] font-black uppercase tracking-[0.3em] mt-1">Gestion Multi-Rôles des Opérateurs</p>
@@ -212,24 +297,24 @@ const Governance: React.FC<GovernanceProps> = ({ tenantId, plan }) => {
              <Lock size={16} /> {planId === 'PRO' ? 'Limite du plan PRO atteinte : maximum 10 utilisateurs.' : 'Limite du plan Basic atteinte : maximum 3 opérateurs.'}
            </div>
         ) : (
-          <button 
-            onClick={() => { 
-              closeModal(); 
+          <button
+            onClick={() => {
+              closeModal();
               setShowUserModal(true);
               // Charger les employés disponibles si ENTERPRISE
               if (isEnterprise) {
                 fetchAvailableEmployees();
               }
             }}
-            className="bg-slate-900 text-white px-8 py-4 rounded-2xl font-black hover:bg-indigo-600 transition-all shadow-xl flex items-center gap-3 text-xs uppercase tracking-widest"
+            className="bg-slate-900 text-white px-4 md:px-8 py-4 rounded-2xl font-black hover:bg-indigo-600 transition-all shadow-xl flex items-center gap-3 text-xs uppercase tracking-widest"
           >
             <UserPlus size={18} /> NOUVEL OPÉRATEUR
           </button>
         )}
       </div>
 
-      <div className="bg-white rounded-[3rem] border border-slate-100 shadow-sm overflow-hidden flex flex-col">
-        <div className="px-10 py-6 border-b border-slate-50 flex justify-between items-center bg-slate-50/50">
+      <div className="bg-white rounded-[3rem] border border-slate-100 shadow-sm overflow-x-auto flex flex-col">
+        <div className="px-4 md:px-10 py-6 border-b border-slate-50 flex justify-between items-center bg-slate-50/50">
           <h3 className="text-xs font-black uppercase tracking-widest text-slate-500">Registre des accès</h3>
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-300" size={14} />
@@ -242,12 +327,12 @@ const Governance: React.FC<GovernanceProps> = ({ tenantId, plan }) => {
             />
           </div>
         </div>
-        <table className="w-full text-left">
+        <table className="w-full text-left min-w-[600px]">
           <thead>
             <tr className="bg-slate-50/30 text-[9px] font-black text-slate-400 uppercase tracking-widest border-b">
-              <th className="px-10 py-4">Opérateur</th>
-              <th className="px-10 py-4">Périmètre de Rôles</th>
-              <th className="px-10 py-4 text-right">Actions</th>
+              <th className="px-4 md:px-10 py-4">Opérateur</th>
+              <th className="px-4 md:px-10 py-4">Périmètre de Rôles</th>
+              <th className="px-4 md:px-10 py-4 text-right">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-50">
@@ -258,7 +343,7 @@ const Governance: React.FC<GovernanceProps> = ({ tenantId, plan }) => {
               
               return (
                 <tr key={u.id} className={`hover:bg-slate-50/50 transition-all group ${!isActive ? 'opacity-60' : ''}`}>
-                  <td className="px-10 py-6">
+                  <td className="px-4 md:px-10 py-6">
                     <div className="flex items-center gap-4">
                       <div className="w-10 h-10 bg-slate-900 text-white rounded-xl flex items-center justify-center font-black text-xs">{u.name.charAt(0)}</div>
                       <div>
@@ -282,7 +367,7 @@ const Governance: React.FC<GovernanceProps> = ({ tenantId, plan }) => {
                       </div>
                     </div>
                   </td>
-                  <td className="px-10 py-6">
+                  <td className="px-4 md:px-10 py-6">
                     <div className="flex flex-wrap gap-2">
                       {roles.map((r: string) => (
                         <span key={r} className={`px-2 py-0.5 rounded-lg text-[7px] font-black uppercase border ${r === 'ADMIN' ? 'bg-indigo-50 text-indigo-600 border-indigo-100' : 'bg-slate-100 text-slate-500 border-slate-200'}`}>
@@ -291,7 +376,7 @@ const Governance: React.FC<GovernanceProps> = ({ tenantId, plan }) => {
                       ))}
                     </div>
                   </td>
-                  <td className="px-10 py-6 text-right flex justify-end gap-2">
+                  <td className="px-4 md:px-10 py-6 text-right flex justify-end gap-2">
                     <button
                       onClick={() => handleOpenEdit(u)}
                       disabled={roles.includes('ADMIN') || !isActive}
@@ -318,8 +403,8 @@ const Governance: React.FC<GovernanceProps> = ({ tenantId, plan }) => {
 
       {showUserModal && (
         <div className="fixed inset-0 z-[700] flex items-center justify-center p-6 bg-slate-950/90 backdrop-blur-md animate-in fade-in duration-300">
-          <div className="bg-white w-full max-w-2xl rounded-[3.5rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-500">
-             <div className={`px-10 py-8 text-white flex justify-between items-center ${editingUser ? 'bg-amber-500' : 'bg-slate-900'}`}>
+          <div className="bg-white w-full max-w-2xl mx-4 md:mx-auto rounded-[2rem] md:rounded-[3.5rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-500 max-h-[90dvh] flex flex-col">
+             <div className={`px-4 md:px-10 py-5 md:py-8 text-white flex justify-between items-center ${editingUser ? 'bg-amber-500' : 'bg-slate-900'}`}>
                 <h3 className="text-xl font-black uppercase tracking-tight flex items-center gap-3">
                   {editingUser ? <Edit3 size={24}/> : <UserPlus size={24}/>}
                   {editingUser ? 'Révision Opérateur' : 'Provisionnement Multi-Rôles'}
@@ -327,14 +412,14 @@ const Governance: React.FC<GovernanceProps> = ({ tenantId, plan }) => {
                 <button onClick={closeModal} className="p-3 hover:bg-white/10 rounded-2xl transition-all"><X size={24}/></button>
              </div>
              
-             <form onSubmit={handleSubmit} className="p-10 space-y-8 max-h-[70vh] overflow-y-auto">
+             <form onSubmit={handleSubmit} className="p-4 md:p-10 space-y-6 md:space-y-8 flex-1 overflow-y-auto custom-scrollbar">
                 {error && (
                   <div className="p-4 bg-rose-50 border border-rose-100 rounded-xl text-rose-600 text-[10px] font-black uppercase flex items-center gap-3">
                     <AlertCircle size={16}/> {error}
                   </div>
                 )}
                 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
                    <div className="space-y-4">
                       <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-2">Identité & Sécurité</label>
                       
@@ -386,7 +471,75 @@ const Governance: React.FC<GovernanceProps> = ({ tenantId, plan }) => {
                         placeholder="Email Professionnel" 
                         readOnly={isEnterprise && !editingUser && userData.employeeId}
                       />
-                      <input type="password" required={!editingUser} value={userData.password} onChange={e => setUserData({...userData, password: e.target.value})} className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 text-sm font-black outline-none focus:ring-4 focus:ring-indigo-500/10 transition-all" placeholder={editingUser ? "Laisser vide pour inchangé" : "Clé d'Accès Initiale"} />
+                      
+                      {/* Champ mot de passe avec générateur */}
+                      <div className="space-y-3">
+                        <div className="relative">
+                          <input 
+                            type={showPassword ? 'text' : 'password'} 
+                            required={!editingUser} 
+                            value={userData.password} 
+                            onChange={e => {
+                              setUserData({...userData, password: e.target.value});
+                              if (e.target.value) {
+                                evaluatePasswordStrength(e.target.value);
+                              } else {
+                                setPasswordStrength({ score: 0, label: '', color: '' });
+                              }
+                            }} 
+                            className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 pr-32 py-4 text-sm font-black outline-none focus:ring-4 focus:ring-indigo-500/10 transition-all" 
+                            placeholder={editingUser ? "Laisser vide pour inchangé" : "Clé d'Accès Initiale"} 
+                          />
+                          <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-2">
+                            <button 
+                              type="button" 
+                              onClick={copyPasswordToClipboard} 
+                              className="text-slate-400 hover:text-emerald-600 transition-colors p-1"
+                              title="Copier le mot de passe"
+                            >
+                              <Copy size={16} />
+                            </button>
+                            <button 
+                              type="button" 
+                              onClick={generateStrongPassword}
+                              className="text-slate-400 hover:text-indigo-600 transition-colors p-1"
+                              title="Générer un mot de passe fort"
+                            >
+                              <Dices size={16} />
+                            </button>
+                            <button 
+                              type="button" 
+                              onClick={() => setShowPassword(!showPassword)} 
+                              className="text-slate-400 hover:text-indigo-600 transition-colors p-1"
+                            >
+                              {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                            </button>
+                          </div>
+                        </div>
+                        
+                        {/* Barre de force du mot de passe */}
+                        {userData.password && (
+                          <div className="space-y-2">
+                            <div className="flex justify-between items-center">
+                              <span className="text-[8px] font-bold text-slate-400 uppercase tracking-widest">Force du mot de passe</span>
+                              <span className={`text-[8px] font-black uppercase tracking-widest ${
+                                passwordStrength.score >= 6 ? 'text-emerald-600' :
+                                passwordStrength.score >= 5 ? 'text-green-600' :
+                                passwordStrength.score >= 4 ? 'text-yellow-600' :
+                                passwordStrength.score >= 2 ? 'text-orange-600' : 'text-red-600'
+                              }`}>
+                                {passwordStrength.label}
+                              </span>
+                            </div>
+                            <div className="w-full bg-slate-200 rounded-full h-2">
+                              <div 
+                                className={`h-2 rounded-full transition-all duration-300 ${passwordStrength.color}`}
+                                style={{ width: `${(passwordStrength.score / 7) * 100}%` }}
+                              ></div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
                    </div>
 
                    <div className="space-y-4">
@@ -422,7 +575,7 @@ const Governance: React.FC<GovernanceProps> = ({ tenantId, plan }) => {
 
       {showConfirmModal && targetUserToToggle && (
         <div className="fixed inset-0 z-[710] flex items-center justify-center p-6 bg-black/40 backdrop-blur-sm">
-          <div className="bg-white w-full max-w-lg rounded-2xl shadow-xl p-6">
+          <div className="bg-white w-full max-w-lg mx-4 md:mx-auto rounded-2xl shadow-xl p-6">
             <h4 className="text-lg font-black mb-4">Confirmer l'opération</h4>
             <p className="text-sm text-slate-600 mb-6">Êtes-vous sûr de vouloir {((targetUserToToggle as any).is_active ?? (targetUserToToggle as any).isActive ?? true) ? 'désactiver' : 'réactiver'} l'utilisateur <strong className="uppercase">{targetUserToToggle.name}</strong> ?</p>
             <div className="flex justify-end gap-3">

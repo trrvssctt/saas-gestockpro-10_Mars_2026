@@ -1208,7 +1208,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
             <button 
               onClick={handleRunPayroll}
               disabled={!confirmPayroll || isLoading}
-              className="px-10 py-4 bg-slate-900 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-indigo-600 transition-all shadow-xl disabled:opacity-50 disabled:cursor-not-allowed"
+              className="px-4 md:px-10 py-4 bg-slate-900 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-indigo-600 transition-all shadow-xl disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {isLoading ? 'Traitement en cours...' : 'Démarrer le Traitement'}
             </button>
@@ -1713,7 +1713,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
                       <button 
                         onClick={handleSaveNewItem}
                         disabled={isLoading}
-                        className="px-10 py-4 bg-slate-900 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-indigo-600 transition-all shadow-xl disabled:opacity-50"
+                        className="px-4 md:px-10 py-4 bg-slate-900 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-indigo-600 transition-all shadow-xl disabled:opacity-50"
                       >
                         {isLoading ? 'Ajout...' : 'Ajouter'}
                       </button>
@@ -1794,7 +1794,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
                       <button 
                         onClick={handleSaveEditItem}
                         disabled={isLoading}
-                        className="px-10 py-4 bg-slate-900 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-indigo-600 transition-all shadow-xl disabled:opacity-50"
+                        className="px-4 md:px-10 py-4 bg-slate-900 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-indigo-600 transition-all shadow-xl disabled:opacity-50"
                       >
                         {isLoading ? 'Modification...' : 'Modifier'}
                       </button>
@@ -1945,7 +1945,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
                       <button 
                         onClick={confirmDeleteItem}
                         disabled={isLoading || (itemToDelete && itemToDelete.isSystemItem)}
-                        className="px-10 py-4 bg-red-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-red-700 transition-all shadow-xl disabled:opacity-50"
+                        className="px-4 md:px-10 py-4 bg-red-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-red-700 transition-all shadow-xl disabled:opacity-50"
                       >
                         {isLoading ? 'Suppression...' : 'Supprimer'}
                       </button>
@@ -2384,7 +2384,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
                       <button 
                         onClick={handleSaveAdvance}
                         disabled={isLoading || selectedEmployees.length === 0}
-                        className="px-10 py-4 bg-slate-900 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-indigo-600 transition-all shadow-xl disabled:opacity-50"
+                        className="px-4 md:px-10 py-4 bg-slate-900 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-indigo-600 transition-all shadow-xl disabled:opacity-50"
                       >
                         {isLoading ? 'Enregistrement...' : `Créer ${selectedEmployees.length} Avance(s)`}
                       </button>
@@ -2624,7 +2624,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
                       <button 
                         onClick={confirmApprovalAdvance}
                         disabled={isLoading}
-                        className="px-10 py-4 bg-emerald-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-emerald-700 transition-all shadow-xl disabled:opacity-50"
+                        className="px-4 md:px-10 py-4 bg-emerald-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-emerald-700 transition-all shadow-xl disabled:opacity-50"
                       >
                         {isLoading ? 'Approbation...' : 'Approuver'}
                       </button>
@@ -2709,7 +2709,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
                       <button 
                         onClick={confirmRejectAdvance}
                         disabled={isLoading || !rejectReason.trim()}
-                        className="px-10 py-4 bg-red-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-red-700 transition-all shadow-xl disabled:opacity-50"
+                        className="px-4 md:px-10 py-4 bg-red-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-red-700 transition-all shadow-xl disabled:opacity-50"
                       >
                         {isLoading ? 'Rejet...' : 'Rejeter'}
                       </button>
@@ -2921,7 +2921,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
                       <button 
                         onClick={handleSavePrime}
                         disabled={isLoading}
-                        className="px-10 py-4 bg-emerald-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-emerald-700 transition-all shadow-xl disabled:opacity-50"
+                        className="px-4 md:px-10 py-4 bg-emerald-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-emerald-700 transition-all shadow-xl disabled:opacity-50"
                       >
                         {isLoading ? 'Enregistrement...' : 'Créer la Prime'}
                       </button>
@@ -3191,7 +3191,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
             <button 
               onClick={handleRegeneratePayslip}
               disabled={regeneratingPayslip}
-              className="px-10 py-4 bg-orange-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-orange-700 transition-all shadow-xl disabled:opacity-50 flex items-center gap-2"
+              className="px-4 md:px-10 py-4 bg-orange-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-orange-700 transition-all shadow-xl disabled:opacity-50 flex items-center gap-2"
             >
               {regeneratingPayslip ? <RefreshCw size={16} className="animate-spin" /> : <RefreshCw size={16} />}
               Régénérer
@@ -3300,7 +3300,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
                     setTimeout(() => setShowSuccessAlert(false), 3000);
                   }
                 }}
-                className="px-10 py-4 bg-indigo-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-indigo-700 transition-all shadow-xl"
+                className="px-4 md:px-10 py-4 bg-indigo-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-indigo-700 transition-all shadow-xl"
               >
                 <Download size={14} className="inline mr-2" /> Télécharger PDF
               </button>

@@ -702,7 +702,7 @@ const DocumentCenter: React.FC<DocumentCenterProps> = ({ onNavigate }) => {
             <button 
               onClick={handleUploadDoc} 
               disabled={uploading || !uploadData.file || !uploadData.employeeId || !uploadData.name.trim() || !uploadData.category}
-              className="px-10 py-4 bg-slate-900 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-indigo-600 transition-all shadow-xl disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              className="px-4 md:px-10 py-4 bg-slate-900 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-indigo-600 transition-all shadow-xl disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
             >
               {uploading ? (
                 <>

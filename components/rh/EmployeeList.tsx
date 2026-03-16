@@ -334,7 +334,7 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ onNavigate }) => {
   }
 
   return (
-    <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 relative">
+    <div className="space-y-4 md:space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 relative">
       {/* Error Alert */}
       {error && (
         <div className="bg-red-50 border border-red-200 rounded-2xl p-4 flex items-center gap-3">
@@ -356,12 +356,12 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ onNavigate }) => {
             <ArrowLeft size={18} />
           </button>
           <div>
-            <h1 className="text-3xl font-black text-slate-900 tracking-tighter uppercase">Liste des Employés</h1>
+            <h1 className="text-xl md:text-3xl font-black text-slate-900 tracking-tighter uppercase">Liste des Employés</h1>
             <p className="text-slate-500 font-medium uppercase text-[10px] tracking-[0.3em]">Gestion du capital humain</p>
           </div>
         </div>
         <div className="flex items-center gap-3">
-          <button className="px-6 py-3 bg-white border border-slate-100 text-slate-900 rounded-2xl font-black text-[10px] uppercase tracking-widest flex items-center gap-2 hover:bg-slate-50 transition-all shadow-sm">
+          <button className="hidden sm:flex px-6 py-3 bg-white border border-slate-100 text-slate-900 rounded-2xl font-black text-[10px] uppercase tracking-widest items-center gap-2 hover:bg-slate-50 transition-all shadow-sm">
             <Download size={16} /> Export PDF
           </button>
             <button 
@@ -370,10 +370,10 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ onNavigate }) => {
                 setIsModalOpen(true);
               }}
               disabled={actionLoading}
-              className="px-6 py-3 bg-slate-900 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest flex items-center gap-2 hover:bg-indigo-600 transition-all shadow-xl active:scale-95 disabled:opacity-50"
+              className="px-4 sm:px-6 py-3 bg-slate-900 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest flex items-center gap-2 hover:bg-indigo-600 transition-all shadow-xl active:scale-95 disabled:opacity-50"
             >
               {actionLoading ? <RefreshCw size={16} className="animate-spin" /> : <UserPlus size={16} />}
-              Nouvel Employé
+              <span className="hidden sm:inline">Nouvel Employé</span>
             </button>
         </div>
       </div>
@@ -389,14 +389,14 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ onNavigate }) => {
             <button 
               onClick={() => setIsModalOpen(false)}
               disabled={actionLoading}
-              className="px-8 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-slate-900 transition-all disabled:opacity-50"
+              className="px-4 md:px-8 py-3 md:py-4 text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-slate-900 transition-all disabled:opacity-50"
             >
               Annuler
             </button>
             <button 
               onClick={handleCreateEmployee}
               disabled={actionLoading}
-              className="px-10 py-4 bg-slate-900 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-indigo-600 transition-all shadow-xl disabled:opacity-50 flex items-center gap-2"
+              className="px-4 md:px-10 py-4 bg-slate-900 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-indigo-600 transition-all shadow-xl disabled:opacity-50 flex items-center gap-2"
             >
               {actionLoading ? (
                 <>
@@ -584,7 +584,7 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ onNavigate }) => {
       </div>
 
       {/* Filters & Search */}
-      <div className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm flex flex-col md:flex-row gap-6 items-center">
+      <div className="bg-white p-4 md:p-6 rounded-[2.5rem] border border-slate-100 shadow-sm flex flex-col md:flex-row gap-4 md:gap-6 items-center">
         <div className="relative flex-grow w-full">
           <Search className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
           <input 
@@ -597,7 +597,7 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ onNavigate }) => {
         </div>
         <div className="flex items-center gap-4 w-full md:w-auto">
           {/* Filtre par département */}
-          <div className="flex items-center gap-2 bg-slate-50 px-6 py-4 rounded-2xl">
+          <div className="flex items-center gap-2 bg-slate-50 px-3 md:px-6 py-3 md:py-4 rounded-2xl">
             <Filter size={18} className="text-slate-400" />
             <select 
               className="bg-transparent border-none focus:ring-0 font-black text-[10px] uppercase tracking-widest text-slate-600"
@@ -612,7 +612,7 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ onNavigate }) => {
           </div>
           
           {/* Filtre par présence */}
-          <div className="flex items-center gap-2 bg-slate-50 px-6 py-4 rounded-2xl min-w-[180px]">
+          <div className="flex items-center gap-2 bg-slate-50 px-3 md:px-6 py-3 md:py-4 rounded-2xl min-w-[140px] md:min-w-[180px]">
             <Users size={18} className="text-slate-400" />
             <select 
               className="bg-transparent border-none focus:ring-0 font-black text-[10px] uppercase tracking-widest text-slate-600 w-full"
@@ -643,14 +643,14 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ onNavigate }) => {
       </div>
 
       {/* Employee Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-8">
         {filteredEmployees.map((emp) => {
           const presenceStatus = getEmployeePresenceStatus(emp.id);
           return (
           <div 
             key={emp.id}
             onClick={() => onNavigate('rh.employee.profile', { employeeId: emp.id })}
-            className="bg-white p-8 rounded-[3rem] border border-slate-100 shadow-sm hover:shadow-2xl hover:-translate-y-2 transition-all duration-500 group cursor-pointer relative overflow-hidden"
+            className="bg-white p-5 md:p-8 rounded-[2rem] md:rounded-[3rem] border border-slate-100 shadow-sm hover:shadow-2xl hover:-translate-y-2 transition-all duration-500 group cursor-pointer relative overflow-hidden"
           >
             {/* Indicateur de présence/absence */}
             <div className="absolute top-4 left-6 z-10">
@@ -809,14 +809,14 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ onNavigate }) => {
             <button 
               onClick={() => setIsEditModalOpen(false)}
               disabled={actionLoading}
-              className="px-8 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-slate-900 transition-all disabled:opacity-50"
+              className="px-4 md:px-8 py-3 md:py-4 text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-slate-900 transition-all disabled:opacity-50"
             >
               Annuler
             </button>
             <button 
               onClick={handleUpdateEmployee}
               disabled={actionLoading}
-              className="px-10 py-4 bg-slate-900 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-indigo-600 transition-all shadow-xl disabled:opacity-50 flex items-center gap-2"
+              className="px-4 md:px-10 py-4 bg-slate-900 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-indigo-600 transition-all shadow-xl disabled:opacity-50 flex items-center gap-2"
             >
               {actionLoading ? (
                 <>

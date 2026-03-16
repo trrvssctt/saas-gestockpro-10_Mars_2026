@@ -5,7 +5,7 @@ import {
   Users as UsersIcon, Settings as SettingsIcon, Activity,
   CreditCard, ShieldCheck, Terminal, ShieldHalf, Loader2,
   Layers, GitMerge, Wallet, History, TrendingDown, Sparkles,
-  AlertTriangle, Clock, Calendar
+  AlertTriangle, Clock, Calendar, Menu
 } from 'lucide-react';
 import { User, UserRole } from '../types';
 import { authBridge } from '../services/authBridge';
@@ -34,6 +34,7 @@ const Layout: React.FC<LayoutProps> = ({
 }) => {
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [asideTextColor, setAsideTextColor] = useState<string>('#ffffff');
   const [primaryTextOnPrimary, setPrimaryTextOnPrimary] = useState<string>('#ffffff');
   const [primaryHex, setPrimaryHex] = useState<string>('#4f46e5');
@@ -190,8 +191,15 @@ const Layout: React.FC<LayoutProps> = ({
 
   return (
     <div className={`flex h-screen ${isSuperAdminMode ? 'bg-slate-950' : 'bg-slate-50'} overflow-hidden transition-colors duration-500`}>
-      <aside 
-        className={`${sidebarCollapsed ? 'w-16' : 'w-64'} text-white flex flex-col shadow-2xl z-20 transition-all duration-300 ease-in-out`} 
+      {/* Mobile backdrop overlay */}
+      {isMobileMenuOpen && (
+        <div
+          className="fixed inset-0 z-40 bg-black/50 md:hidden"
+          onClick={() => setIsMobileMenuOpen(false)}
+        />
+      )}
+      <aside
+        className={`${sidebarCollapsed ? 'w-16' : 'w-64'} text-white flex flex-col shadow-2xl z-50 transition-all duration-300 ease-in-out fixed md:relative inset-y-0 left-0 transform ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0`}
         style={!isSuperAdminMode ? { backgroundColor: 'var(--button-kernel)', color: asideTextColor } : undefined}
         onMouseEnter={() => setSidebarCollapsed(false)}
         onMouseLeave={() => setSidebarCollapsed(true)}
@@ -262,7 +270,7 @@ const Layout: React.FC<LayoutProps> = ({
             return (
               <button
                 key={item.id}
-                onClick={() => setActiveTab(item.id)}
+                onClick={() => { setActiveTab(item.id); setIsMobileMenuOpen(false); }}
                 onMouseEnter={() => setHoveredMenuId(item.id)}
                 onMouseLeave={() => setHoveredMenuId(null)}
                 className={`w-full flex items-center ${sidebarCollapsed ? 'justify-center px-2 py-3' : 'gap-3 px-4 py-3'} rounded-xl transition-all duration-200 group`}
@@ -347,8 +355,14 @@ const Layout: React.FC<LayoutProps> = ({
       </aside>
 
       <main className="flex-1 overflow-y-auto relative custom-scrollbar">
-        <header className="h-16 bg-white/80 backdrop-blur-md border-b sticky top-0 z-10 flex items-center justify-between px-8">
+        <header className="h-16 bg-white/80 backdrop-blur-md border-b sticky top-0 z-10 flex items-center justify-between px-4 md:px-8">
           <div className="flex items-center gap-2">
+            <button
+              onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+              className="md:hidden p-2 text-slate-600 hover:text-slate-900"
+            >
+              <Menu size={22} />
+            </button>
             <span className="text-xs font-black text-slate-400 uppercase tracking-widest">Instance / </span>
             <span className="text-xs font-black text-slate-900 uppercase tracking-widest">{activeTab}</span>
           </div>
@@ -366,9 +380,9 @@ const Layout: React.FC<LayoutProps> = ({
             </div>
           </div>
         </header>
-        <div className="p-8">
+        <div className="p-4 md:p-8">
           {isTenantLate && isAdminOrSuper && (
-            <div className="mb-6 p-6 rounded-2xl border-2 bg-amber-50 border-amber-200 flex items-center justify-between">
+            <div className="mb-6 p-6 rounded-2xl border-2 bg-amber-50 border-amber-200 flex flex-col md:flex-row gap-4 items-start md:items-center">
               <div>
                 <h4 className="text-sm font-black uppercase tracking-tight text-amber-700">Instance en retard de paiement</h4>
                 <p className="text-xs text-amber-700 font-bold">Seul le tableau de bord est accessible. Régularisez votre abonnement pour rétablir l'accès à tous les modules.</p>
@@ -382,7 +396,7 @@ const Layout: React.FC<LayoutProps> = ({
           {/* Alerte d'absence pour l'employé connecté */}
           {!absenceLoading && absenceStatus && !absenceStatus.isPresent && absenceStatus.leave && (
             <div className="mb-6 p-6 rounded-2xl border-2 bg-red-50 border-red-200 animate-pulse shadow-lg">
-              <div className="flex items-center justify-between mb-4">
+              <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center mb-4">
                 <div className="flex items-center gap-4">
                   <div className="w-12 h-12 bg-red-500 text-white rounded-full flex items-center justify-center shadow-lg">
                     <AlertTriangle size={24} className="animate-bounce" />
@@ -394,7 +408,7 @@ const Layout: React.FC<LayoutProps> = ({
                     </p>
                   </div>
                 </div>
-                <div className="flex items-center gap-2 px-4 py-2 bg-red-100 rounded-full">
+                <div className="flex items-center gap-2 px-4 py-2 bg-red-100 rounded-full shrink-0">
                   <Clock size={16} className="text-red-600" />
                   <span className="text-xs font-black text-red-700 uppercase">
                     Retour dans {getDaysUntilReturn(absenceStatus.leave.endDate)} jour{getDaysUntilReturn(absenceStatus.leave.endDate) !== 1 ? 's' : ''}

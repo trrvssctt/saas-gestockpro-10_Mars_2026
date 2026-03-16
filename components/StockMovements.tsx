@@ -424,22 +424,22 @@ const StockMovements = ({ currency, tenantSettings }: { currency: string, tenant
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 print:hidden">
-        <div className="lg:col-span-4 grid grid-cols-1 gap-6">
-            <div className="bg-emerald-900 p-8 rounded-[2.5rem] text-white shadow-xl relative overflow-hidden group">
+        <div className="lg:col-span-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-1 gap-6">
+            <div className="bg-emerald-900 p-4 md:p-8 rounded-[2.5rem] text-white shadow-xl relative overflow-hidden group">
               <div className="absolute right-0 top-0 p-6 opacity-10 group-hover:scale-110 transition-transform"><ArrowUpCircle size={80}/></div>
               <p className="text-[10px] font-black text-emerald-300 uppercase tracking-widest mb-1">Logistique Entrées</p>
-              <h3 className="text-4xl font-black">{totals.inCount.toLocaleString()}</h3>
+              <h3 className="text-2xl md:text-4xl font-black">{totals.inCount.toLocaleString()}</h3>
               <p className="text-sm font-black opacity-80">Réception</p>
             </div>
-            <div className="bg-rose-900 p-8 rounded-[2.5rem] text-white shadow-xl relative overflow-hidden group">
+            <div className="bg-rose-900 p-4 md:p-8 rounded-[2.5rem] text-white shadow-xl relative overflow-hidden group">
               <div className="absolute right-0 top-0 p-6 opacity-10 group-hover:scale-110 transition-transform"><ArrowDownCircle size={80}/></div>
               <p className="text-[10px] font-black text-rose-300 uppercase tracking-widest mb-1">Audit des Sorties</p>
-              <h3 className="text-4xl font-black">{totals.outCount.toLocaleString()}</h3>
+              <h3 className="text-2xl md:text-4xl font-black">{totals.outCount.toLocaleString()}</h3>
               <p className="text-sm font-black opacity-80">Expédition</p>
             </div>
         </div>
 
-        <div className="lg:col-span-8 bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm">
+        <div className="lg:col-span-8 bg-white p-4 md:p-8 rounded-[2.5rem] border border-slate-100 shadow-sm">
            <div className="h-60 w-full">
               {chartData.length > 0 ? (
                 <ResponsiveContainer width="100%" height="100%">
@@ -462,7 +462,7 @@ const StockMovements = ({ currency, tenantSettings }: { currency: string, tenant
         </div>
       </div>
 
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 print:hidden bg-white p-8 rounded-[3rem] border border-slate-100 shadow-sm">
+      <div className="flex flex-col sm:flex-row gap-3 flex-wrap print:hidden bg-white p-4 md:p-8 rounded-[3rem] border border-slate-100 shadow-sm">
         <div>
           <h2 className="text-3xl font-black text-slate-900 tracking-tighter uppercase flex items-center gap-3">
             <History className="text-indigo-600" size={32} /> Registre des Flux
@@ -501,7 +501,7 @@ const StockMovements = ({ currency, tenantSettings }: { currency: string, tenant
 
       {/* ZONE FILTRES AVANCÉS */}
       {showFilters && (
-        <div className="bg-white p-8 rounded-[3rem] border border-slate-100 shadow-xl animate-in slide-in-from-top-4 duration-300 space-y-6">
+        <div className="bg-white p-4 md:p-8 rounded-[3rem] border border-slate-100 shadow-xl animate-in slide-in-from-top-4 duration-300 space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
             <div className="space-y-2">
               <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest px-2">Article / SKU</label>
@@ -560,16 +560,16 @@ const StockMovements = ({ currency, tenantSettings }: { currency: string, tenant
 
       <div className="bg-white rounded-[3.5rem] border border-slate-100 shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-left">
+          <table className="w-full min-w-[600px] text-left">
              <thead>
                 <tr className="bg-slate-50/50 text-slate-400 text-[9px] font-black uppercase tracking-widest border-b">
-                   <th className="px-10 py-6">Horodatage</th>
-                   <th className="px-10 py-6">Article / Référence</th>
-                   <th className="px-10 py-6">Source / Motif</th>
-                   <th className="px-10 py-6 text-center">Action</th>
-                   <th className="px-10 py-6 text-right">Mouvement</th>
-                   <th className="px-10 py-6 text-right">Opérateur</th>
-                   <th className="px-10 py-6 text-right">Stock Final</th>
+                   <th className="px-3 md:px-6 py-3 md:py-4">Horodatage</th>
+                   <th className="px-3 md:px-6 py-3 md:py-4">Article / Référence</th>
+                   <th className="px-3 md:px-6 py-3 md:py-4">Source / Motif</th>
+                   <th className="px-3 md:px-6 py-3 md:py-4 text-center">Action</th>
+                   <th className="px-3 md:px-6 py-3 md:py-4 text-right">Mouvement</th>
+                   <th className="px-3 md:px-6 py-3 md:py-4 text-right">Opérateur</th>
+                   <th className="px-3 md:px-6 py-3 md:py-4 text-right">Stock Final</th>
                 </tr>
              </thead>
              <tbody className="divide-y divide-slate-50">
@@ -581,30 +581,30 @@ const StockMovements = ({ currency, tenantSettings }: { currency: string, tenant
                    const p = m.stock_item || m.stockItem || m.StockItem;
                    return (
                    <tr key={m.id} className="hover:bg-slate-50/50 transition-all group">
-                      <td className="px-10 py-6">
+                      <td className="px-3 md:px-6 py-3 md:py-4">
                          <p className="text-xs font-black text-slate-800">{new Date(m.createdAt).toLocaleDateString()}</p>
                          <p className="text-[9px] text-slate-400 font-bold">{new Date(m.createdAt).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</p>
                       </td>
-                      <td className="px-10 py-6">
-                         <p className="text-sm font-black text-slate-900 uppercase truncate max-w-[180px]">{p?.name || 'Article Inconnu'}</p>
+                      <td className="px-3 md:px-6 py-3 md:py-4">
+                         <p className="text-sm font-black text-slate-900 uppercase truncate max-w-[120px] md:max-w-[180px]">{p?.name || 'Article Inconnu'}</p>
                          <p className="text-[8px] font-mono text-slate-400 font-bold uppercase tracking-tighter">SKU: {p?.sku || 'N/A'}</p>
                       </td>
-                      <td className="px-10 py-6">
+                      <td className="px-3 md:px-6 py-3 md:py-4">
                          <p className="text-[10px] font-black text-slate-600 uppercase">{m.reason || 'MANUEL'}</p>
                          <p className="text-[8px] text-indigo-400 font-bold mt-1 uppercase tracking-widest">Ref: {m.referenceId || 'GSP-AUTO'}</p>
                       </td>
-                      <td className="px-10 py-6 text-center">
+                      <td className="px-3 md:px-6 py-3 md:py-4 text-center">
                          <span className={`px-2 py-0.5 rounded-full text-[7px] font-black uppercase border ${m.type === 'IN' ? 'bg-emerald-50 text-emerald-600 border-emerald-100' : m.type === 'ADJUSTMENT' ? 'bg-amber-50 text-amber-600 border-amber-100' : 'bg-rose-50 text-rose-600 border-rose-100'}`}>
                             {m.type === 'IN' ? 'ENTRÉE' : m.type === 'ADJUSTMENT' ? 'AJUSTEMENT' : 'SORTIE'}
                          </span>
                       </td>
-                      <td className={`px-10 py-6 text-right font-black text-base ${m.type === 'IN' ? 'text-emerald-600' : m.type === 'ADJUSTMENT' ? 'text-amber-600' : 'text-rose-600'}`}>
+                      <td className={`px-3 md:px-6 py-3 md:py-4 text-right font-black text-base ${m.type === 'IN' ? 'text-emerald-600' : m.type === 'ADJUSTMENT' ? 'text-amber-600' : 'text-rose-600'}`}>
                          {m.type === 'IN' ? '+' : ''}{m.qty}
                       </td>
-                      <td className="px-10 py-6 text-right">
+                      <td className="px-3 md:px-6 py-3 md:py-4 text-right">
                          <p className="text-[10px] font-black text-slate-600 uppercase">{m.userRef || 'Kernel'}</p>
                       </td>
-                      <td className="px-10 py-6 text-right font-black text-slate-400">
+                      <td className="px-3 md:px-6 py-3 md:py-4 text-right font-black text-slate-400">
                          {m.newLevel}
                       </td>
                    </tr>

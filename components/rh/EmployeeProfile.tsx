@@ -1686,7 +1686,7 @@ const EmployeeProfile: React.FC<EmployeeProfileProps> = ({ employeeId, onNavigat
   ];
 
   return (
-    <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 relative">
+    <div className="space-y-4 md:space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 relative">
       {/* Success Alert */}
       <AnimatePresence>
         {showSuccessAlert && (
@@ -1694,7 +1694,7 @@ const EmployeeProfile: React.FC<EmployeeProfileProps> = ({ employeeId, onNavigat
             initial={{ opacity: 0, y: -20 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -20 }}
-            className="fixed top-8 left-1/2 -translate-x-1/2 z-[200] bg-emerald-500 text-white px-8 py-4 rounded-2xl shadow-2xl flex items-center gap-4 font-black uppercase text-[10px] tracking-widest"
+            className="fixed top-4 md:top-8 left-1/2 -translate-x-1/2 z-[200] max-w-[90vw] bg-emerald-500 text-white px-4 md:px-8 py-3 md:py-4 rounded-2xl shadow-2xl flex items-center gap-2 md:gap-4 font-black uppercase text-[10px] tracking-widest"
           >
             <CheckCircle2 size={20} /> {alertMessage}
           </motion.div>
@@ -1725,7 +1725,7 @@ const EmployeeProfile: React.FC<EmployeeProfileProps> = ({ employeeId, onNavigat
             </div>
             <div>
               <div className="flex items-center gap-3 mb-1">
-                <h1 className="text-3xl font-black text-slate-900 tracking-tighter uppercase">{employee.firstName} {employee.lastName}</h1>
+                <h1 className="text-xl md:text-3xl font-black text-slate-900 tracking-tighter uppercase">{employee.firstName} {employee.lastName}</h1>
                 <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest ${employee.status === 'ACTIVE' ? 'bg-emerald-50 text-emerald-600' : 'bg-slate-100 text-slate-400'}`}>
                   {employee.status}
                 </span>
@@ -1792,13 +1792,13 @@ const EmployeeProfile: React.FC<EmployeeProfileProps> = ({ employeeId, onNavigat
           <div className="flex justify-end gap-4">
             <button 
               onClick={() => setIsEditModalOpen(false)}
-              className="px-8 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-slate-900 transition-all"
+              className="px-4 md:px-8 py-3 md:py-4 text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-slate-900 transition-all"
             >
               Annuler
             </button>
             <button 
               onClick={handleUpdateEmployee}
-              className="px-10 py-4 bg-slate-900 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-indigo-600 transition-all shadow-xl"
+              className="px-4 md:px-10 py-4 bg-slate-900 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-indigo-600 transition-all shadow-xl"
             >
               Mettre à jour
             </button>
@@ -1877,12 +1877,12 @@ const EmployeeProfile: React.FC<EmployeeProfileProps> = ({ employeeId, onNavigat
       </HRModal>
 
       {/* Tabs Navigation */}
-      <div className="flex items-center gap-2 bg-slate-100 p-1.5 rounded-[2rem] w-fit overflow-x-auto no-scrollbar">
+      <div className="flex items-center gap-1 sm:gap-2 bg-slate-100 p-1.5 rounded-[2rem] w-full sm:w-fit overflow-x-auto no-scrollbar">
         {tabs.map(tab => (
-          <button 
+          <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
-            className={`px-6 py-3 rounded-full font-black text-[10px] uppercase tracking-widest transition-all flex items-center gap-2 whitespace-nowrap ${activeTab === tab.id ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+            className={`px-3 sm:px-6 py-2.5 sm:py-3 rounded-full font-black text-[9px] sm:text-[10px] uppercase tracking-widest transition-all flex items-center gap-1.5 sm:gap-2 whitespace-nowrap flex-shrink-0 ${activeTab === tab.id ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
           >
             {tab.icon} {tab.label}
           </button>
@@ -1902,7 +1902,7 @@ const EmployeeProfile: React.FC<EmployeeProfileProps> = ({ employeeId, onNavigat
             {activeTab === 'general' && (
             <div className="grid lg:grid-cols-3 gap-8">
               <div className="lg:col-span-2 space-y-8">
-                <div className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm">
+                <div className="bg-white p-5 md:p-10 rounded-[2rem] md:rounded-[3rem] border border-slate-100 shadow-sm">
                   <h3 className="text-lg font-black text-slate-900 uppercase tracking-tighter mb-8 flex items-center gap-3">
                     <UserCheck className="text-indigo-500" /> Informations Personnelles
                   </h3>
@@ -1978,7 +1978,7 @@ const EmployeeProfile: React.FC<EmployeeProfileProps> = ({ employeeId, onNavigat
                 </div>
 
                 {/* Section Statut de Présence */}
-                <div className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm">
+                <div className="bg-white p-5 md:p-10 rounded-[2rem] md:rounded-[3rem] border border-slate-100 shadow-sm">
                   <h3 className="text-lg font-black text-slate-900 uppercase tracking-tighter mb-8 flex items-center gap-3">
                     <Clock className="text-blue-500" /> Statut de Présence
                   </h3>
@@ -2021,7 +2021,7 @@ const EmployeeProfile: React.FC<EmployeeProfileProps> = ({ employeeId, onNavigat
                         
                         {!presenceStatus.isPresent && presenceStatus.leave && (
                           <div className="mt-4 pt-4 border-t border-red-200">
-                            <div className="grid grid-cols-2 gap-4 text-sm">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 text-sm">
                               <div>
                                 <p className="text-xs font-black text-red-500 uppercase tracking-widest">Début du congé</p>
                                 <p className="font-bold text-red-700">
@@ -2054,7 +2054,7 @@ const EmployeeProfile: React.FC<EmployeeProfileProps> = ({ employeeId, onNavigat
                   })()}
                 </div>
 
-                <div className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm">
+                <div className="bg-white p-5 md:p-10 rounded-[2rem] md:rounded-[3rem] border border-slate-100 shadow-sm">
                   <h3 className="text-lg font-black text-slate-900 uppercase tracking-tighter mb-8 flex items-center gap-3">
                     <TrendingUp className="text-emerald-500" /> KPI & Performance Visuelle
                   </h3>
@@ -2076,7 +2076,7 @@ const EmployeeProfile: React.FC<EmployeeProfileProps> = ({ employeeId, onNavigat
               </div>
 
               <div className="space-y-8">
-                <div className="bg-slate-900 p-10 rounded-[3rem] text-white relative overflow-hidden">
+                <div className="bg-slate-900 p-5 md:p-10 rounded-[2rem] md:rounded-[3rem] text-white relative overflow-hidden">
                   <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-500/10 blur-2xl rounded-full"></div>
                   <h3 className="text-sm font-black uppercase tracking-widest mb-8 flex items-center gap-3">
                     <Clock className="text-indigo-400" /> Temps & Présence
@@ -2098,7 +2098,7 @@ const EmployeeProfile: React.FC<EmployeeProfileProps> = ({ employeeId, onNavigat
                   </div>
                 </div>
 
-                <div className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm">
+                <div className="bg-white p-5 md:p-10 rounded-[2rem] md:rounded-[3rem] border border-slate-100 shadow-sm">
                   <h3 className="text-sm font-black text-slate-900 uppercase tracking-widest mb-8 flex items-center gap-3">
                     <AlertCircle className="text-amber-500" /> Alertes & Rappels
                   </h3>
@@ -2137,7 +2137,7 @@ const EmployeeProfile: React.FC<EmployeeProfileProps> = ({ employeeId, onNavigat
           )}
 
           {activeTab === 'contracts' && (
-            <div className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm">
+            <div className="bg-white p-5 md:p-10 rounded-[2rem] md:rounded-[3rem] border border-slate-100 shadow-sm">
               <div className="flex items-center justify-between mb-10">
                 <h3 className="text-lg font-black text-slate-900 uppercase tracking-tighter flex items-center gap-3">
                   <FileText className="text-indigo-500" /> Gestion du Contrat
@@ -2169,13 +2169,13 @@ const EmployeeProfile: React.FC<EmployeeProfileProps> = ({ employeeId, onNavigat
                     <button onClick={() => {
                       resetContractForm();
                       setIsContractModalOpen(false);
-                    }} className="px-8 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-slate-900 transition-all">Annuler</button>
-                    <button onClick={handleAddContract} className="px-10 py-4 bg-slate-900 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-indigo-600 transition-all shadow-xl">Créer</button>
+                    }} className="px-4 md:px-8 py-3 md:py-4 text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-slate-900 transition-all">Annuler</button>
+                    <button onClick={handleAddContract} className="px-4 md:px-10 py-4 bg-slate-900 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-indigo-600 transition-all shadow-xl">Créer</button>
                   </div>
                 }
               >
                 <form className="space-y-6">
-                  <div className="grid grid-cols-2 gap-6">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
                     <div className="space-y-2">
                       <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Type de Contrat <span className="text-red-500">*</span></label>
                       <select 
@@ -2209,7 +2209,7 @@ const EmployeeProfile: React.FC<EmployeeProfileProps> = ({ employeeId, onNavigat
                       <p className="text-[9px] text-slate-500 font-medium">Montant en F CFA (optionnel)</p>
                     </div>
                   </div>
-                  <div className="grid grid-cols-2 gap-6">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
                     <div className="space-y-2">
                       <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Date de Début <span className="text-red-500">*</span></label>
                       <input 
@@ -2531,7 +2531,7 @@ const EmployeeProfile: React.FC<EmployeeProfileProps> = ({ employeeId, onNavigat
           )}
 
           {activeTab === 'history' && (
-            <div className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm">
+            <div className="bg-white p-5 md:p-10 rounded-[2rem] md:rounded-[3rem] border border-slate-100 shadow-sm">
               <div className="flex items-center justify-between mb-10">
                 <h3 className="text-lg font-black text-slate-900 uppercase tracking-tighter flex items-center gap-3">
                   <History className="text-indigo-500" /> Timeline Carrière
@@ -2561,7 +2561,7 @@ const EmployeeProfile: React.FC<EmployeeProfileProps> = ({ employeeId, onNavigat
                     <span className="text-sm font-medium">Calcul en cours...</span>
                   </div>
                 ) : currentMonthSalary ? (
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 sm:gap-6">
                     <div className="text-center">
                       <p className="text-xs font-black uppercase tracking-widest text-slate-400 mb-2">Salaire Base</p>
                       <p className="text-xl font-black text-slate-900">{formatAmount(currentMonthSalary.baseSalary, currentMonthSalary.currency)}</p>
@@ -2905,7 +2905,7 @@ const EmployeeProfile: React.FC<EmployeeProfileProps> = ({ employeeId, onNavigat
           )}
 
           {activeTab === 'documents' && (
-            <div className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm">
+            <div className="bg-white p-5 md:p-10 rounded-[2rem] md:rounded-[3rem] border border-slate-100 shadow-sm">
               <div className="flex items-center justify-between mb-10">
                 <h3 className="text-lg font-black text-slate-900 uppercase tracking-tighter flex items-center gap-3">
                   <FolderOpen className="text-indigo-500" /> Dossier Numérique
@@ -2934,14 +2934,14 @@ const EmployeeProfile: React.FC<EmployeeProfileProps> = ({ employeeId, onNavigat
                         setIsDocModalOpen(false);
                         resetDocForm();
                       }} 
-                      className="px-8 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-slate-900 transition-all"
+                      className="px-4 md:px-8 py-3 md:py-4 text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-slate-900 transition-all"
                     >
                       Annuler
                     </button>
                     <button 
                       onClick={handleAddDoc}
                       disabled={isUploadingDoc || !docForm.name.trim() || !docForm.file}
-                      className="px-10 py-4 bg-slate-900 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-indigo-600 transition-all shadow-xl disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="px-4 md:px-10 py-4 bg-slate-900 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-indigo-600 transition-all shadow-xl disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       {isUploadingDoc ? 'Upload...' : 'Uploader'}
                     </button>
@@ -3359,7 +3359,7 @@ const EmployeeProfile: React.FC<EmployeeProfileProps> = ({ employeeId, onNavigat
 
           {activeTab === 'payroll' && (
             <div className="space-y-8">
-              <div className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm">
+              <div className="bg-white p-5 md:p-10 rounded-[2rem] md:rounded-[3rem] border border-slate-100 shadow-sm">
                 <div className="flex items-center justify-between mb-10">
                   <h3 className="text-lg font-black text-slate-900 uppercase tracking-tighter flex items-center gap-3">
                     <CreditCard className="text-indigo-500" /> Historique des Bulletins
@@ -3598,13 +3598,13 @@ const EmployeeProfile: React.FC<EmployeeProfileProps> = ({ employeeId, onNavigat
                 </div>
               </div>
 
-              <div className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm">
+              <div className="bg-white p-5 md:p-10 rounded-[2rem] md:rounded-[3rem] border border-slate-100 shadow-sm">
                 <h3 className="text-lg font-black text-slate-900 uppercase tracking-tighter mb-8 flex items-center gap-3">
                   <TrendingUp className="text-indigo-500" /> Primes & Avances
                 </h3>
                 
                 {/* Statistiques Rapides */}
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-6 mb-8">
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 sm:gap-6 mb-8">
                   <div className="p-6 bg-emerald-50 rounded-[2rem] border border-emerald-100">
                     <div className="flex items-center gap-3 mb-2">
                       <TrendingUp className="text-emerald-600" size={20} />
@@ -3909,11 +3909,11 @@ const EmployeeProfile: React.FC<EmployeeProfileProps> = ({ employeeId, onNavigat
 
           {activeTab === 'performance' && (
             <div className="space-y-8">
-              <div className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm">
+              <div className="bg-white p-5 md:p-10 rounded-[2rem] md:rounded-[3rem] border border-slate-100 shadow-sm">
                 <h3 className="text-lg font-black text-slate-900 uppercase tracking-tighter mb-10 flex items-center gap-3">
                   <Activity className="text-indigo-500" /> Évaluation de la Performance
                 </h3>
-                <div className="grid lg:grid-cols-2 gap-12">
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 lg:gap-12">
                   <div className="space-y-8">
                     <h4 className="text-sm font-black uppercase tracking-widest text-slate-400">Objectifs 2024</h4>
                     {[
@@ -3936,7 +3936,7 @@ const EmployeeProfile: React.FC<EmployeeProfileProps> = ({ employeeId, onNavigat
                     <div className="w-32 h-32 bg-white rounded-[2.5rem] shadow-xl flex items-center justify-center mb-6 border border-slate-100">
                       <TrendingUp size={48} className="text-indigo-500" />
                     </div>
-                    <p className="text-4xl font-black text-slate-900 tracking-tighter mb-2">A+</p>
+                    <p className="text-2xl md:text-4xl font-black text-slate-900 tracking-tighter mb-2">A+</p>
                     <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-6">Score Global Performance</p>
                     <p className="text-xs text-slate-500 font-medium leading-relaxed max-w-xs">
                       Moussa dépasse systématiquement les attentes techniques et fait preuve d'un leadership exemplaire.
@@ -3945,7 +3945,7 @@ const EmployeeProfile: React.FC<EmployeeProfileProps> = ({ employeeId, onNavigat
                 </div>
               </div>
 
-              <div className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm">
+              <div className="bg-white p-5 md:p-10 rounded-[2rem] md:rounded-[3rem] border border-slate-100 shadow-sm">
                 <h3 className="text-lg font-black text-slate-900 uppercase tracking-tighter mb-8 flex items-center gap-3">
                   <MessageSquare size={20} className="text-indigo-500" /> Feedback Continu
                 </h3>

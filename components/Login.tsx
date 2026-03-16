@@ -5,7 +5,7 @@ import {
   Eye, EyeOff, Zap, Check, ChevronLeft, RefreshCw,
   Building2, CreditCard, Sparkles, User as UserIcon,
   Star, WifiOff, X, MapPin, Phone, Briefcase, Info,
-  Terminal, Shield, Smartphone
+  Terminal, Shield, Smartphone, Copy, Dices
 } from 'lucide-react';
 import { User, SubscriptionPlan, UserRole } from '../types';
 import logo from '../assets/logo_gestockpro.png';
@@ -27,6 +27,10 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBackToLanding, initialM
   const [apiError, setApiError] = useState<ApiError | null>(null);
   const [showPassword, setShowPassword] = useState(false);
   const [dynamicPlans, setDynamicPlans] = useState<SubscriptionPlan[]>([]);
+  const [passwordStrength, setPasswordStrength] = useState({ score: 0, label: '', color: '' });
+  const [loginAttempts, setLoginAttempts] = useState(0);
+  const [blockedUntil, setBlockedUntil] = useState<number | null>(null);
+  const [timeRemaining, setTimeRemaining] = useState(0);
   
   // États Auth
   const [loginEmail, setLoginEmail] = useState('');
@@ -67,8 +71,170 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBackToLanding, initialM
     fetchPlans();
   }, []);
 
+  // Système de protection contre les tentatives de connexion
+  const checkLoginAttempts = (email: string) => {
+    const attemptsKey = `login_attempts_${email}`;
+    const blockedKey = `login_blocked_until_${email}`;
+    
+    const attempts = parseInt(localStorage.getItem(attemptsKey) || '0');
+    const blocked = parseInt(localStorage.getItem(blockedKey) || '0');
+    
+    const now = Date.now();
+    
+    if (blocked && now < blocked) {
+      setBlockedUntil(blocked);
+      setLoginAttempts(attempts);
+      return false; // Toujours bloqué
+    } else if (blocked && now >= blocked) {
+      // Le blocage a expiré, réinitialiser
+      localStorage.removeItem(attemptsKey);
+      localStorage.removeItem(blockedKey);
+      setBlockedUntil(null);
+      setLoginAttempts(0);
+      return true;
+    }
+    
+    setLoginAttempts(attempts);
+    return attempts < 3;
+  };
+
+  const recordFailedAttempt = (email: string) => {
+    const attemptsKey = `login_attempts_${email}`;
+    const blockedKey = `login_blocked_until_${email}`;
+    
+    const attempts = parseInt(localStorage.getItem(attemptsKey) || '0') + 1;
+    localStorage.setItem(attemptsKey, attempts.toString());
+    setLoginAttempts(attempts);
+    
+    if (attempts >= 3) {
+      const blockUntil = Date.now() + (15 * 60 * 1000); // 15 minutes
+      localStorage.setItem(blockedKey, blockUntil.toString());
+      setBlockedUntil(blockUntil);
+    }
+  };
+
+  const resetLoginAttempts = (email: string) => {
+    const attemptsKey = `login_attempts_${email}`;
+    const blockedKey = `login_blocked_until_${email}`;
+    localStorage.removeItem(attemptsKey);
+    localStorage.removeItem(blockedKey);
+    setLoginAttempts(0);
+    setBlockedUntil(null);
+  };
+
+  // Timer pour le temps restant de blocage
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    
+    if (blockedUntil) {
+      interval = setInterval(() => {
+        const remaining = Math.max(0, Math.ceil((blockedUntil - Date.now()) / 1000));
+        setTimeRemaining(remaining);
+        
+        if (remaining === 0) {
+          setBlockedUntil(null);
+          setLoginAttempts(0);
+          if (loginEmail) {
+            resetLoginAttempts(loginEmail);
+          }
+        }
+      }, 1000);
+    }
+    
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [blockedUntil, loginEmail]);
+
+  // Générateur de mot de passe fort
+  const generateStrongPassword = () => {
+    const chars = {
+      upper: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ',
+      lower: 'abcdefghijklmnopqrstuvwxyz', 
+      numbers: '0123456789',
+      symbols: '!@#$%^&*()_+-=[]{}|;:,.<>?'
+    };
+    
+    let password = '';
+    // Au moins un caractère de chaque type
+    password += chars.upper[Math.floor(Math.random() * chars.upper.length)];
+    password += chars.lower[Math.floor(Math.random() * chars.lower.length)];
+    password += chars.numbers[Math.floor(Math.random() * chars.numbers.length)];
+    password += chars.symbols[Math.floor(Math.random() * chars.symbols.length)];
+    
+    // Compléter avec 8 caractères aléatoires
+    const allChars = chars.upper + chars.lower + chars.numbers + chars.symbols;
+    for (let i = 0; i < 8; i++) {
+      password += allChars[Math.floor(Math.random() * allChars.length)];
+    }
+    
+    // Mélanger le mot de passe
+    password = password.split('').sort(() => Math.random() - 0.5).join('');
+    
+    setRegData({...regData, adminPassword: password});
+    evaluatePasswordStrength(password);
+  };
+
+  // Évaluation de la force du mot de passe
+  const evaluatePasswordStrength = (password: string) => {
+    let score = 0;
+    const checks = {
+      length: password.length >= 8,
+      lengthGood: password.length >= 12,
+      hasUpper: /[A-Z]/.test(password),
+      hasLower: /[a-z]/.test(password),
+      hasNumber: /\d/.test(password),
+      hasSymbol: /[!@#$%^&*()_+\-=\[\]{}|;:,.<>?]/.test(password),
+      noRepeating: !/(..).*\1/.test(password)
+    };
+    
+    if (checks.length) score += 1;
+    if (checks.lengthGood) score += 1;
+    if (checks.hasUpper) score += 1;
+    if (checks.hasLower) score += 1;
+    if (checks.hasNumber) score += 1;
+    if (checks.hasSymbol) score += 1;
+    if (checks.noRepeating) score += 1;
+    
+    let label = 'Très Faible';
+    let color = 'bg-red-500';
+    
+    if (score >= 6) {
+      label = 'Très Fort';
+      color = 'bg-emerald-500';
+    } else if (score >= 5) {
+      label = 'Fort';
+      color = 'bg-green-500';
+    } else if (score >= 4) {
+      label = 'Moyen';
+      color = 'bg-yellow-500';
+    } else if (score >= 2) {
+      label = 'Faible';
+      color = 'bg-orange-500';
+    }
+    
+    setPasswordStrength({ score, label, color });
+  };
+
+  // Copier le mot de passe dans le presse-papier
+  const copyPasswordToClipboard = async () => {
+    try {
+      await navigator.clipboard.writeText(regData.adminPassword);
+      // Optionnel: ajouter une notification de succès
+    } catch (err) {
+      console.error('Erreur lors de la copie:', err);
+    }
+  };
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    // Vérifier les tentatives de connexion
+    if (!checkLoginAttempts(loginEmail)) {
+      setApiError({ message: `Trop de tentatives de connexion. Réessayez dans ${Math.ceil(timeRemaining / 60)} minutes.` } as any);
+      return;
+    }
+    
     setLoading(true);
     setApiError(null);
     try {
@@ -127,9 +293,14 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBackToLanding, initialM
         lastLogin: apiUser?.lastLogin || apiUser?.last_login || null
       };
 
-      authBridge.saveSession(user, data.token);
+      // Connexion réussie - réinitialiser les tentatives
+      resetLoginAttempts(loginEmail);
+      
+      authBridge.saveSession(user, data.token, data.sessionToken);
       onLoginSuccess(user);
     } catch (err: any) {
+      // Enregistrer la tentative échouée
+      recordFailedAttempt(loginEmail);
       setApiError(err);
     } finally {
       setLoading(false);
@@ -182,7 +353,7 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBackToLanding, initialM
         lastLogin: apiUser?.lastLogin || apiUser?.last_login || null
       };
 
-      authBridge.saveSession(user, data.token);
+      authBridge.saveSession(user, data.token, data.sessionToken);
       onLoginSuccess(user);
     } catch (err: any) {
       setApiError(err);
@@ -248,7 +419,7 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBackToLanding, initialM
                 </button>
               ))}
             </div>
-            <button onClick={() => setRegStep(2)} className="w-full py-5 bg-slate-900 text-white rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-indigo-600 transition-all flex items-center justify-center gap-3 mt-8 shadow-xl">CONTINUER L'IDENTITÉ <ArrowRight size={18} /></button>
+            <button onClick={() => setRegStep(2)} className="w-full py-4 md:py-5 bg-slate-900 text-white rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-indigo-600 transition-all flex items-center justify-center gap-3 mt-8 shadow-xl">CONTINUER L'IDENTITÉ <ArrowRight size={18} /></button>
           </div>
         );
       case 2:
@@ -266,8 +437,8 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBackToLanding, initialM
             </div>
             
             <div className="flex gap-4 mt-8">
-              <button onClick={() => setRegStep(1)} className="px-8 py-5 border-2 border-slate-100 text-slate-400 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-slate-50 transition-all">RETOUR</button>
-              <button onClick={() => setRegStep(3)} className="flex-1 py-5 bg-slate-900 text-white rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-indigo-600 transition-all flex items-center justify-center gap-3 shadow-xl">CRÉER L'ADMIN <ArrowRight size={18} /></button>
+              <button onClick={() => setRegStep(1)} className="px-4 py-3 md:py-4 border-2 border-slate-100 text-slate-400 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-slate-50 transition-all">RETOUR</button>
+              <button onClick={() => setRegStep(3)} className="flex-1 py-3 md:py-4 bg-slate-900 text-white rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-indigo-600 transition-all flex items-center justify-center gap-3 shadow-xl">CRÉER L'ADMIN <ArrowRight size={18} /></button>
             </div>
           </div>
         );
@@ -281,12 +452,77 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBackToLanding, initialM
             <div className="space-y-4">
               <div className="relative"><UserIcon className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-300" size={18} /><input type="text" required value={regData.adminName} onChange={e => setRegData({...regData, adminName: e.target.value})} className="w-full bg-slate-50 border border-slate-100 rounded-2xl pl-12 pr-6 py-4 text-sm font-bold outline-none focus:ring-4 focus:ring-indigo-500/10" placeholder="Nom Complet" /></div>
               <div className="relative"><Mail className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-300" size={18} /><input type="email" required value={regData.adminEmail} onChange={e => setRegData({...regData, adminEmail: e.target.value})} className="w-full bg-slate-50 border border-slate-100 rounded-2xl pl-12 pr-6 py-4 text-sm font-bold outline-none focus:ring-4 focus:ring-indigo-500/10" placeholder="Email Administrateur" /></div>
-              <div className="relative"><Lock className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-300" size={18} /><input type={showPassword ? 'text' : 'password'} required value={regData.adminPassword} onChange={e => setRegData({...regData, adminPassword: e.target.value})} className="w-full bg-slate-50 border border-slate-100 rounded-2xl pl-12 pr-14 py-4 text-sm font-bold outline-none focus:ring-4 focus:ring-indigo-500/10" placeholder="Clé d'Accès de Sécurité" /><button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-5 top-1/2 -translate-y-1/2 text-slate-300 hover:text-indigo-600">{showPassword ? <EyeOff size={18} /> : <Eye size={18} />}</button></div>
+              
+              {/* Champ mot de passe avec générateur */}
+              <div className="space-y-3">
+                <div className="relative">
+                  <Lock className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-300" size={18} />
+                  <input 
+                    type={showPassword ? 'text' : 'password'} 
+                    required 
+                    value={regData.adminPassword} 
+                    onChange={e => {
+                      setRegData({...regData, adminPassword: e.target.value});
+                      evaluatePasswordStrength(e.target.value);
+                    }} 
+                    className="w-full bg-slate-50 border border-slate-100 rounded-2xl pl-12 pr-32 py-4 text-sm font-bold outline-none focus:ring-4 focus:ring-indigo-500/10" 
+                    placeholder="Clé d'Accès de Sécurité" 
+                  />
+                  <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-2">
+                    <button 
+                      type="button" 
+                      onClick={copyPasswordToClipboard} 
+                      className="text-slate-400 hover:text-emerald-600 transition-colors p-1"
+                      title="Copier le mot de passe"
+                    >
+                      <Copy size={16} />
+                    </button>
+                    <button 
+                      type="button" 
+                      onClick={generateStrongPassword}
+                      className="text-slate-400 hover:text-indigo-600 transition-colors p-1"
+                      title="Générer un mot de passe fort"
+                    >
+                      <Dices size={16} />
+                    </button>
+                    <button 
+                      type="button" 
+                      onClick={() => setShowPassword(!showPassword)} 
+                      className="text-slate-400 hover:text-indigo-600 transition-colors p-1"
+                    >
+                      {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                    </button>
+                  </div>
+                </div>
+                
+                {/* Barre de force du mot de passe */}
+                {regData.adminPassword && (
+                  <div className="space-y-2">
+                    <div className="flex justify-between items-center">
+                      <span className="text-[8px] font-bold text-slate-400 uppercase tracking-widest">Force du mot de passe</span>
+                      <span className={`text-[8px] font-black uppercase tracking-widest ${
+                        passwordStrength.score >= 6 ? 'text-emerald-600' :
+                        passwordStrength.score >= 5 ? 'text-green-600' :
+                        passwordStrength.score >= 4 ? 'text-yellow-600' :
+                        passwordStrength.score >= 2 ? 'text-orange-600' : 'text-red-600'
+                      }`}>
+                        {passwordStrength.label}
+                      </span>
+                    </div>
+                    <div className="w-full bg-slate-200 rounded-full h-2">
+                      <div 
+                        className={`h-2 rounded-full transition-all duration-300 ${passwordStrength.color}`}
+                        style={{ width: `${(passwordStrength.score / 7) * 100}%` }}
+                      ></div>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
             <div className="p-4 bg-emerald-50 rounded-2xl border border-emerald-100 flex items-start gap-3"><ShieldCheck size={20} className="text-emerald-600 shrink-0" /><p className="text-[9px] text-emerald-800 font-bold uppercase leading-relaxed">En validant, vous déployez une infrastructure isolée conforme aux protocoles GSP-3.2.</p></div>
             <div className="flex gap-4 mt-8">
-              <button type="button" onClick={() => setRegStep(2)} className="px-8 py-5 border-2 border-slate-100 text-slate-400 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-slate-50 transition-all">RETOUR</button>
-              <button type="submit" disabled={loading} className="flex-1 py-5 bg-indigo-600 text-white rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-slate-900 transition-all flex items-center justify-center gap-3 shadow-xl">{loading ? <RefreshCw className="animate-spin" size={18} /> : <>LANCER LE DÉPLOIEMENT <Sparkles size={18} /></>}</button>
+              <button type="button" onClick={() => setRegStep(2)} className="px-4 py-3 md:py-4 border-2 border-slate-100 text-slate-400 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-slate-50 transition-all">RETOUR</button>
+              <button type="submit" disabled={loading} className="flex-1 py-3 md:py-4 bg-indigo-600 text-white rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-slate-900 transition-all flex items-center justify-center gap-3 shadow-xl">{loading ? <RefreshCw className="animate-spin" size={18} /> : <>LANCER LE DÉPLOIEMENT <Sparkles size={18} /></>}</button>
             </div>
           </form>
         );
@@ -294,39 +530,68 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBackToLanding, initialM
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 flex items-center justify-center p-6 relative overflow-hidden font-sans text-slate-900">
-      <button type="button" onClick={onBackToLanding} className="absolute left-6 top-6 z-40 text-sm font-black text-white uppercase tracking-widest flex items-center gap-2 hover:text-indigo-300">
+    <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4 sm:p-6 relative overflow-hidden font-sans text-slate-900">
+      <button type="button" onClick={onBackToLanding} className="absolute left-4 top-4 sm:left-6 sm:top-6 z-40 text-sm font-black text-white uppercase tracking-widest flex items-center gap-2 hover:text-indigo-300">
         <ChevronLeft size={16} /> Accueil
       </button>
       <div className="absolute top-[-20%] left-[-10%] w-[60%] h-[60%] bg-indigo-600/10 rounded-full blur-[120px]"></div>
       
       <div className={`w-full transition-all duration-700 ${mode === 'REGISTER' ? 'max-w-5xl' : 'max-w-md'}`}>
-        <div className="text-center mb-10">
+        <div className="text-center mb-6 md:mb-10">
           
           <img src={logo} alt="GeStockPro" className="mx-auto mb-4 h-14" />
-          <h1 className="text-3xl font-black text-white uppercase tracking-tighter">
+          <h1 className="text-2xl md:text-3xl font-black text-white uppercase tracking-tighter">
             {mode === 'REGISTER' ? 'Déploiement Instance SaaS' : mode === 'SUPERADMIN' ? 'Console Maître Kernel' : mode === 'MFA' ? 'Vérification de Sécurité' : 'Accès Privé GeStock'}
           </h1>
         </div>
 
-        <div className="bg-white rounded-[3.5rem] shadow-2xl border border-slate-100 overflow-hidden relative">
+        <div className="bg-white rounded-[2rem] md:rounded-[3.5rem] shadow-2xl border border-slate-100 overflow-hidden relative">
           {apiError && (
-            <div className="absolute top-8 left-8 right-8 z-20 p-5 bg-rose-50 border-2 border-rose-100 rounded-3xl animate-in shake duration-500 flex items-center justify-between">
+            <div className="absolute top-4 left-4 right-4 md:top-8 md:left-8 md:right-8 z-20 p-5 bg-rose-50 border-2 border-rose-100 rounded-3xl animate-in shake duration-500 flex items-center justify-between">
               <div className="flex items-center gap-4"><AlertCircle size={20} className="text-rose-600" /><p className="text-xs font-bold text-rose-700">{apiError.message}</p></div>
               <button onClick={() => setApiError(null)}><X size={18} className="text-rose-300" /></button>
             </div>
           )}
 
           {mode === 'LOGIN' || mode === 'SUPERADMIN' ? (
-            <form onSubmit={handleLogin} className="p-12 space-y-6">
+            <form onSubmit={handleLogin} className="p-5 md:p-12 space-y-5 md:space-y-6">
+              {/* Affichage du statut de blocage */}
+              {blockedUntil && timeRemaining > 0 && (
+                <div className="p-5 bg-rose-50 border-2 border-rose-200 rounded-3xl text-rose-700 text-center animate-in shake duration-500">
+                  <div className="flex items-center justify-center gap-3 mb-2">
+                    <Lock size={20} className="text-rose-600" />
+                    <h4 className="text-sm font-black uppercase tracking-widest">Compte Temporairement Bloqué</h4>
+                  </div>
+                  <p className="text-xs font-bold mb-3">Trop de tentatives de connexion échouées.</p>
+                  <div className="bg-rose-100 rounded-2xl p-4 border border-rose-200">
+                    <p className="text-2xl font-black text-rose-800">
+                      {Math.floor(timeRemaining / 60)}:{(timeRemaining % 60).toString().padStart(2, '0')}
+                    </p>
+                    <p className="text-[10px] font-bold text-rose-600 uppercase tracking-widest mt-1">Minutes restantes</p>
+                  </div>
+                </div>
+              )}
+              
+              {/* Indicateur de tentatives */}
+              {loginAttempts > 0 && !blockedUntil && (
+                <div className={`p-3 rounded-2xl text-center text-xs font-bold ${
+                  loginAttempts === 1 ? 'bg-yellow-50 text-yellow-700 border border-yellow-200' :
+                  loginAttempts === 2 ? 'bg-orange-50 text-orange-700 border border-orange-200' :
+                  'bg-rose-50 text-rose-700 border border-rose-200'
+                }`}>
+                  ⚠️ {loginAttempts}/3 tentatives utilisées
+                  {loginAttempts === 2 && ' - Dernière chance avant blocage'}
+                </div>
+              )}
+              
               <div className="space-y-5">
-                <div className="relative"><Mail className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-300" size={18} /><input type="email" required value={loginEmail} onChange={e => setLoginEmail(e.target.value.toLowerCase())} className="w-full bg-slate-50 border border-slate-100 rounded-2xl pl-12 pr-6 py-4 text-sm font-bold outline-none focus:ring-4 focus:ring-indigo-500/10 transition-all" placeholder={mode === 'SUPERADMIN' ? 'MASTER_ID' : 'Email Opérateur'} /></div>
-                <div className="relative"><Lock className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-300" size={18} /><input type={showPassword ? 'text' : 'password'} required value={loginPassword} onChange={e => setLoginPassword(e.target.value)} className="w-full bg-slate-50 border border-slate-100 rounded-2xl pl-12 pr-14 py-4 text-sm font-bold outline-none focus:ring-4 focus:ring-indigo-500/10 transition-all" placeholder="ACCESS_KEY" /><button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-5 top-1/2 -translate-y-1/2 text-slate-300 hover:text-indigo-600">{showPassword ? <EyeOff size={18} /> : <Eye size={18} />}</button></div>
-                <button type="submit" disabled={loading} className={`w-full py-5 text-white rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl transition-all flex items-center justify-center gap-3 ${mode === 'SUPERADMIN' ? 'bg-rose-500 hover:bg-rose-600' : 'bg-slate-900 hover:bg-indigo-600'}`}>{loading ? <RefreshCw className="animate-spin" size={18} /> : <>OUVRIR LA SESSION <ArrowRight size={18} /></>}</button>
+                <div className="relative"><Mail className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-300" size={18} /><input type="email" required value={loginEmail} onChange={e => setLoginEmail(e.target.value.toLowerCase())} disabled={!!(blockedUntil && timeRemaining > 0)} className="w-full bg-slate-50 border border-slate-100 rounded-2xl pl-12 pr-6 py-4 text-sm font-bold outline-none focus:ring-4 focus:ring-indigo-500/10 transition-all disabled:opacity-50 disabled:cursor-not-allowed" placeholder={mode === 'SUPERADMIN' ? 'MASTER_ID' : 'Email Opérateur'} /></div>
+                <div className="relative"><Lock className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-300" size={18} /><input type={showPassword ? 'text' : 'password'} required value={loginPassword} onChange={e => setLoginPassword(e.target.value)} disabled={!!(blockedUntil && timeRemaining > 0)} className="w-full bg-slate-50 border border-slate-100 rounded-2xl pl-12 pr-14 py-4 text-sm font-bold outline-none focus:ring-4 focus:ring-indigo-500/10 transition-all disabled:opacity-50 disabled:cursor-not-allowed" placeholder="ACCESS_KEY" /><button type="button" onClick={() => setShowPassword(!showPassword)} disabled={!!(blockedUntil && timeRemaining > 0)} className="absolute right-5 top-1/2 -translate-y-1/2 text-slate-300 hover:text-indigo-600 disabled:cursor-not-allowed">{showPassword ? <EyeOff size={18} /> : <Eye size={18} />}</button></div>
+                <button type="submit" disabled={loading || (blockedUntil && timeRemaining > 0)} className={`w-full py-5 text-white rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl transition-all flex items-center justify-center gap-3 disabled:opacity-50 disabled:cursor-not-allowed ${mode === 'SUPERADMIN' ? 'bg-rose-500 hover:bg-rose-600' : 'bg-slate-900 hover:bg-indigo-600'}`}>{loading ? <RefreshCw className="animate-spin" size={18} /> : blockedUntil && timeRemaining > 0 ? <>ACCÈS BLOQUÉ <Lock size={18} /></> : <>OUVRIR LA SESSION <ArrowRight size={18} /></>}</button>
               </div>
             </form>
           ) : mode === 'MFA' ? (
-            <form onSubmit={handleVerifyMFA} className="p-16 space-y-8 animate-in zoom-in-95">
+            <form onSubmit={handleVerifyMFA} className="p-6 md:p-16 space-y-6 md:space-y-8 animate-in zoom-in-95">
                <div className="text-center space-y-4">
                   <div className="w-20 h-20 bg-indigo-50 text-indigo-600 rounded-3xl flex items-center justify-center mx-auto shadow-inner"><Smartphone size={40} className="animate-bounce" /></div>
                   <h3 className="text-lg font-black uppercase text-slate-800">Double Authentification</h3>
@@ -335,7 +600,7 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBackToLanding, initialM
                <div className="space-y-4">
                   <input 
                     type="text" required maxLength={6} value={mfaCode} onChange={e => setMfaCode(e.target.value.replace(/\D/g, ''))}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-2xl py-6 text-center text-3xl font-black tracking-[0.5em] outline-none focus:ring-4 focus:ring-indigo-500/10"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-2xl py-5 text-center text-2xl sm:text-3xl font-black tracking-[0.3em] sm:tracking-[0.5em] outline-none focus:ring-4 focus:ring-indigo-500/10"
                     placeholder="000000"
                   />
                   <button type="submit" disabled={loading || mfaCode.length !== 6} className="w-full py-5 bg-indigo-600 text-white rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl hover:bg-slate-900 transition-all flex items-center justify-center gap-3">
@@ -345,8 +610,20 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBackToLanding, initialM
                <button type="button" onClick={() => setMode('LOGIN')} className="w-full text-[10px] font-black text-slate-400 uppercase tracking-widest hover:text-indigo-600 transition-colors">Annuler la session</button>
             </form>
           ) : (
-            <div className="grid grid-cols-1 lg:grid-cols-12 min-h-[600px]">
-              <div className="lg:col-span-4 bg-slate-900 p-10 text-white flex flex-col justify-between relative overflow-hidden">
+            <div className="flex flex-col lg:grid lg:grid-cols-12">
+              {/* Barre de progression mobile (inscription) */}
+              <div className="flex lg:hidden items-center justify-between px-5 py-3 bg-slate-900 text-white">
+                <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">
+                  {[{step:1,label:'Moteur'},{step:2,label:'Entreprise'},{step:3,label:'Admin'}].find(s=>s.step===regStep)?.label}
+                </span>
+                <div className="flex items-center gap-1.5">
+                  {[1,2,3].map(s => (
+                    <div key={s} className={`h-1.5 rounded-full transition-all duration-500 ${regStep === s ? 'w-6 bg-white' : regStep > s ? 'w-3 bg-emerald-400' : 'w-3 bg-slate-600'}`} />
+                  ))}
+                </div>
+              </div>
+
+              <div className="lg:col-span-4 bg-slate-900 p-6 lg:p-10 text-white hidden lg:flex flex-col justify-between relative overflow-hidden">
                 <div className="absolute top-0 right-0 p-8 opacity-5"><Zap size={200} /></div>
                 <div className="space-y-8 relative z-10">
                   {[{ step: 1, label: 'Choix du Plan', icon: Star }, { step: 2, label: 'L\'Entreprise', icon: Building2 }, { step: 3, label: 'Administrateur', icon: UserIcon }].map(s => (
@@ -354,11 +631,11 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBackToLanding, initialM
                   ))}
                 </div>
               </div>
-              <div className="lg:col-span-8 p-12 flex flex-col">{renderRegistrationStep()}</div>
+              <div className="col-span-12 lg:col-span-8 p-5 sm:p-8 lg:p-12 flex flex-col max-h-[70vh] lg:max-h-[75vh] overflow-y-auto custom-scrollbar">{renderRegistrationStep()}</div>
             </div>
           )}
 
-          <div className="px-10 py-8 bg-slate-50 border-t border-slate-100 flex flex-col md:flex-row gap-4 items-center justify-center">
+          <div className="px-5 md:px-10 py-5 md:py-8 bg-slate-50 border-t border-slate-100 flex flex-col sm:flex-row gap-3 items-center justify-center">
            
             {mode === 'LOGIN' && (
               <button type="button" onClick={() => { setMode('REGISTER'); setRegStep(1); }} className="text-[11px] font-black text-indigo-600 hover:text-indigo-800 transition-colors uppercase tracking-widest flex items-center gap-3">

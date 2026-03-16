@@ -106,6 +106,10 @@ const Inventory = ({ currency, plan }: { currency: string, userRole?: UserRole, 
 
   const openCreate = () => {
     if (activeInventory) return;
+    if (subcategories.length === 0) {
+      showToast("Impossible de créer un produit : aucune sous-catégorie disponible. Veuillez d'abord créer des catégories.", 'error');
+      return;
+    }
     setFormData({ name: '', unitPrice: 0, minThreshold: 5, quantity: 0, subcategoryId: subcategories[0]?.id || '', location: '', imageUrl: '' });
     setModalMode('CREATE');
   };
@@ -265,11 +269,15 @@ const Inventory = ({ currency, plan }: { currency: string, userRole?: UserRole, 
           </h2>
           <p className="text-slate-500 text-[10px] font-black uppercase tracking-[0.3em] mt-1">Gestion Active du Stock</p>
         </div>
-        {canModify && !isLimitReached && (
-          <button onClick={openCreate} disabled={!!activeInventory} className="px-8 py-4 bg-slate-900 text-white rounded-2xl font-black hover:bg-indigo-600 transition-all shadow-xl flex items-center gap-3 text-xs uppercase tracking-widest">
+        {canModify && !isLimitReached && subcategories.length > 0 ? (
+          <button onClick={openCreate} disabled={!!activeInventory} className="px-4 md:px-8 py-3 md:py-4 bg-slate-900 text-white rounded-2xl font-black hover:bg-indigo-600 transition-all shadow-xl flex items-center gap-3 text-xs uppercase tracking-widest">
             <Plus size={18} /> RÉFÉRENCER ARTICLE
           </button>
-        )}
+        ) : canModify && !isLimitReached && subcategories.length === 0 ? (
+          <div className="flex items-center gap-3 px-6 py-4 bg-amber-50 text-amber-600 rounded-2xl border border-amber-100 text-[10px] font-black uppercase tracking-widest shadow-sm">
+            <AlertCircle size={16} /> Créez d'abord des catégories pour référencer des articles
+          </div>
+        ) : null}
       </div>
 
       {showSuccessMessage && (
@@ -280,7 +288,7 @@ const Inventory = ({ currency, plan }: { currency: string, userRole?: UserRole, 
 
       {/* Bannière Statistiques du Stock */}
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6 print:hidden">
-        <div className={`p-8 rounded-[2.5rem] shadow-xl relative overflow-hidden group border transition-all ${stockStats.outOfStock > 0 ? 'bg-rose-900 text-white border-rose-800' : 'bg-slate-900 text-white border-slate-800'}`}>
+        <div className={`p-4 md:p-8 rounded-[2.5rem] shadow-xl relative overflow-hidden group border transition-all ${stockStats.outOfStock > 0 ? 'bg-rose-900 text-white border-rose-800' : 'bg-slate-900 text-white border-slate-800'}`}>
           <div className="absolute right-0 top-0 p-6 opacity-10 group-hover:scale-110 transition-transform">
             {stockStats.outOfStock > 0 ? <ShieldAlert size={80}/> : <Boxes size={80}/>}
           </div>
@@ -293,7 +301,7 @@ const Inventory = ({ currency, plan }: { currency: string, userRole?: UserRole, 
           </p>
         </div>
         
-        <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm relative group overflow-hidden">
+        <div className="bg-white p-4 md:p-8 rounded-[2.5rem] border border-slate-100 shadow-sm relative group overflow-hidden">
           <div className="absolute right-0 top-0 p-6 opacity-5 group-hover:rotate-12 transition-transform"><Package size={60}/></div>
           <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Stock Disponible</p>
           <h3 className="text-2xl font-black text-slate-900">{stockStats.inStock}</h3>
@@ -302,7 +310,7 @@ const Inventory = ({ currency, plan }: { currency: string, userRole?: UserRole, 
           </div>
         </div>
 
-        <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm relative group overflow-hidden">
+        <div className="bg-white p-4 md:p-8 rounded-[2.5rem] border border-slate-100 shadow-sm relative group overflow-hidden">
           <div className="absolute right-0 top-0 p-6 opacity-5 group-hover:-rotate-12 transition-transform"><TrendingUp size={60}/></div>
           <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Valorisation Totale</p>
           <h3 className="text-2xl font-black text-slate-900">{stockStats.totalValue.toLocaleString()} {currency}</h3>
@@ -311,7 +319,7 @@ const Inventory = ({ currency, plan }: { currency: string, userRole?: UserRole, 
           </div>
         </div>
 
-        <div className="bg-emerald-50 p-8 rounded-[2.5rem] border border-emerald-100 flex flex-col justify-center relative overflow-hidden">
+        <div className="bg-emerald-50 p-4 md:p-8 rounded-[2.5rem] border border-emerald-100 flex flex-col justify-center relative overflow-hidden">
           <div className="absolute right-0 bottom-0 p-4 opacity-20"><BarChart3 size={80} className="text-emerald-700"/></div>
           <div className="flex items-center gap-3 text-emerald-600 mb-2 relative z-10">
             <TrendingUp size={20} />
@@ -347,7 +355,7 @@ const Inventory = ({ currency, plan }: { currency: string, userRole?: UserRole, 
 
           {/* Filtres avancés */}
           {showFilters && (
-            <div className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-xl animate-in slide-in-from-top-4 duration-300 grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-xl animate-in slide-in-from-top-4 duration-300 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
               <div className="space-y-2">
                 <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest px-2">Recherche</label>
                 <input type="text" value={filters.search} onChange={e => setFilters({...filters, search: e.target.value})} className="w-full bg-slate-50 border border-slate-100 rounded-xl px-4 py-3 text-xs font-bold outline-none focus:ring-2 focus:ring-indigo-500 transition-all" placeholder="Nom, SKU..." />
@@ -380,7 +388,7 @@ const Inventory = ({ currency, plan }: { currency: string, userRole?: UserRole, 
                 <input type="date" value={filters.dateTo} onChange={e => setFilters({...filters, dateTo: e.target.value})} className="w-full bg-slate-50 border border-slate-100 rounded-xl px-4 py-3 text-xs font-bold outline-none focus:ring-2 focus:ring-indigo-500 transition-all" />
               </div>
 
-              <div className="md:col-span-4 flex gap-2 pt-2">
+              <div className="sm:col-span-2 md:col-span-4 flex gap-2 pt-2">
                 <button onClick={() => setFilters({ search: '', dateFrom: '', dateTo: '', subcategoryId: '', status: 'ALL' })} className="px-6 py-3 bg-slate-100 text-slate-500 rounded-2xl text-[9px] font-black uppercase tracking-widest hover:bg-rose-50 hover:text-rose-600 transition-all w-full">RÉINITIALISER LES FILTRES</button>
               </div>
             </div>
@@ -418,7 +426,7 @@ const Inventory = ({ currency, plan }: { currency: string, userRole?: UserRole, 
                   <h3 className="font-black text-slate-900 text-lg uppercase truncate leading-none">{item.name}</h3>
                   <p className="text-[10px] text-slate-400 font-mono mt-3 truncate font-bold">SKU: {item.sku}</p>
                   
-                  <div className="grid grid-cols-2 gap-4 mt-6">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-6">
                      <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
                        <p className="text-[8px] font-black text-slate-400 uppercase mb-1">Disponible</p>
                        <p className="text-sm font-black text-slate-900">{item.currentLevel}</p>
@@ -468,12 +476,12 @@ const Inventory = ({ currency, plan }: { currency: string, userRole?: UserRole, 
           <table className="w-full text-left">
             <thead>
               <tr className="bg-slate-50 text-slate-400 text-[9px] font-black uppercase tracking-widest border-b">
-                <th className="px-6 py-4">Produit</th>
-                <th className="px-6 py-4">SKU</th>
-                <th className="px-6 py-4">Sous-catégorie</th>
-                <th className="px-6 py-4 text-center">Stock</th>
-                <th className="px-6 py-4 text-right">Prix</th>
-                <th className="px-6 py-4 text-right">Actions</th>
+                <th className="px-3 md:px-6 py-3 md:py-4">Produit</th>
+                <th className="px-3 md:px-6 py-3 md:py-4">SKU</th>
+                <th className="px-3 md:px-6 py-3 md:py-4">Sous-catégorie</th>
+                <th className="px-3 md:px-6 py-3 md:py-4 text-center">Stock</th>
+                <th className="px-3 md:px-6 py-3 md:py-4 text-right">Prix</th>
+                <th className="px-3 md:px-6 py-3 md:py-4 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50">
@@ -486,15 +494,15 @@ const Inventory = ({ currency, plan }: { currency: string, userRole?: UserRole, 
                 const scName = subcategories.find((s:any) => s.id === (item.subcategoryId || item.subcategory_id))?.name || '';
                 return (
                   <tr key={item.id} className="group hover:bg-slate-50/50 transition-all">
-                    <td className="px-6 py-4 font-black text-slate-900 flex items-center gap-3">
+                    <td className="px-3 md:px-6 py-3 md:py-4 font-black text-slate-900 flex items-center gap-3">
                       <div className="w-10 h-10 rounded-lg bg-slate-50 flex items-center justify-center overflow-hidden">{item.imageUrl ? <img src={item.imageUrl} className="w-full h-full object-cover" alt="" /> : <Package size={18} />}</div>
                       <div className="truncate">{item.name}</div>
                     </td>
-                    <td className="px-6 py-4 text-slate-500 font-mono">{item.sku}</td>
-                    <td className="px-6 py-4 text-slate-600">{scName}</td>
-                    <td className="px-6 py-4 text-center font-black">{item.currentLevel}</td>
-                    <td className="px-6 py-4 text-right font-black">{Number(item.unitPrice).toLocaleString()} {currency}</td>
-                    <td className="px-6 py-4 text-right flex items-center justify-end gap-2">
+                    <td className="px-3 md:px-6 py-3 md:py-4 text-slate-500 font-mono">{item.sku}</td>
+                    <td className="px-3 md:px-6 py-3 md:py-4 text-slate-600">{scName}</td>
+                    <td className="px-3 md:px-6 py-3 md:py-4 text-center font-black">{item.currentLevel}</td>
+                    <td className="px-3 md:px-6 py-3 md:py-4 text-right font-black">{Number(item.unitPrice).toLocaleString()} {currency}</td>
+                    <td className="px-3 md:px-6 py-3 md:py-4 text-right flex items-center justify-end gap-2">
                       <button onClick={() => openDetails(item)} className="px-3 py-2 rounded-xl text-slate-400 hover:text-indigo-600">Voir</button>
                       {canModify && (
                         <>
@@ -514,16 +522,16 @@ const Inventory = ({ currency, plan }: { currency: string, userRole?: UserRole, 
       {/* MODAL CRÉATION / ÉDITION */}
       {(modalMode === 'CREATE' || modalMode === 'EDIT') && (
         <div className="fixed inset-0 z-[1000] flex items-center justify-center p-6 bg-slate-950/90 backdrop-blur-md animate-in fade-in duration-300">
-          <div className="bg-white w-full max-w-2xl rounded-[3.5rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-500">
-             <div className={`px-10 py-8 text-white flex justify-between items-center ${modalMode === 'CREATE' ? 'bg-slate-900' : 'bg-amber-500'}`}>
+          <div className="bg-white w-full max-w-2xl mx-4 md:mx-auto rounded-[2rem] md:rounded-[3.5rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-500 max-h-[90dvh] flex flex-col">
+             <div className={`px-4 md:px-10 py-5 md:py-8 text-white flex justify-between items-center ${modalMode === 'CREATE' ? 'bg-slate-900' : 'bg-amber-500'}`}>
                 <h3 className="text-xl font-black uppercase tracking-tight flex items-center gap-3">
                    {modalMode === 'CREATE' ? <Plus size={24}/> : <Edit3 size={24}/>}
                    {modalMode === 'CREATE' ? 'Nouvel Article' : 'Révision Article'}
                 </h3>
                 <button onClick={() => setModalMode(null)} className="p-3 hover:bg-white/10 rounded-2xl transition-all"><X size={24}/></button>
              </div>
-             <form onSubmit={handleSubmit} className="p-10 space-y-8 max-h-[75vh] overflow-y-auto custom-scrollbar">
-                <div className="grid grid-cols-2 gap-6">
+             <form onSubmit={handleSubmit} className="p-4 md:p-10 space-y-6 md:space-y-8 flex-1 overflow-y-auto custom-scrollbar">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
                    <div className="space-y-4">
                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-2">Désignation Produit <span className="text-rose-500">*</span></label>
                      <input type="text" required placeholder="Désignation" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 text-sm font-black outline-none focus:ring-4 focus:ring-indigo-500/10 shadow-inner" />
@@ -547,7 +555,7 @@ const Inventory = ({ currency, plan }: { currency: string, userRole?: UserRole, 
                       </div>
                    </div>
                 </div>
-                <div className="grid grid-cols-2 gap-6">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
                    <div className="space-y-4">
                       <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-2">Tarification & Catégorie <span className="text-rose-600">*</span></label>
                       <input type="number" required placeholder="Prix Unit. TTC" value={formData.unitPrice} onChange={e => setFormData({...formData, unitPrice: Number(e.target.value)})} className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 text-sm font-black outline-none focus:ring-4 focus:ring-indigo-500/10 shadow-inner" />
@@ -582,7 +590,7 @@ const Inventory = ({ currency, plan }: { currency: string, userRole?: UserRole, 
       {/* CONFIRM DELETE MODAL */}
       {showDeleteConfirm && (
         <div className="fixed inset-0 z-[1100] flex items-center justify-center p-6 bg-slate-950/90 backdrop-blur-md animate-in fade-in duration-300">
-           <div className="bg-white w-full max-w-md rounded-[3rem] shadow-2xl overflow-hidden p-10 text-center animate-in zoom-in-95">
+           <div className="bg-white w-full max-w-md mx-4 md:mx-auto rounded-[3rem] shadow-2xl overflow-hidden p-5 md:p-10 text-center animate-in zoom-in-95">
               <div className="w-20 h-20 bg-rose-50 text-rose-500 rounded-[2rem] flex items-center justify-center mx-auto mb-6 shadow-inner">
                 <ShieldAlert size={40} />
               </div>
@@ -615,8 +623,8 @@ const Inventory = ({ currency, plan }: { currency: string, userRole?: UserRole, 
       {/* MODAL VUE DÉTAILLÉE (VIEW) */}
       {modalMode === 'VIEW' && selectedItem && (
         <div className="fixed inset-0 z-[1000] flex items-center justify-center p-6 bg-slate-950/95 backdrop-blur-md animate-in fade-in duration-300">
-           <div className="bg-white w-full max-w-5xl rounded-[4rem] shadow-2xl overflow-hidden flex flex-col max-h-[90vh] animate-in zoom-in-95 duration-500">
-              <div className="px-12 py-10 bg-slate-900 text-white flex justify-between items-center shrink-0">
+           <div className="bg-white w-full max-w-5xl mx-4 md:mx-auto rounded-[2.5rem] md:rounded-[4rem] shadow-2xl overflow-hidden flex flex-col max-h-[90dvh] animate-in zoom-in-95 duration-500">
+              <div className="px-6 md:px-12 py-6 md:py-10 bg-slate-900 text-white flex justify-between items-center shrink-0">
                  <div className="flex items-center gap-6">
                     <div className="w-20 h-20 bg-indigo-600 rounded-3xl flex items-center justify-center text-3xl shadow-2xl shadow-indigo-500/20 overflow-hidden">
                       {selectedItem.imageUrl ? (
@@ -626,7 +634,7 @@ const Inventory = ({ currency, plan }: { currency: string, userRole?: UserRole, 
                       )}
                     </div>
                     <div>
-                       <h3 className="text-3xl font-black uppercase tracking-tighter leading-none">{selectedItem.name}</h3>
+                       <h3 className="text-xl md:text-3xl font-black uppercase tracking-tighter leading-none">{selectedItem.name}</h3>
                        <div className="flex items-center gap-4 mt-3">
                         <span className="text-[10px] font-black text-indigo-400 uppercase bg-indigo-500/10 px-3 py-1 rounded-full tracking-widest">SKU: {selectedItem.sku}</span>
                         <span className={`text-[10px] font-black uppercase px-3 py-1 rounded-full ${selectedItem.currentLevel > selectedItem.minThreshold ? 'bg-emerald-500/10 text-emerald-400' : 'bg-rose-500/10 text-rose-400 animate-pulse'}`}>
@@ -637,23 +645,23 @@ const Inventory = ({ currency, plan }: { currency: string, userRole?: UserRole, 
                  </div>
                  <button onClick={() => setModalMode(null)} className="p-4 bg-white/5 hover:bg-white/10 rounded-3xl transition-all"><X size={32}/></button>
               </div>
-              <div className="flex-1 overflow-y-auto p-12 grid grid-cols-12 gap-10 bg-slate-50/30 custom-scrollbar">
+              <div className="flex-1 overflow-y-auto p-4 md:p-12 grid grid-cols-12 gap-3 md:gap-6 lg:gap-10 bg-slate-50/30 custom-scrollbar">
                  <div className="col-span-12 lg:col-span-4 space-y-8">
                     {selectedItem.imageUrl && (
                       <div className="bg-white p-4 rounded-[3rem] border border-slate-100 shadow-sm overflow-hidden">
                         <img src={selectedItem.imageUrl} className="w-full rounded-2xl object-cover aspect-square shadow-inner" alt={selectedItem.name} />
                       </div>
                     )}
-                    <div className="bg-white p-8 rounded-[3rem] border border-slate-100 shadow-sm space-y-6">
+                    <div className="bg-white p-4 md:p-8 rounded-[2rem] md:rounded-[3rem] border border-slate-100 shadow-sm space-y-4 md:space-y-6">
                        <h4 className="text-xs font-black uppercase tracking-widest text-slate-400 flex items-center gap-2"><MapPin size={14}/> Localisation</h4>
                        <p className="text-sm font-black text-slate-800 uppercase leading-none">{selectedItem.location || 'ZONE DE STOCKAGE INDÉFINIE'}</p>
                     </div>
-                    <div className="bg-white p-8 rounded-[3rem] border border-slate-100 shadow-sm space-y-6">
+                    <div className="bg-white p-4 md:p-8 rounded-[2rem] md:rounded-[3rem] border border-slate-100 shadow-sm space-y-4 md:space-y-6">
                        <h4 className="text-xs font-black uppercase tracking-widest text-slate-400 flex items-center gap-2"><Tag size={14}/> Valorisation PRMP</h4>
                        <p className="text-2xl font-black text-indigo-600">{(selectedItem.currentLevel * Number(selectedItem.unitPrice)).toLocaleString()} <span className="text-xs">{currency}</span></p>
                     </div>
                  </div>
-                 <div className="col-span-12 lg:col-span-8 bg-white p-10 rounded-[3.5rem] border border-slate-100 shadow-sm flex flex-col min-h-[450px]">
+                 <div className="col-span-12 lg:col-span-8 bg-white p-5 md:p-10 rounded-[3.5rem] border border-slate-100 shadow-sm flex flex-col min-h-[450px]">
                     <div className="flex items-center justify-between mb-8">
                        <h4 className="text-xs font-black uppercase tracking-widest text-slate-400 flex items-center gap-2"><History size={18}/> Flux Logistiques</h4>
                     </div>

@@ -60,13 +60,13 @@ const Customers: React.FC<CustomersProps> = ({ user, currency, plan }) => {
     e.preventDefault();
     if (!showEditModal) return;
     setError(null);
-    if (!formData.phone || !formData.mainContact) {
-      setError('Le numéro de téléphone et le nom du responsable sont obligatoires.');
+    if (!formData.phone) {
+      setError('Le numéro de téléphone est obligatoire.');
       return;
     }
     setActionLoading(true);
     try {
-      const payload = { ...formData, companyName: formData.companyName && String(formData.companyName).trim() !== '' ? formData.companyName : formData.mainContact };
+      const payload = { ...formData, companyName: formData.companyName && String(formData.companyName).trim() !== '' ? formData.companyName : (formData.mainContact || 'Client') };
       const updated = await apiClient.put(`/customers/${showEditModal.id}`, payload);
       setCustomers(prev => prev.map(c => c.id === updated.id ? updated : c));
       setShowEditModal(null);
@@ -81,8 +81,8 @@ const Customers: React.FC<CustomersProps> = ({ user, currency, plan }) => {
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
-    if (!formData.phone || !formData.mainContact) {
-      setError('Le numéro de téléphone et le nom du responsable sont obligatoires.');
+    if (!formData.phone) {
+      setError('Le numéro de téléphone est obligatoire.');
       return;
     }
     setActionLoading(true);
@@ -93,7 +93,7 @@ const Customers: React.FC<CustomersProps> = ({ user, currency, plan }) => {
         setActionLoading(false);
         return;
       }
-      const payload = { ...formData, companyName: formData.companyName && String(formData.companyName).trim() !== '' ? formData.companyName : formData.mainContact };
+      const payload = { ...formData, companyName: formData.companyName && String(formData.companyName).trim() !== '' ? formData.companyName : (formData.mainContact || 'Client') };
       const data = await apiClient.post('/customers', payload);
       setCustomers([data, ...customers]);
       setShowCreateModal(false);
@@ -221,14 +221,14 @@ const Customers: React.FC<CustomersProps> = ({ user, currency, plan }) => {
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500 pb-20">
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
+      <div className="flex flex-col sm:flex-row flex-wrap sm:items-center justify-between gap-3">
         <div>
-          <h2 className="text-3xl font-black text-slate-900 tracking-tighter flex items-center gap-3">
+          <h2 className="text-xl md:text-3xl font-black text-slate-900 tracking-tighter flex items-center gap-3">
             <Users className="text-indigo-600" size={32} /> Hub Relation Clients
           </h2>
           <p className="text-slate-500 text-[10px] font-black uppercase tracking-[0.3em] mt-1">Intelligence Commerciale • Instance Isolé</p>
         </div>
-        <div className="flex gap-3 items-center">
+        <div className="flex flex-wrap gap-3 items-center">
           <button onClick={fetchData} className="p-4 bg-white border border-slate-200 text-slate-400 hover:text-indigo-600 rounded-2xl transition-all shadow-sm">
              <RefreshCw size={20} className={loading ? 'animate-spin' : ''} />
           </button>
@@ -239,13 +239,13 @@ const Customers: React.FC<CustomersProps> = ({ user, currency, plan }) => {
           <button onClick={() => setShowFilters(s => !s)} className={`p-3 rounded-xl text-[10px] font-black uppercase tracking-widest ${showFilters ? 'bg-indigo-600 text-white' : 'bg-white text-slate-400'}`}>{showFilters ? 'Masquer filtres' : 'Filtres'}</button>
           {canModify && !isAccountant && (
             isCustomersLimitReached ? (
-              <div className="flex items-center gap-3 px-6 py-4 bg-rose-50 text-rose-600 rounded-2xl border border-rose-100 text-[10px] font-black uppercase tracking-widest shadow-sm">
+              <div className="flex items-center gap-3 px-4 md:px-6 py-3 md:py-4 bg-rose-50 text-rose-600 rounded-2xl border border-rose-100 text-[10px] font-black uppercase tracking-widest shadow-sm">
                 <Lock size={16} /> {currentPlanId === 'PRO' ? 'Limite du plan PRO atteinte : maximum 12 clients.' : 'Limite du plan Basic atteinte : maximum 5 clients.'}
               </div>
             ) : (
               <button 
                 onClick={() => { resetForm(); setShowCreateModal(true); }}
-                className="bg-slate-900 text-white px-8 py-4 rounded-2xl font-black hover:bg-indigo-600 transition-all shadow-xl flex items-center gap-3 text-xs uppercase tracking-widest"
+                className="bg-slate-900 text-white px-4 md:px-8 py-3 md:py-4 rounded-2xl font-black hover:bg-indigo-600 transition-all shadow-xl flex items-center gap-3 text-xs uppercase tracking-widest"
               >
                 <Plus size={18} /> CRÉER UN CLIENT
               </button>
@@ -274,7 +274,7 @@ const Customers: React.FC<CustomersProps> = ({ user, currency, plan }) => {
 
       {showFilters && (
         <div className="bg-white p-4 rounded-[1.5rem] border border-slate-100 shadow-sm mt-4">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
             <div>
               <label className="text-[10px] font-black uppercase text-slate-400">Date de création (début)</label>
               <input type="date" value={filters.dateFrom} onChange={e => setFilters({...filters, dateFrom: e.target.value})} className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-4 py-3 mt-2" />
@@ -292,7 +292,7 @@ const Customers: React.FC<CustomersProps> = ({ user, currency, plan }) => {
               </select>
             </div>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
             <div>
               <label className="text-[10px] font-black uppercase text-slate-400">Encours min ({currency})</label>
               <input type="number" value={filters.minOutstanding} onChange={e => setFilters({...filters, minOutstanding: e.target.value})} className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-4 py-3 mt-2" />
@@ -335,7 +335,7 @@ const Customers: React.FC<CustomersProps> = ({ user, currency, plan }) => {
                     <h3 className="font-black text-slate-900 text-lg uppercase truncate leading-none">{customer.companyName || 'Passage'}</h3>
                     <p className="text-[10px] text-slate-400 font-bold uppercase mt-2 tracking-widest truncate flex items-center gap-2"><Mail size={12}/> {customer.email}</p>
                     
-                    <div className="mt-8 grid grid-cols-2 gap-4 flex-1">
+                    <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 gap-4 flex-1">
                       <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
                         <p className="text-[8px] font-black text-slate-400 uppercase mb-1">Encours</p>
                         <p className="text-sm font-black text-slate-900">{(customer.outstandingBalance || 0).toLocaleString()} {currency}</p>
@@ -390,11 +390,11 @@ const Customers: React.FC<CustomersProps> = ({ user, currency, plan }) => {
             <table className="w-full text-left">
               <thead>
                 <tr className="bg-slate-50 text-slate-400 text-[9px] font-black uppercase tracking-widest border-b">
-                  <th className="px-6 py-4">Client</th>
-                  <th className="px-6 py-4">Email</th>
-                  <th className="px-6 py-4 text-center">Solvabilité</th>
-                  <th className="px-6 py-4 text-right">Encours</th>
-                  <th className="px-6 py-4 text-right">Actions</th>
+                  <th className="px-3 md:px-6 py-3 md:py-4">Client</th>
+                  <th className="px-3 md:px-6 py-3 md:py-4">Email</th>
+                  <th className="px-3 md:px-6 py-3 md:py-4 text-center">Solvabilité</th>
+                  <th className="px-3 md:px-6 py-3 md:py-4 text-right">Encours</th>
+                  <th className="px-3 md:px-6 py-3 md:py-4 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-50">
@@ -402,11 +402,11 @@ const Customers: React.FC<CustomersProps> = ({ user, currency, plan }) => {
                   const isLinked = hasLinkedSales(customer.id);
                   return (
                     <tr key={customer.id} className="group hover:bg-slate-50/50 transition-all">
-                      <td className="px-6 py-4 font-black text-slate-900">{customer.companyName || '—'}</td>
-                      <td className="px-6 py-4 text-slate-500 text-sm truncate">{customer.email}</td>
-                      <td className="px-6 py-4 text-center text-[11px] font-black">{customer.healthStatus === 'GOOD' ? 'SOLVABLE' : customer.healthStatus === 'WARNING' ? 'VIGILANCE' : 'RISQUE'}</td>
-                      <td className="px-6 py-4 text-right font-black">{(customer.outstandingBalance || 0).toLocaleString()} {currency}</td>
-                      <td className="px-6 py-4 text-right flex items-center justify-end gap-2">
+                      <td className="px-3 md:px-6 py-3 md:py-4 font-black text-slate-900">{customer.companyName || '—'}</td>
+                      <td className="px-3 md:px-6 py-3 md:py-4 text-slate-500 text-sm truncate max-w-[120px] md:max-w-[200px]">{customer.email}</td>
+                      <td className="px-3 md:px-6 py-3 md:py-4 text-center text-[11px] font-black">{customer.healthStatus === 'GOOD' ? 'SOLVABLE' : customer.healthStatus === 'WARNING' ? 'VIGILANCE' : 'RISQUE'}</td>
+                      <td className="px-3 md:px-6 py-3 md:py-4 text-right font-black">{(customer.outstandingBalance || 0).toLocaleString()} {currency}</td>
+                      <td className="px-3 md:px-6 py-3 md:py-4 text-right flex items-center justify-end gap-2">
                         <button onClick={() => openDetails(customer)} className="px-3 py-2 rounded-xl text-slate-400 hover:text-indigo-600">Voir</button>
                         {canModify && !isAccountant && (
                           <>
@@ -427,8 +427,8 @@ const Customers: React.FC<CustomersProps> = ({ user, currency, plan }) => {
       {/* MODAL CRÉATION / MODIFICATION */}
       {(showCreateModal || showEditModal) && (
         <div className="fixed inset-0 z-[700] flex items-center justify-center p-6 bg-slate-950/90 backdrop-blur-md animate-in fade-in duration-300">
-          <div className="bg-white w-full max-w-2xl rounded-[3.5rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-500">
-             <div className={`px-10 py-8 text-white flex justify-between items-center ${showEditModal ? 'bg-amber-500' : 'bg-slate-900'}`}>
+          <div className="bg-white w-full max-w-2xl mx-4 md:mx-auto rounded-[2rem] md:rounded-[3.5rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-500 max-h-[90dvh] flex flex-col">
+             <div className={`px-4 md:px-10 py-5 md:py-8 text-white flex justify-between items-center ${showEditModal ? 'bg-amber-500' : 'bg-slate-900'}`}>
                 <div className="flex items-center gap-4">
                   {showEditModal ? <Edit3 size={28}/> : <Plus size={28}/>}
                   <h3 className="text-xl font-black uppercase tracking-tight">
@@ -437,19 +437,19 @@ const Customers: React.FC<CustomersProps> = ({ user, currency, plan }) => {
                 </div>
                 <button onClick={() => { setShowCreateModal(false); setShowEditModal(null); }} className="p-3 hover:bg-white/10 rounded-2xl transition-all"><X size={24}/></button>
              </div>
-             <form onSubmit={showEditModal ? handleUpdate : handleCreate} className="p-10 space-y-8 max-h-[75vh] overflow-y-auto">
+             <form onSubmit={showEditModal ? handleUpdate : handleCreate} className="p-4 md:p-10 space-y-6 md:space-y-8 flex-1 overflow-y-auto custom-scrollbar">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                    <div className="space-y-4">
                       <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-2">Identité Entreprise</label>
                       <input type="text" value={formData.companyName} onChange={e => setFormData({...formData, companyName: e.target.value})} className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 text-sm font-black focus:ring-4 focus:ring-indigo-500/10 outline-none" placeholder="Raison Sociale (optionnel)" />
                       <input type="email" value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})} className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 text-sm font-black focus:ring-4 focus:ring-indigo-500/10 outline-none" placeholder="Email de contact (optionnel)" />
                       <input type="text" required value={formData.phone} onChange={e => setFormData({...formData, phone: e.target.value})} className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 text-sm font-black focus:ring-4 focus:ring-indigo-500/10 outline-none" placeholder="Téléphone (obligatoire)" />
-                      <input type="text" required value={formData.mainContact} onChange={e => setFormData({...formData, mainContact: e.target.value})} className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 text-sm font-black focus:ring-4 focus:ring-indigo-500/10 outline-none" placeholder="Nom du responsable (obligatoire)" />
+                      <input type="text" value={formData.mainContact} onChange={e => setFormData({...formData, mainContact: e.target.value})} className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 text-sm font-black focus:ring-4 focus:ring-indigo-500/10 outline-none" placeholder="Nom du responsable (optionnel)" />
                    </div>
                    <div className="space-y-4">
                       <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-2">Logistique & Crédit</label>
                       <textarea value={formData.billingAddress} onChange={e => setFormData({...formData, billingAddress: e.target.value})} className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 text-sm font-bold focus:ring-4 focus:ring-indigo-500/10 outline-none min-h-[100px]" placeholder="Adresse de facturation"></textarea>
-                      <div className="grid grid-cols-2 gap-4">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                          <div className="space-y-2">
                            <p className="text-[9px] font-black text-slate-400 uppercase px-2">Délai (jours)</p>
                            <input type="number" value={formData.paymentTerms} onChange={e => setFormData({...formData, paymentTerms: Number(e.target.value)})} className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 text-sm font-black outline-none" />
@@ -475,7 +475,7 @@ const Customers: React.FC<CustomersProps> = ({ user, currency, plan }) => {
       {/* CONFIRM DELETE MODAL */}
       {showDeleteConfirm && (
         <div className="fixed inset-0 z-[800] flex items-center justify-center p-6 bg-slate-950/90 backdrop-blur-md animate-in fade-in duration-300">
-           <div className="bg-white w-full max-w-md rounded-[3rem] shadow-2xl overflow-hidden p-10 text-center animate-in zoom-in-95">
+           <div className="bg-white w-full max-w-md mx-4 md:mx-auto rounded-[3rem] shadow-2xl overflow-hidden p-5 md:p-10 text-center animate-in zoom-in-95">
               <div className="w-20 h-20 bg-rose-50 text-rose-500 rounded-[2rem] flex items-center justify-center mx-auto mb-6 shadow-inner">
                 <ShieldAlert size={40} />
               </div>
@@ -508,14 +508,14 @@ const Customers: React.FC<CustomersProps> = ({ user, currency, plan }) => {
       {/* MODAL DÉTAILS VUE 360 */}
       {showDetailModal && (
         <div className="fixed inset-0 z-[700] flex items-center justify-center p-6 bg-slate-950/90 backdrop-blur-md animate-in fade-in duration-300">
-          <div className="bg-white w-full max-w-5xl rounded-[4rem] shadow-2xl overflow-hidden flex flex-col max-h-[90vh] animate-in zoom-in-95 duration-500">
-            <div className="px-12 py-10 bg-slate-900 text-white flex justify-between items-center">
+          <div className="bg-white w-full max-w-5xl mx-4 md:mx-auto rounded-[4rem] shadow-2xl overflow-hidden flex flex-col max-h-[90vh] animate-in zoom-in-95 duration-500">
+            <div className="px-6 md:px-12 py-6 md:py-10 bg-slate-900 text-white flex justify-between items-center">
               <div className="flex items-center gap-6">
                 <div className="w-20 h-20 bg-indigo-600 rounded-3xl flex items-center justify-center text-4xl font-black shadow-2xl uppercase">
                   {(showDetailModal.companyName || 'C').charAt(0)}
                 </div>
                 <div>
-                  <h3 className="text-3xl font-black uppercase tracking-tighter leading-none">{showDetailModal.companyName}</h3>
+                  <h3 className="text-xl md:text-3xl font-black uppercase tracking-tighter leading-none">{showDetailModal.companyName}</h3>
                   <div className="flex items-center gap-4 mt-3">
                     <span className="text-[10px] font-black text-indigo-400 uppercase bg-indigo-500/10 px-3 py-1 rounded-full">ID: {showDetailModal.id.slice(0, 8)}</span>
                     <span className={`text-[10px] font-black uppercase px-3 py-1 rounded-full ${showDetailModal.healthStatus === 'GOOD' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-rose-500/10 text-rose-400 animate-pulse'}`}>
@@ -527,9 +527,9 @@ const Customers: React.FC<CustomersProps> = ({ user, currency, plan }) => {
               <button onClick={() => setShowDetailModal(null)} className="p-4 bg-white/5 hover:bg-white/10 rounded-3xl transition-all"><X size={32}/></button>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-12 grid grid-cols-12 gap-10 bg-slate-50/30 custom-scrollbar">
+            <div className="flex-1 overflow-y-auto p-4 md:p-12 grid grid-cols-12 gap-3 md:gap-6 lg:gap-10 bg-slate-50/30 custom-scrollbar">
                <div className="col-span-12 lg:col-span-4 space-y-8">
-                  <div className="bg-white p-8 rounded-[3rem] border border-slate-100 shadow-sm space-y-6">
+                  <div className="bg-white p-4 md:p-8 rounded-[2rem] md:rounded-[3rem] border border-slate-100 shadow-sm space-y-4 md:space-y-6">
                     <h4 className="text-xs font-black uppercase tracking-widest text-slate-400 flex items-center gap-2"><Phone size={14}/> Coordonnées</h4>
                     <div className="space-y-4">
                       <div className="flex items-center gap-4">
@@ -542,27 +542,27 @@ const Customers: React.FC<CustomersProps> = ({ user, currency, plan }) => {
                       </div>
                     </div>
                   </div>
-                  <div className="bg-white p-8 rounded-[3rem] border border-slate-100 shadow-sm space-y-6">
+                  <div className="bg-white p-4 md:p-8 rounded-[2rem] md:rounded-[3rem] border border-slate-100 shadow-sm space-y-4 md:space-y-6">
                     <h4 className="text-xs font-black uppercase tracking-widest text-slate-400 flex items-center gap-2"><MapPin size={14}/> Logistique</h4>
                     <div><p className="text-[8px] font-black text-slate-400 uppercase">Siège Social</p><p className="text-sm font-bold text-slate-800 leading-relaxed">{showDetailModal.billingAddress || 'Non renseignée'}</p></div>
                   </div>
                </div>
 
                <div className="col-span-12 lg:col-span-8 space-y-8">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div className={`p-8 rounded-[2.5rem] text-white shadow-xl relative overflow-hidden ${ (customerStats?.outstanding || 0) > 0 ? 'bg-rose-600' : 'bg-emerald-600'}`}>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                    <div className={`p-4 md:p-8 rounded-[2.5rem] text-white shadow-xl relative overflow-hidden ${ (customerStats?.outstanding || 0) > 0 ? 'bg-rose-600' : 'bg-emerald-600'}`}>
                        <div className="absolute right-0 top-0 p-4 opacity-10"><TrendingUp size={80}/></div>
                        <h4 className="text-[9px] font-black uppercase tracking-[0.2em] mb-4 opacity-70">Encours Actuel</h4>
                        <p className="text-4xl font-black">{(customerStats?.outstanding || 0).toLocaleString()} <span className="text-sm uppercase">{currency}</span></p>
                     </div>
-                    <div className="p-8 rounded-[2.5rem] bg-indigo-600 text-white shadow-xl relative overflow-hidden">
+                    <div className="p-4 md:p-8 rounded-[2.5rem] bg-indigo-600 text-white shadow-xl relative overflow-hidden">
                        <div className="absolute right-0 top-0 p-4 opacity-10"><BarChart3 size={80}/></div>
                        <h4 className="text-[9px] font-black uppercase tracking-[0.2em] mb-4 opacity-70">Volume d'affaires</h4>
                        <p className="text-4xl font-black">{(customerStats?.totalInvoiced || 0).toLocaleString()} <span className="text-sm uppercase">{currency}</span></p>
                     </div>
                   </div>
 
-                  <div className="bg-white p-10 rounded-[3.5rem] border border-slate-100 shadow-sm flex flex-col min-h-[350px]">
+                  <div className="bg-white p-5 md:p-10 rounded-[3.5rem] border border-slate-100 shadow-sm flex flex-col min-h-[350px]">
                      <div className="flex items-center justify-between mb-8">
                         <h4 className="text-xs font-black uppercase tracking-widest text-slate-400 flex items-center gap-2"><History size={18}/> Dernières commandes</h4>
                         {historyLoading && <Loader2 className="animate-spin text-indigo-500" size={16}/>}
@@ -594,7 +594,7 @@ const Customers: React.FC<CustomersProps> = ({ user, currency, plan }) => {
                   </div>
                </div>
             </div>
-            <div className="p-10 bg-white border-t border-slate-100 flex gap-4 shrink-0">
+            <div className="p-5 md:p-10 bg-white border-t border-slate-100 flex gap-4 shrink-0">
                <button onClick={() => setShowDetailModal(null)} className="px-12 py-5 bg-slate-100 text-slate-500 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-slate-200 transition-all">FERMER LE DOSSIER</button>
             </div>
           </div>

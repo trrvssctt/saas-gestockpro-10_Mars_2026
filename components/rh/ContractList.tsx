@@ -1444,7 +1444,7 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
               type="submit" 
               form="contract-form"
               disabled={creating || !contractForm.employeeId || !contractForm.startDate}
-              className="px-10 py-4 bg-slate-900 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-indigo-600 transition-all shadow-xl disabled:opacity-50 flex items-center gap-2"
+              className="px-4 md:px-10 py-4 bg-slate-900 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-indigo-600 transition-all shadow-xl disabled:opacity-50 flex items-center gap-2"
             >
               {creating && <Loader2 size={16} className="animate-spin" />}
               {creating ? 'Création...' : 'Créer le Contrat'}
@@ -1607,7 +1607,7 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
               type="submit" 
               form="edit-contract-form"
               disabled={isEditing || !editForm.modificationReason.trim()}
-              className="px-10 py-4 bg-indigo-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-indigo-700 transition-all shadow-xl disabled:opacity-50 flex items-center gap-2"
+              className="px-4 md:px-10 py-4 bg-indigo-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-indigo-700 transition-all shadow-xl disabled:opacity-50 flex items-center gap-2"
             >
               {isEditing && <Loader2 size={16} className="animate-spin" />}
               {isEditing ? 'Modification...' : 'Enregistrer les modifications'}
@@ -1751,7 +1751,7 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
               type="submit" 
               form="bulk-payslip-form"
               disabled={generatingPayslips || !bulkPayslipForm.month}
-              className="px-10 py-4 bg-emerald-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-emerald-700 transition-all shadow-xl disabled:opacity-50 flex items-center gap-2"
+              className="px-4 md:px-10 py-4 bg-emerald-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-emerald-700 transition-all shadow-xl disabled:opacity-50 flex items-center gap-2"
             >
               {generatingPayslips && <Loader2 size={16} className="animate-spin" />}
               {generatingPayslips ? 'Génération...' : 'Générer les Fiches'}
@@ -2008,7 +2008,7 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
               type="submit" 
               form="renewal-form"
               disabled={isRenewing || hasRenewalFormErrors()}
-              className={`px-10 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all shadow-xl disabled:opacity-50 flex items-center gap-2 ${
+              className={`px-4 md:px-10 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all shadow-xl disabled:opacity-50 flex items-center gap-2 ${
                 hasRenewalFormErrors() 
                   ? 'bg-gray-400 text-gray-200 cursor-not-allowed' 
                   : 'bg-green-600 text-white hover:bg-green-700'
@@ -2279,7 +2279,7 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
               type="submit" 
               form="terminate-form"
               disabled={processing || !terminationForm.reason.trim() || terminationForm.reason.trim().length < 15}
-              className="px-10 py-4 bg-red-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-red-700 transition-all shadow-xl disabled:opacity-50 flex items-center gap-2"
+              className="px-4 md:px-10 py-4 bg-red-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-red-700 transition-all shadow-xl disabled:opacity-50 flex items-center gap-2"
             >
               {processing && <Loader2 size={16} className="animate-spin" />}
               {processing ? 'Résiliation...' : 'Résilier le Contrat'}
@@ -2357,7 +2357,7 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
               type="submit" 
               form="suspend-form"
               disabled={processing || !suspensionForm.reason.trim()}
-              className="px-10 py-4 bg-amber-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-amber-700 transition-all shadow-xl disabled:opacity-50 flex items-center gap-2"
+              className="px-4 md:px-10 py-4 bg-amber-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-amber-700 transition-all shadow-xl disabled:opacity-50 flex items-center gap-2"
             >
               {processing && <Loader2 size={16} className="animate-spin" />}
               {processing ? 'Suspension...' : 'Suspendre le Contrat'}

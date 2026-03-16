@@ -45,10 +45,10 @@ const HRModal: React.FC<HRModalProps> = ({
             initial={{ opacity: 0, scale: 0.95, y: 20 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 20 }}
-            className={`relative w-full ${sizeClasses[size]} bg-white rounded-[3rem] shadow-2xl overflow-hidden flex flex-col max-h-[90vh]`}
+            className={`relative w-full ${sizeClasses[size]} bg-white rounded-[2rem] sm:rounded-[3rem] shadow-2xl overflow-hidden flex flex-col max-h-[90dvh]`}
           >
             {/* Header */}
-            <div className="px-10 py-8 border-b border-slate-50 flex items-center justify-between shrink-0">
+            <div className="px-4 sm:px-10 py-5 sm:py-8 border-b border-slate-50 flex items-center justify-between shrink-0">
               <h3 className="text-xl font-black text-slate-900 uppercase tracking-tighter">{title}</h3>
               <button 
                 onClick={onClose}
@@ -59,13 +59,13 @@ const HRModal: React.FC<HRModalProps> = ({
             </div>
 
             {/* Body */}
-            <div className="px-10 py-8 overflow-y-auto custom-scrollbar flex-grow">
+            <div className="px-4 sm:px-10 py-5 sm:py-8 overflow-y-auto custom-scrollbar flex-grow">
               {children}
             </div>
 
             {/* Footer */}
             {footer && (
-              <div className="px-10 py-8 border-t border-slate-50 bg-slate-50/50 shrink-0">
+              <div className="px-4 sm:px-10 py-5 sm:py-8 border-t border-slate-50 bg-slate-50/50 shrink-0">
                 {footer}
               </div>
             )}

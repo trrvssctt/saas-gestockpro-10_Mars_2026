@@ -197,7 +197,7 @@ const SubcategoryManager: React.FC<{ plan?: SubscriptionPlan }> = ({ plan }) => 
         </div>
       )}
 
-      <div className="bg-white p-4 rounded-[2rem] border border-slate-100 shadow-sm flex items-center gap-4">
+      <div className="bg-white p-4 rounded-[2rem] border border-slate-100 shadow-sm flex flex-col sm:flex-row gap-3">
         <div className="relative flex-1">
           <Search className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
           <input 
@@ -377,7 +377,7 @@ const SubcategoryManager: React.FC<{ plan?: SubscriptionPlan }> = ({ plan }) => 
             </>
           ) : (
             <div className="bg-white rounded-[1.5rem] border border-slate-100 shadow-sm overflow-x-auto">
-              <table className="w-full text-left">
+              <table className="w-full min-w-[600px] text-left">
                 <thead>
                   <tr className="bg-slate-50 text-slate-400 text-[9px] font-black uppercase tracking-widest border-b">
                     <th className="px-6 py-4">Nom</th>
@@ -425,15 +425,15 @@ const SubcategoryManager: React.FC<{ plan?: SubscriptionPlan }> = ({ plan }) => 
       {/* CREATE / EDIT MODAL */}
       {showModal && (
         <div className="fixed inset-0 z-[600] flex items-center justify-center p-6 bg-slate-950/90 backdrop-blur-md animate-in fade-in duration-300">
-          <div className="bg-white w-full max-w-lg rounded-[3.5rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-500">
+          <div className="bg-white w-full mx-4 md:mx-auto max-w-lg rounded-[3.5rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-500">
              <div className={`px-10 py-8 text-white flex justify-between items-center ${showModal === 'CREATE' ? 'bg-slate-900' : 'bg-amber-500'}`}>
-                <h3 className="text-xl font-black uppercase tracking-tight flex items-center gap-3">
+                <h3 className="text-lg md:text-xl font-black uppercase tracking-tight flex items-center gap-3">
                   {showModal === 'CREATE' ? <Plus size={24}/> : <Edit3 size={24}/>}
                   {showModal === 'CREATE' ? 'Nouveau Sous-Segment' : 'Révision Sous-Segment'}
                 </h3>
                 <button onClick={() => setShowModal(null)} className="p-3 hover:bg-white/10 rounded-2xl transition-all"><X size={24}/></button>
              </div>
-             <form onSubmit={handleSubmit} className="p-10 space-y-8">
+             <form onSubmit={handleSubmit} className="p-5 md:p-10 space-y-8">
                 <div className="space-y-6">
                    <div>
                       <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-2">Segment Parent <span className="text-rose-500">*</span></label>
@@ -495,7 +495,7 @@ const SubcategoryManager: React.FC<{ plan?: SubscriptionPlan }> = ({ plan }) => 
       {/* CONFIRM DELETE MODAL */}
       {showDeleteConfirm && (
         <div className="fixed inset-0 z-[700] flex items-center justify-center p-6 bg-slate-950/90 backdrop-blur-md animate-in fade-in duration-300">
-           <div className="bg-white w-full max-w-md rounded-[3rem] shadow-2xl overflow-hidden p-10 text-center animate-in zoom-in-95">
+           <div className="bg-white w-full mx-4 md:mx-auto max-w-md rounded-[3rem] shadow-2xl overflow-hidden p-5 md:p-10 text-center animate-in zoom-in-95">
               <div className="w-20 h-20 bg-rose-50 text-rose-500 rounded-[2rem] flex items-center justify-center mx-auto mb-6 shadow-inner">
                 <ShieldAlert size={40} />
               </div>
@@ -528,8 +528,8 @@ const SubcategoryManager: React.FC<{ plan?: SubscriptionPlan }> = ({ plan }) => 
       {/* DETAILS MODAL */}
       {showDetailsSub && (
         <div className="fixed inset-0 z-[1100] flex items-center justify-center p-6 bg-slate-950/95 backdrop-blur-md animate-in fade-in duration-300">
-           <div className="bg-white w-full max-w-5xl rounded-[4rem] shadow-2xl overflow-hidden flex flex-col max-h-[90vh] animate-in zoom-in-95 duration-500">
-              <div className="px-12 py-10 bg-slate-900 text-white flex justify-between items-center shrink-0">
+           <div className="bg-white w-full mx-4 md:mx-auto max-w-5xl rounded-[4rem] shadow-2xl overflow-hidden flex flex-col max-h-[90vh] animate-in zoom-in-95 duration-500">
+              <div className="px-6 md:px-12 py-6 md:py-10 bg-slate-900 text-white flex justify-between items-center shrink-0">
                  <div className="flex items-center gap-6">
                     <div className="w-20 h-20 bg-indigo-600 rounded-3xl flex items-center justify-center text-3xl shadow-2xl shadow-indigo-500/20 overflow-hidden">
                       <Package size={40} />

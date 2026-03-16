@@ -970,7 +970,7 @@ const LeaveManagement: React.FC<LeaveManagementProps> = ({ onNavigate, user }) =
             </button>
             <button 
               onClick={handleSubmit} 
-              className="px-10 py-4 bg-slate-900 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-indigo-600 transition-all shadow-xl"
+              className="px-4 md:px-10 py-4 bg-slate-900 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-indigo-600 transition-all shadow-xl"
             >
               {selectedLeave ? 'Modifier' : 'Créer'} la Demande
             </button>

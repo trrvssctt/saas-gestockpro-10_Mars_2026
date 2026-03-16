@@ -1,246 +1,1465 @@
+/**
+ * ChatInterface.tsx — Kernel IA Orchestrator
+ * 
+ * Assistant IA d'analyse métier (vente, stock, RH) pour un SaaS.
+ * 
+ * Architecture :
+ * - Sous-composants isolés : ChatHeader, MessageBubble, VisualBlock, MarkdownRenderer
+ * - Helpers purs et testables : parseStructuredFormatted, arrayToCSV, formatStatValue, safeStr, detectChartType
+ * - Zéro objet affiché dans les tooltips Recharts
+ * - Responsive, accessible (aria-label, role, keyboard), dark-mode ready
+ * - Exports CSV / XLSX / PNG robustes
+ * - Scroll automatique, plein écran, mobile-first
+ */
 
-import React, { useState, useRef, useEffect } from 'react';
-import { 
-  MessageSquare, Send, X, Bot, Sparkles, 
+import React, { useState, useRef, useEffect, useCallback, memo } from 'react';
+import {
+  MessageSquare, Send, X, Bot, Sparkles,
   BarChart3, Table as TableIcon, Activity,
-  ChevronRight, ArrowRight, Loader2, Maximize, Minimize, Download
+  Loader2, Maximize2, Minimize2, Download,
+  AlertCircle, ChevronDown,
 } from 'lucide-react';
 import { getAIResponse, AIChatResponse, cleanProfessionalText, fetchChatHistory } from '../services/geminiService';
 import { UserRole } from '../types';
-import { 
-  ResponsiveContainer, AreaChart, Area, 
-  XAxis, YAxis, Tooltip, CartesianGrid 
+import DocumentPreview from './DocumentPreview';
+import {
+  ResponsiveContainer,
+  AreaChart, Area,
+  XAxis, YAxis, Tooltip, CartesianGrid,
+  BarChart, Bar,
+  PieChart, Pie, Cell, Legend,
+  ComposedChart, Line,
 } from 'recharts';
 
-interface Message extends AIChatResponse {
+// ─────────────────────────────────────────────
+// Types
+// ─────────────────────────────────────────────
+
+// Tous les formats produits par le workflow n8n v2 + anciens formats pour rétrocompatibilité
+type MessageFormat =
+  | 'general' | 'list' | 'table' | 'stats' | 'excel'
+  // Graphiques — workflow v2
+  | 'chart' | 'bar_chart' | 'histogram' | 'donut_chart' | 'multi_chart' | 'heatmap'
+  // Anciens formats / rétrocompat
+  | 'advanced_chart' | 'advancedchart' | 'chart_advanced'
+  // Documents
+  | 'document_invoice' | 'document_delivery' | 'document_payslip' | 'document_report'
+  | 'document_html'   // Format généré par le nœud "Generate Document HTML" n8n
+  | 'error' | 'empty';
+
+interface Message {
   role: 'user' | 'ai';
+  formattedResponse: string;
+  format: MessageFormat;
+  rawResults?: any[];
+  downloadUrl?: string;
+  documentHtml?: string;
+  // Données structurées pour DocumentPreview React (persistance rechargement)
+  documentData?: {
+    type: 'FACTURE' | 'RECU' | 'BON_SORTIE' | 'SUBSCRIPTION_INVOICE';
+    sale: Record<string, any>;
+    tenant: Record<string, any>;
+    currency: string;
+  };
+  resultCount: number;
+  status: 'SUCCESS' | 'ERROR';
+  mode?: string;
+  metadata?: Record<string, any>;
   timestamp: Date;
 }
 
+interface ParsedStructured {
+  text: string | null;
+  format: string | null;
+  rawResults?: any[];
+}
+
+interface ChartMeta {
+  // Champs de base
+  xAxis?: string;
+  yAxis?: string | string[];
+  series?: Array<{ key: string; type?: string; color?: string; label?: string; yAxisId?: string }> | string[];
+  chartType?: string;
+  type?: string; // alias de chartType dans chart_config
+  colors?: string[];
+  // Champs enrichis workflow n8n v2
+  horizontal?: boolean;
+  dataLabels?: boolean;
+  dual_axis?: boolean;
+  nameKey?: string;
+  valueKey?: string;
+  smooth?: boolean;
+  // Histogramme spécifique
+  barGap?: number;              // 0 = barres jointives (style histogramme)
+  secondaryAxis?: string;       // colonne pour la ligne secondaire (ex: montant_total)
+  showSecondaryLine?: boolean;  // affiche une courbe de tendance en overlay
+}
+
+// ─────────────────────────────────────────────
+// Constantes
+// ─────────────────────────────────────────────
+
+/** Palette harmonieuse, accessible (WCAG AA), personnalisable via meta.colors */
+const CHART_COLORS = ['#6366f1', '#22d3ee', '#f59e0b', '#10b981', '#f43f5e', '#a78bfa', '#34d399'];
+
+const SAMPLE_QUESTIONS = [
+  'Top 5 produits vendus ce mois-ci',
+  'Montant total des factures impayées',
+  'Articles en rupture de stock ?',
+  'Prévision de stock 30 prochains jours',
+];
+
+// ─────────────────────────────────────────────
+// Helpers purs (facilement testables avec Jest)
+// ─────────────────────────────────────────────
+
+/**
+ * Convertit n'importe quelle valeur en string sûre pour les tooltips.
+ * Évite l'erreur "Objects are not valid as a React child".
+ */
+export const safeStr = (v: unknown): string => {
+  if (v === null || v === undefined) return '—';
+  if (typeof v === 'string') return v;
+  if (typeof v === 'number') return v.toLocaleString('fr-FR');
+  if (typeof v === 'boolean') return v ? 'Oui' : 'Non';
+  if (v instanceof Date) return v.toLocaleDateString('fr-FR');
+  if (typeof v === 'object') return JSON.stringify(v);
+  return String(v);
+};
+
+/**
+ * Formate une valeur numérique avec séparateurs locaux.
+ * Utilisé dans les cartes stats.
+ */
+export const formatStatValue = (v: unknown): string => {
+  if (v === null || v === undefined) return '—';
+  if (typeof v === 'number') return v.toLocaleString('fr-FR');
+  if (typeof v === 'string') {
+    const cleaned = v.replace(/[^0-9.-]+/g, '');
+    const n = Number(cleaned);
+    if (!Number.isNaN(n) && /^[-0-9,.]+$/.test(v.trim())) return n.toLocaleString('fr-FR');
+    return v;
+  }
+  if (typeof v === 'object') return JSON.stringify(v);
+  return String(v);
+};
+
+/**
+ * Génère un CSV robuste depuis un tableau d'objets.
+ * Gère les valeurs null/undefined, les virgules, les guillemets.
+ */
+export const arrayToCSV = (arr: Record<string, unknown>[]): string => {
+  if (!arr?.length) return '';
+  const keys = Array.from(
+    arr.reduce<Set<string>>((acc, row) => {
+      Object.keys(row ?? {}).forEach(k => acc.add(k));
+      return acc;
+    }, new Set<string>())
+  );
+  const escape = (v: unknown) => {
+    const s = safeStr(v);
+    return `"${s.replace(/"/g, '""')}"`;
+  };
+  return [
+    keys.join(','),
+    ...arr.map(row => keys.map(k => escape(row[k])).join(',')),
+  ].join('\n');
+};
+
+/**
+ * Détecte le type de graphique Recharts à rendre.
+ * Priorité : meta.type / meta.chartType → format string → détection auto structure.
+ * Couvre tous les formats produits par le workflow n8n v2.
+ */
+export const detectChartType = (
+  data: Record<string, unknown>[],
+  meta: ChartMeta,
+  format: string
+): 'bar' | 'area' | 'pie' | 'composed' => {
+  // 1. Priorité aux instructions explicites de la méta chart_config
+  const explicitType = (meta.type ?? meta.chartType ?? '').toLowerCase();
+  if (explicitType === 'bar') return 'bar';
+  if (explicitType === 'pie' || explicitType === 'donut') return 'pie';
+  if (explicitType === 'area' || explicitType === 'line') return 'area';
+  if (explicitType === 'composed') return 'composed';
+
+  // 2. Déduction depuis le nom du format n8n
+  if (format === 'bar_chart') return 'bar';
+  if (format === 'histogram') return 'bar'; // histogramme → rendu BarChart avec barGap=0
+  if (format === 'donut_chart') return 'pie';
+  if (format === 'multi_chart') return 'composed';
+  if (['advanced_chart', 'advancedchart', 'chart_advanced'].includes(format)) return 'bar';
+
+  // 3. Détection auto : 2 colonnes (string + number) → donut
+  const keys = Object.keys(data[0] ?? {});
+  if (keys.length === 2) {
+    const sample = data[0];
+    const v1 = sample[keys[0]]; const v2 = sample[keys[1]];
+    if (typeof v1 === 'string' && (typeof v2 === 'number' || !isNaN(Number(v2)))) return 'pie';
+  }
+
+  // 4. Défaut : courbe area
+  return 'area';
+};
+
+/**
+ * Nettoie et parse la réponse IA, qui peut être du JSON brut ou du texte.
+ * Retourne toujours un objet safe avec text, format et rawResults.
+ */
+export const parseStructuredFormatted = (formatted: string): ParsedStructured => {
+  if (!formatted || typeof formatted !== 'string') {
+    return { text: formatted || '', format: null };
+  }
+
+  // Supprime les balises markdown de code fences et préfixes courants
+  let trimmed = formatted.trim()
+    .replace(/^```(?:json|js|text)?\s*/i, '')
+    .replace(/\s*```\s*$/i, '')
+    .replace(/^json\s+/i, '')
+    .trim();
+
+  if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) {
+    return { text: trimmed, format: null };
+  }
+
+  try {
+    const parsed: unknown = JSON.parse(trimmed);
+
+    // Cas tableau racine → format list ou table
+    if (Array.isArray(parsed)) {
+      return { text: null, format: 'list', rawResults: parsed };
+    }
+
+    if (typeof parsed !== 'object' || parsed === null) {
+      return { text: trimmed, format: null };
+    }
+
+    const obj = parsed as Record<string, unknown>;
+
+    // Extraction du texte principal
+    const TEXT_KEYS = ['response', 'formattedResponse', 'formatted_response', 'finalresponse',
+      'finalResponse', 'final_response', 'final', 'message', 'text', 'summary'];
+    const textKey = TEXT_KEYS.find(k => obj[k] !== undefined && obj[k] !== null && String(obj[k]).trim().length > 0);
+    let text: string | null = textKey ? safeStr(obj[textKey]) : null;
+
+    // Extraction des données brutes
+    let rawResults = (obj.rawResults ?? obj.data ?? obj.results ?? obj.rows) as any[] | undefined;
+    if (Array.isArray(rawResults)) {
+      // Supprime les métadonnées internes de chaque ligne
+      rawResults = rawResults.map(row => {
+        if (row && typeof row === 'object' && '_metadata' in row) {
+          const { _metadata, ...rest } = row as Record<string, unknown>;
+          return rest;
+        }
+        return row;
+      });
+    }
+
+    const format = (obj.format ?? obj.type ?? (Array.isArray(rawResults) ? 'table' : null)) as string | null;
+
+    if (!text && rawResults) {
+      text = safeStr(obj.summary ?? obj.title) || `Résultats : ${Array.isArray(rawResults) ? rawResults.length : 1}`;
+    }
+
+    if (!text) {
+      const keys = Object.keys(obj).filter(k => !['data', 'results', 'rows', 'rawResults'].includes(k));
+      text = keys.length
+        ? keys.map(k => `**${k}** : ${typeof obj[k] === 'object' ? JSON.stringify(obj[k]) : safeStr(obj[k])}`).join('\n')
+        : 'Réponse structurée reçue.';
+    }
+
+    return { text, format, rawResults };
+  } catch {
+    return { text: 'Réponse structurée (format non exploitable).', format: null };
+  }
+};
+
+/**
+ * Extrait le premier tableau Markdown d'un texte et le convertit en array d'objets.
+ * Utile pour proposer l'export CSV/XLSX sur les tableaux inline.
+ */
+export const parseMarkdownTableToData = (content: string | undefined): Record<string, string>[] | null => {
+  if (!content) return null;
+  const lines = content.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const next = lines[i + 1] ?? '';
+    if (lines[i].includes('|') && /(^|\s)\|?\s*[-:]{3,}/.test(next.replace(/\s*\|\s*/g, '|'))) {
+      const splitRow = (l: string) => {
+        let cells = l.split('|').map(c => c.trim());
+        if (cells[0] === '') cells = cells.slice(1);
+        if (cells[cells.length - 1] === '') cells = cells.slice(0, -1);
+        return cells;
+      };
+      const tableLines: string[] = [lines[i], next];
+      let j = i + 2;
+      while (j < lines.length && lines[j].includes('|')) tableLines.push(lines[j++]);
+      const header = splitRow(tableLines[0]);
+      return tableLines.slice(2).map(l => {
+        const cells = splitRow(l);
+        return Object.fromEntries(header.map((h, ci) => [h || `col${ci}`, cells[ci] ?? '']));
+      });
+    }
+  }
+  return null;
+};
+
+// ─────────────────────────────────────────────
+// Téléchargements
+// ─────────────────────────────────────────────
+
+const downloadBlob = (blob: Blob, filename: string) => {
+  const url = URL.createObjectURL(blob);
+  const a = Object.assign(document.createElement('a'), { href: url, download: filename });
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+};
+
+const exportCSV = (data: Record<string, unknown>[], filename = 'export.csv') => {
+  try {
+    downloadBlob(new Blob([arrayToCSV(data)], { type: 'text/csv;charset=utf-8;' }), filename);
+  } catch (e) { console.error('CSV export error', e); }
+};
+
+const exportXLSX = async (data: Record<string, unknown>[], filename = 'export.xlsx') => {
+  try {
+    // Importation dynamique : graceful degradation vers CSV si xlsx absent
+    const XLSX = (await import('xlsx')).default as any;
+    const ws = XLSX.utils.json_to_sheet(data ?? []);
+    const wb = { Sheets: { data: ws }, SheetNames: ['data'] };
+    downloadBlob(
+      new Blob([XLSX.write(wb, { bookType: 'xlsx', type: 'array' })], { type: 'application/octet-stream' }),
+      filename
+    );
+  } catch {
+    console.warn('xlsx absent, fallback CSV');
+    exportCSV(data, filename.replace(/\.xlsx$/i, '.csv'));
+  }
+};
+
+const exportChartPNG = async (el: HTMLDivElement | null, filename = 'chart.png') => {
+  if (!el) return;
+  const svg = el.querySelector('svg') as SVGSVGElement | null;
+  if (!svg) return;
+  try {
+    const { width, height } = svg.getBoundingClientRect();
+    const canvas = Object.assign(document.createElement('canvas'), { width: width * 2, height: height * 2 });
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    const blob = new Blob([new XMLSerializer().serializeToString(svg)], { type: 'image/svg+xml;charset=utf-8' });
+    const img = new Image();
+    const url = URL.createObjectURL(blob);
+    await new Promise<void>((res, rej) => { img.onload = () => res(); img.onerror = rej; img.src = url; });
+    ctx.scale(2, 2);
+    ctx.drawImage(img, 0, 0);
+    URL.revokeObjectURL(url);
+    canvas.toBlob(b => { if (b) downloadBlob(b, filename); }, 'image/png');
+  } catch (e) { console.error('PNG export error', e); }
+};
+
+// ─────────────────────────────────────────────
+// Sous-composant : Tooltip Recharts robuste
+// ─────────────────────────────────────────────
+
+/** Tooltip Recharts : jamais d'objet affiché, tout est stringifié */
+const SafeTooltip = memo(({ active, payload, label }: any) => {
+  if (!active || !payload?.length) return null;
+  return (
+    <div
+      role="tooltip"
+      style={{
+        background: 'rgba(15,23,42,0.95)',
+        backdropFilter: 'blur(8px)',
+        borderRadius: 10,
+        padding: '8px 12px',
+        color: '#f1f5f9',
+        fontSize: 11,
+        fontWeight: 600,
+        border: '1px solid rgba(99,102,241,0.3)',
+        boxShadow: '0 4px 20px rgba(0,0,0,0.4)',
+        maxWidth: 220,
+      }}
+    >
+      {label !== undefined && (
+        <div style={{ fontWeight: 800, marginBottom: 4, color: '#94a3b8', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+          {safeStr(label)}
+        </div>
+      )}
+      {payload.map((p: any, i: number) => (
+        <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
+          <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: p.color ?? '#6366f1', flexShrink: 0 }} />
+          <span style={{ color: '#94a3b8', fontSize: 10 }}>{safeStr(p.name)}:</span>
+          <span style={{ fontWeight: 900 }}>{safeStr(p.value)}</span>
+        </div>
+      ))}
+    </div>
+  );
+});
+SafeTooltip.displayName = 'SafeTooltip';
+
+// ─────────────────────────────────────────────
+// Sous-composant : Bouton d'export
+// ─────────────────────────────────────────────
+
+interface ExportButtonProps {
+  label: string;
+  icon: React.ReactNode;
+  onClick: () => void;
+  dark?: boolean;
+}
+
+const ExportButton = memo(({ label, icon, onClick, dark }: ExportButtonProps) => (
+  <button
+    aria-label={`Exporter ${label}`}
+    onClick={onClick}
+    className={`
+      inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-bold
+      transition-all duration-150 active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500
+      ${dark
+        ? 'bg-white/10 border border-white/20 text-white hover:bg-white/20'
+        : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 shadow-sm'}
+    `}
+  >
+    {icon}
+    <span>{label}</span>
+  </button>
+));
+ExportButton.displayName = 'ExportButton';
+
+// ─────────────────────────────────────────────
+// Sous-composant : VisualBlock (graphiques, tableaux, stats, listes)
+// ─────────────────────────────────────────────
+
+interface VisualBlockProps {
+  msg: Message;
+  chartRef: (el: HTMLDivElement | null) => void;
+  exportKey: string;
+}
+
+const VisualBlock = memo(({ msg, chartRef, exportKey }: VisualBlockProps) => {
+  const { format, rawResults, downloadUrl } = msg;
+
+  // ── Guard : sort SAUF pour les formats document ────────────────────────
+  // Les documents (document_html, document_invoice, etc.) peuvent ne pas avoir
+  // de rawResults mais avoir documentData → il ne faut pas les bloquer ici.
+  const isDocFormat = format === 'document_html'
+    || ['document_invoice','document_delivery','document_payslip','document_report'].includes(format);
+
+  if (!rawResults?.length && !isDocFormat) return null;
+
+  // ── TABLE ──────────────────────────────────
+  if (format === 'table') {
+    const cols = Object.keys(rawResults[0]);
+    return (
+      <div className="mt-3 border border-slate-100 rounded-2xl overflow-hidden shadow-sm bg-white">
+        <div className="flex justify-end gap-2 p-2 bg-slate-50 border-b border-slate-100">
+          <ExportButton label="CSV" icon={<Download size={11} />} onClick={() => exportCSV(rawResults, `table-${exportKey}.csv`)} />
+          <ExportButton label="XLSX" icon={<TableIcon size={11} />} onClick={() => exportXLSX(rawResults, `table-${exportKey}.xlsx`)} />
+        </div>
+        <div className="overflow-x-auto max-h-56 overscroll-contain" style={{ WebkitOverflowScrolling: 'touch' }}>
+          <table className="w-full text-left text-[11px]" role="table">
+            <thead className="bg-slate-50 sticky top-0 z-10">
+              <tr>
+                {cols.map(c => (
+                  <th key={c} scope="col" className="px-3 py-2 font-black uppercase text-[9px] text-slate-400 tracking-wider whitespace-nowrap">
+                    {c}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-50">
+              {rawResults.map((row, i) => (
+                <tr key={i} className="hover:bg-indigo-50/40 transition-colors">
+                  {cols.map(c => (
+                    <td key={c} className="px-3 py-2 font-medium text-slate-800 whitespace-nowrap">
+                      {safeStr(row[c])}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div className="px-3 py-1.5 bg-slate-50 border-t border-slate-100 text-[9px] text-slate-400 font-bold">
+          {rawResults.length} ligne{rawResults.length > 1 ? 's' : ''}
+        </div>
+      </div>
+    );
+  }
+
+  // ── CHART (tous formats graphiques) ────────
+  // Reconnaît : chart, bar_chart, donut_chart, multi_chart, heatmap,
+  //             advanced_chart, advancedchart, chart_advanced (rétrocompat)
+  const ALL_CHART_FORMATS: MessageFormat[] = [
+    'chart', 'bar_chart', 'histogram', 'donut_chart', 'multi_chart', 'heatmap',
+    'advanced_chart', 'advancedchart', 'chart_advanced',
+  ];
+  if ((ALL_CHART_FORMATS as string[]).includes(format)) {
+    // chart_config provient de metadata.chart_config (workflow v2) ou directement de metadata
+    const chartCfg: ChartMeta = (msg.metadata?.chart_config ?? msg.metadata ?? {}) as ChartMeta;
+    const keys = Object.keys(rawResults[0]);
+
+    // xAxis : priorité chart_config, sinon 1ère colonne
+    const xKey = chartCfg.xAxis ?? keys[0];
+
+    // yAxis : priorité chart_config.yAxis, puis series (objet ou string[])
+    const rawSeries = chartCfg.series;
+    const rawY = chartCfg.yAxis;
+    let yKeys: string[];
+    if (Array.isArray(rawSeries) && rawSeries.length) {
+      // series peut être Array<{key, type, color, label}> ou string[]
+      yKeys = (rawSeries as any[]).map((s: any) => (typeof s === 'string' ? s : s.key));
+    } else if (Array.isArray(rawY)) {
+      yKeys = rawY as string[];
+    } else if (typeof rawY === 'string') {
+      yKeys = [rawY];
+    } else {
+      // Fallback : toutes les colonnes numériques sauf xKey
+      yKeys = keys.filter(k => k !== xKey).slice(0, 3);
+      if (!yKeys.length) yKeys = [keys[1] ?? keys[0]];
+    }
+
+    const chartType = detectChartType(rawResults, chartCfg, format);
+    const isHorizontal = chartCfg.horizontal === true;
+    const isHistogram  = format === 'histogram'; // barres jointives, axe continu
+    const colors = chartCfg.colors?.length ? chartCfg.colors : CHART_COLORS;
+
+    // Colonne secondaire pour la ligne de tendance des histogrammes
+    const secondaryKey = chartCfg.secondaryAxis ?? null;
+    const showSecondLine = chartCfg.showSecondaryLine === true && !!secondaryKey;
+
+    // Nettoyage des données :
+    // - xKey → string safe
+    // - yKeys + secondaryKey → nombre (parseFloat, fallback 0)
+    const cleanedData = rawResults.map(row => {
+      const out: Record<string, unknown> = { [xKey]: safeStr(row[xKey]) };
+      for (const y of yKeys) {
+        const v = row[y];
+        out[y] = typeof v === 'number' ? v : (parseFloat(String(v)) || 0);
+      }
+      // Colonne secondaire (ligne de tendance histogramme)
+      if (secondaryKey && row[secondaryKey] !== undefined) {
+        const sv = row[secondaryKey];
+        out[secondaryKey] = typeof sv === 'number' ? sv : (parseFloat(String(sv)) || 0);
+      }
+      return out;
+    });
+
+    // Hauteur adaptive : plus de données = plus de place
+    const containerH = isHorizontal
+      ? Math.max(220, cleanedData.length * 36 + 60)
+      : isHistogram
+        ? Math.max(260, cleanedData.length * 30 + 60)
+        : 240;
+
+    // Formatter axe des valeurs
+    const fmtValue = (v: number) =>
+      v >= 1_000_000 ? `${(v / 1_000_000).toFixed(1)}M`
+      : v >= 1_000 ? `${(v / 1_000).toFixed(0)}k`
+      : safeStr(v);
+
+    // Label personnalisé centré au-dessus de chaque barre (histogramme / bar_chart)
+    const CustomBarLabel = ({ x, y, width, value }: any) => {
+      if (!chartCfg.dataLabels || value === 0) return null;
+      return (
+        <text
+          x={(x ?? 0) + (width ?? 0) / 2}
+          y={(y ?? 0) - 4}
+          fill="#94a3b8"
+          fontSize={8}
+          fontWeight={700}
+          textAnchor="middle"
+        >
+          {fmtValue(value)}
+        </text>
+      );
+    };
+
+    return (
+      <div
+        ref={chartRef}
+        className="mt-3 p-3 bg-slate-900 rounded-2xl border border-slate-800 relative overflow-hidden"
+        style={{ height: containerH }}
+        aria-label="Graphique d'analyse"
+      >
+        {/* ── Header ── */}
+        <div className="flex items-center justify-between mb-2 flex-shrink-0">
+          <p className="text-[8px] font-black text-indigo-400 uppercase tracking-widest flex items-center gap-1">
+            <BarChart3 size={9} />
+            {format === 'histogram'   ? 'Distribution / Histogramme'
+              : format === 'bar_chart'  ? 'Graphique Barres'
+              : format === 'donut_chart' ? 'Répartition'
+              : format === 'multi_chart' ? 'Multi-Séries'
+              : 'Analyse Graphique'}
+          </p>
+          <div className="flex gap-1">
+            <ExportButton dark label="CSV"  icon={<Download size={10} />} onClick={() => exportCSV(rawResults,  `chart-${exportKey}.csv`)} />
+            <ExportButton dark label="XLSX" icon={<TableIcon size={10} />} onClick={() => exportXLSX(rawResults, `chart-${exportKey}.xlsx`)} />
+          </div>
+        </div>
+
+        {/* ── Recharts ── */}
+        <div style={{ width: '100%', height: containerH - 44 }}>
+          <ResponsiveContainer width="100%" height="100%">
+
+            {/* ── HISTOGRAMME — BarChart sans gap avec ligne de tendance optionnelle ── */}
+            {chartType === 'bar' && isHistogram ? (
+              <ComposedChart
+                data={cleanedData}
+                margin={{ top: 18, right: showSecondLine ? 32 : 8, bottom: 28, left: 0 }}
+                barCategoryGap={0}   // barres jointives = style histogramme
+                barGap={0}
+              >
+                <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
+                <XAxis
+                  dataKey={xKey}
+                  tick={{ fontSize: 8, fill: '#94a3b8', fontWeight: 600 }}
+                  axisLine={false} tickLine={false}
+                  interval={0}
+                  angle={cleanedData.length > 5 ? -25 : 0}
+                  textAnchor={cleanedData.length > 5 ? 'end' : 'middle'}
+                  height={cleanedData.length > 5 ? 42 : 22}
+                />
+                <YAxis
+                  yAxisId="left"
+                  tick={{ fontSize: 8, fill: '#64748b' }}
+                  axisLine={false} tickLine={false}
+                  tickFormatter={fmtValue}
+                />
+                {/* Axe Y droit pour la ligne secondaire (ex: montant_total) */}
+                {showSecondLine && (
+                  <YAxis
+                    yAxisId="right"
+                    orientation="right"
+                    tick={{ fontSize: 8, fill: '#22d3ee' }}
+                    axisLine={false} tickLine={false}
+                    tickFormatter={fmtValue}
+                  />
+                )}
+                <Tooltip content={<SafeTooltip />} cursor={{ fill: 'rgba(99,102,241,0.12)' }} />
+                {showSecondLine && <Legend iconSize={8} wrapperStyle={{ fontSize: 9, color: '#94a3b8', fontWeight: 700 }} />}
+
+                {/* Barres de fréquence (histogramme) */}
+                {yKeys.map((yk, i) => (
+                  <Bar
+                    key={yk}
+                    dataKey={yk}
+                    yAxisId="left"
+                    fill={colors[i % colors.length]}
+                    radius={0}              // coins droits = histogramme
+                    maxBarSize={999}        // occupe toute la largeur disponible
+                    label={chartCfg.dataLabels ? <CustomBarLabel /> : undefined}
+                  >
+                    {/* Dégradé vertical pour chaque barre */}
+                    {cleanedData.map((_, ci) => (
+                      <Cell
+                        key={`cell-${ci}`}
+                        fill={`url(#hist-grad-${exportKey}-${i})`}
+                        stroke={colors[i % colors.length]}
+                        strokeWidth={1}
+                        strokeOpacity={0.5}
+                      />
+                    ))}
+                  </Bar>
+                ))}
+
+                {/* Ligne de tendance secondaire (montant_total, moyenne, etc.) */}
+                {showSecondLine && secondaryKey && (
+                  <Line
+                    type="monotone"
+                    dataKey={secondaryKey}
+                    yAxisId="right"
+                    stroke="#22d3ee"
+                    strokeWidth={2}
+                    dot={{ r: 3, fill: '#22d3ee', strokeWidth: 0 }}
+                    activeDot={{ r: 5, strokeWidth: 0 }}
+                    name={secondaryKey}
+                  />
+                )}
+
+                {/* Définitions des dégradés */}
+                <defs>
+                  {yKeys.map((_, i) => (
+                    <linearGradient key={i} id={`hist-grad-${exportKey}-${i}`} x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%"   stopColor={colors[i % colors.length]} stopOpacity={0.9} />
+                      <stop offset="100%" stopColor={colors[i % colors.length]} stopOpacity={0.55} />
+                    </linearGradient>
+                  ))}
+                </defs>
+              </ComposedChart>
+
+            ) : chartType === 'bar' ? (
+            /* ── BAR_CHART classique (vertical ou horizontal) ── */
+              <BarChart
+                data={cleanedData}
+                layout={isHorizontal ? 'vertical' : 'horizontal'}
+                margin={{ top: chartCfg.dataLabels ? 18 : 4, right: 24, bottom: isHorizontal ? 4 : 20, left: isHorizontal ? 90 : 0 }}
+              >
+                <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" horizontal={!isHorizontal} vertical={isHorizontal} />
+                {isHorizontal ? (
+                  <>
+                    <XAxis
+                      type="number"
+                      tick={{ fontSize: 8, fill: '#64748b' }}
+                      axisLine={false} tickLine={false}
+                      tickFormatter={fmtValue}
+                    />
+                    <YAxis
+                      type="category"
+                      dataKey={xKey}
+                      tick={{ fontSize: 9, fill: '#94a3b8', fontWeight: 700 }}
+                      axisLine={false} tickLine={false}
+                      width={85}
+                      tickFormatter={(v: string) => v.length > 18 ? v.slice(0, 17) + '…' : v}
+                    />
+                  </>
+                ) : (
+                  <>
+                    <XAxis
+                      dataKey={xKey}
+                      tick={{ fontSize: 8, fill: '#94a3b8', fontWeight: 600 }}
+                      axisLine={false} tickLine={false}
+                      interval={0}
+                      angle={cleanedData.length > 6 ? -30 : 0}
+                      textAnchor={cleanedData.length > 6 ? 'end' : 'middle'}
+                      height={cleanedData.length > 6 ? 40 : 20}
+                      tickFormatter={(v: string) => v.length > 12 ? v.slice(0, 11) + '…' : v}
+                    />
+                    <YAxis
+                      tick={{ fontSize: 8, fill: '#64748b' }}
+                      axisLine={false} tickLine={false}
+                      tickFormatter={fmtValue}
+                    />
+                  </>
+                )}
+                <Tooltip content={<SafeTooltip />} cursor={{ fill: 'rgba(99,102,241,0.08)' }} />
+                {yKeys.map((yk, i) => (
+                  <Bar
+                    key={yk}
+                    dataKey={yk}
+                    fill={colors[i % colors.length]}
+                    radius={isHorizontal ? [0, 4, 4, 0] : [4, 4, 0, 0]}
+                    maxBarSize={32}
+                    label={chartCfg.dataLabels ? <CustomBarLabel /> : undefined}
+                  />
+                ))}
+              </BarChart>
+
+            ) : chartType === 'pie' ? (
+            /* ── DONUT / PIE ── */
+              <PieChart>
+                <Tooltip content={<SafeTooltip />} />
+                <Legend iconSize={8} wrapperStyle={{ fontSize: 9, color: '#94a3b8', fontWeight: 700 }} />
+                <Pie
+                  data={cleanedData}
+                  dataKey={chartCfg.valueKey ?? yKeys[0]}
+                  nameKey={chartCfg.nameKey ?? xKey}
+                  cx="50%" cy="50%"
+                  outerRadius="65%"
+                  innerRadius="35%"
+                  paddingAngle={3}
+                  label={({ name, percent }: any) =>
+                    percent > 0.05 ? `${safeStr(name).slice(0, 10)} ${(percent * 100).toFixed(0)}%` : ''
+                  }
+                  labelLine={false}
+                >
+                  {cleanedData.map((_, i) => (
+                    <Cell key={`cell-${i}`} fill={colors[i % colors.length]} />
+                  ))}
+                </Pie>
+              </PieChart>
+
+            ) : chartType === 'composed' ? (
+            /* ── MULTI-SÉRIES / COMPOSED ── */
+              (() => {
+                // series enrichies depuis chart_config.series si dispo
+                const seriesCfg = Array.isArray(chartCfg.series) && typeof (chartCfg.series as any[])[0] === 'object'
+                  ? (chartCfg.series as any[])
+                  : yKeys.map((k, i) => ({ key: k, type: 'bar', color: colors[i % colors.length], label: k }));
+
+                return (
+                  <ComposedChart data={cleanedData} margin={{ top: 4, right: 24, bottom: 20, left: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
+                    <XAxis dataKey={xKey} tick={{ fontSize: 8, fill: '#94a3b8', fontWeight: 600 }} axisLine={false} tickLine={false}
+                      tickFormatter={(v: string) => v.length > 10 ? v.slice(0, 9) + '…' : v} />
+                    <YAxis yAxisId="left"  tick={{ fontSize: 8, fill: '#64748b' }} axisLine={false} tickLine={false} tickFormatter={fmtValue} />
+                    {chartCfg.dual_axis && (
+                      <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 8, fill: '#64748b' }} axisLine={false} tickLine={false} />
+                    )}
+                    <Tooltip content={<SafeTooltip />} />
+                    <Legend iconSize={8} wrapperStyle={{ fontSize: 9, color: '#94a3b8', fontWeight: 700 }} />
+                    {seriesCfg.map((s: any, i: number) => {
+                      const yId = s.yAxisId ?? 'left';
+                      const col = s.color ?? colors[i % colors.length];
+                      if (s.type === 'line') {
+                        return <Line key={s.key} type="monotone" dataKey={s.key} stroke={col} strokeWidth={2} dot={false} yAxisId={yId} name={s.label ?? s.key} />;
+                      }
+                      if (s.type === 'area') {
+                        return (
+                          <Area key={s.key} type="monotone" dataKey={s.key} stroke={col}
+                            fill={`url(#grad-${exportKey}-${i})`} strokeWidth={2} dot={false}
+                            yAxisId={yId} name={s.label ?? s.key} />
+                        );
+                      }
+                      return <Bar key={s.key} dataKey={s.key} fill={col} radius={[4, 4, 0, 0]} maxBarSize={28} yAxisId={yId} name={s.label ?? s.key} />;
+                    })}
+                  </ComposedChart>
+                );
+              })()
+
+            ) : (
+            /* ── AREA / LINE (défaut) ── */
+              <AreaChart data={cleanedData} margin={{ top: 4, right: 24, bottom: 20, left: 0 }}>
+                <defs>
+                  {yKeys.map((yk, i) => (
+                    <linearGradient key={yk} id={`grad-${exportKey}-${i}`} x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%"  stopColor={colors[i % colors.length]} stopOpacity={0.3} />
+                      <stop offset="95%" stopColor={colors[i % colors.length]} stopOpacity={0} />
+                    </linearGradient>
+                  ))}
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
+                <XAxis dataKey={xKey} tick={{ fontSize: 8, fill: '#94a3b8', fontWeight: 600 }} axisLine={false} tickLine={false}
+                  tickFormatter={(v: string) => v.length > 10 ? v.slice(0, 9) + '…' : v} />
+                <YAxis tick={{ fontSize: 8, fill: '#64748b' }} axisLine={false} tickLine={false} tickFormatter={fmtValue} />
+                <Tooltip content={<SafeTooltip />} />
+                {yKeys.map((yk, i) => (
+                  <Area key={yk} type={chartCfg.smooth !== false ? 'monotone' : 'linear'} dataKey={yk}
+                    stroke={colors[i % colors.length]} fill={`url(#grad-${exportKey}-${i})`}
+                    strokeWidth={2} dot={false} activeDot={{ r: 4, strokeWidth: 0 }} />
+                ))}
+              </AreaChart>
+            )}
+
+          </ResponsiveContainer>
+        </div>
+      </div>
+    );
+  }
+
+  // ── STATS ──────────────────────────────────
+  if (format === 'stats') {
+    const items: Array<{ label: string; value: unknown }> = [];
+    const raw = rawResults;
+    if (Array.isArray(raw)) {
+      for (const s of raw) {
+        if (s && typeof s === 'object') {
+          const keys = Object.keys(s);
+          if ('label' in s || 'value' in s) {
+            items.push({ label: safeStr((s as any).label ?? (s as any).name ?? (s as any).title), value: (s as any).value ?? (s as any).v ?? (s as any).count ?? (s as any).amount });
+          } else if (keys.length === 1) {
+            items.push({ label: keys[0], value: (s as any)[keys[0]] });
+          } else {
+            items.push({ label: safeStr((s as any).title ?? (s as any).name ?? keys[0]), value: (s as any).value ?? (s as any)[keys[1] ?? keys[0]] });
+          }
+        } else {
+          items.push({ label: `#${items.length + 1}`, value: s });
+        }
+      }
+    } else if (raw && typeof raw === 'object') {
+      for (const k of Object.keys(raw as object)) {
+        items.push({ label: k, value: (raw as any)[k] });
+      }
+    }
+
+    return (
+      <div className="mt-3 grid grid-cols-2 gap-2.5">
+        {items.map((it, idx) => {
+          const numVal = typeof it.value === 'number' ? it.value : Number(String(it.value).replace(/[^0-9.-]+/g, ''));
+          const isNum = !Number.isNaN(numVal);
+          return (
+            <div key={idx} className="p-3 bg-gradient-to-br from-indigo-50 to-violet-50 border border-indigo-100 rounded-xl">
+              <div className="text-[8px] font-black text-indigo-400 uppercase tracking-widest mb-1">{it.label}</div>
+              <div className="text-base font-extrabold text-indigo-900">{formatStatValue(it.value)}</div>
+              {isNum && (
+                <div className="mt-1.5 h-1.5 w-full rounded-full bg-indigo-100 overflow-hidden">
+                  <div
+                    className="h-full bg-gradient-to-r from-indigo-400 to-violet-500 rounded-full transition-all duration-700"
+                    style={{ width: `${Math.min(100, Math.abs(numVal))}%` }}
+                  />
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
+
+  // ── LIST ───────────────────────────────────
+  if (format === 'list') {
+    return (
+      <ul className="mt-2 space-y-1" role="list">
+        {rawResults.map((item, idx) => (
+          <li key={idx} className="flex items-start gap-2 text-[11px] font-medium text-slate-700">
+            <span className="mt-1 w-1.5 h-1.5 rounded-full bg-indigo-400 flex-shrink-0" />
+            {safeStr(item)}
+          </li>
+        ))}
+      </ul>
+    );
+  }
+
+  // ── EXCEL / téléchargement ─────────────────
+  if (format === 'excel') {
+    return (
+      <a
+        href={downloadUrl ?? '#'}
+        className="mt-2 inline-flex items-center gap-2 text-indigo-600 font-bold text-[11px] hover:text-indigo-800 underline"
+        download
+        aria-label="Télécharger le fichier Excel"
+      >
+        <Download size={13} /> Télécharger le fichier
+      </a>
+    );
+  }
+
+  // ── DOCUMENT HTML (facture, bon de livraison, rapport…) ──────────────
+  if (format === 'document_html' || ['document_invoice','document_delivery','document_payslip','document_report'].includes(format)) {
+    const docTitle: string = msg.metadata?.title ?? msg.metadata?.document_type ?? 'Document';
+    const refNum: string   = msg.metadata?.ref ?? '';
+    const docHtml: string | undefined = (msg as any).documentHtml ?? msg.metadata?.documentHtml;
+
+    // documentData : données structurées pour DocumentPreview React
+    // Priorité : champ direct > metadata.documentData (rechargement historique)
+    const docData = (msg as any).documentData ?? msg.metadata?.documentData;
+
+    // ── Impression PDF via le HTML brut ──────────────────────────────────
+    const printDoc = () => {
+      if (!docHtml) return;
+      const win = window.open('', '_blank');
+      if (!win) return;
+      win.document.write(docHtml);
+      win.document.close();
+      win.focus();
+      setTimeout(() => win.print(), 500);
+    };
+
+    // ── Téléchargement HTML ───────────────────────────────────────────────
+    const downloadDoc = () => {
+      if (!docHtml) return;
+      const blob = new Blob([docHtml], { type: 'text/html;charset=utf-8' });
+      downloadBlob(blob, `${docTitle.replace(/\s+/g, '_')}_${refNum || exportKey}.html`);
+    };
+
+    // ── Cas 1 : DocumentPreview React disponible (données structurées) ────
+    // Rendu natif avec le design exact de l'application, persistant au rechargement
+    if (docData?.sale && docData?.tenant) {
+      return (
+        <div className="mt-3 rounded-2xl overflow-hidden border border-slate-200 shadow-sm">
+          {/* Barre d'actions */}
+          <div className="flex items-center justify-between px-3 py-2 bg-slate-800 flex-shrink-0">
+            <div className="flex items-center gap-2">
+              <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">
+                📄 {docTitle}
+              </span>
+              {refNum && (
+                <span className="text-[8px] text-slate-500 font-mono bg-slate-700 px-2 py-0.5 rounded">
+                  #{refNum}
+                </span>
+              )}
+            </div>
+            <div className="flex gap-1.5">
+              {docHtml && (
+                <button
+                  onClick={printDoc}
+                  aria-label="Imprimer / Exporter PDF"
+                  className="inline-flex items-center gap-1 px-2.5 py-1 bg-indigo-600 text-white text-[9px] font-bold rounded-lg hover:bg-indigo-500 transition"
+                >
+                  🖨️ PDF
+                </button>
+              )}
+              {docHtml && (
+                <button
+                  onClick={downloadDoc}
+                  aria-label="Télécharger HTML"
+                  className="inline-flex items-center gap-1 px-2 py-1 bg-white/10 border border-white/20 text-white text-[9px] font-bold rounded-lg hover:bg-white/20 transition"
+                >
+                  <Download size={10} /> HTML
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* DocumentPreview natif — même design que l'appli, scroll interne */}
+          <div
+            className="overflow-y-auto bg-slate-100"
+            style={{ maxHeight: 520 }}
+          >
+            <div style={{ transform: 'scale(0.72)', transformOrigin: 'top center', width: '139%' }}>
+              <DocumentPreview
+                type={docData.type}
+                sale={docData.sale}
+                tenant={docData.tenant}
+                currency={docData.currency || 'FCFA'}
+              />
+            </div>
+          </div>
+
+          <div className="px-3 py-1.5 bg-slate-50 border-t border-slate-100 text-[8px] text-slate-400 font-medium">
+            💡 Cliquez sur <strong>PDF</strong> pour imprimer ou exporter via votre navigateur.
+          </div>
+        </div>
+      );
+    }
+
+    // ── Cas 2 : HTML brut seulement (fallback iframe) ─────────────────────
+    if (docHtml) {
+      return (
+        <div className="mt-3 rounded-2xl overflow-hidden border border-slate-200 shadow-sm">
+          <div className="flex items-center justify-between px-3 py-2 bg-slate-800">
+            <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">📄 {docTitle}</span>
+            <div className="flex gap-1.5">
+              <button onClick={printDoc} className="inline-flex items-center gap-1 px-2.5 py-1 bg-indigo-600 text-white text-[9px] font-bold rounded-lg hover:bg-indigo-500 transition">
+                🖨️ PDF
+              </button>
+              <button onClick={downloadDoc} className="inline-flex items-center gap-1 px-2 py-1 bg-white/10 border border-white/20 text-white text-[9px] font-bold rounded-lg hover:bg-white/20 transition">
+                <Download size={10} /> HTML
+              </button>
+            </div>
+          </div>
+          <div className="relative bg-slate-100" style={{ height: 400 }}>
+            <iframe
+              srcDoc={docHtml}
+              title={`Aperçu — ${docTitle}`}
+              className="w-full h-full border-0"
+              sandbox="allow-same-origin"
+            />
+          </div>
+          <div className="px-3 py-1.5 bg-slate-50 border-t border-slate-100 text-[8px] text-slate-400">
+            💡 Cliquez sur <strong>PDF</strong> pour exporter.
+          </div>
+        </div>
+      );
+    }
+
+    // ── Cas 3 : Aucune donnée — tableau brut ─────────────────────────────
+    if (rawResults?.length) {
+      const cols = Object.keys(rawResults[0]);
+      return (
+        <div className="mt-3 border border-indigo-100 rounded-xl overflow-hidden">
+          <div className="px-3 py-2 bg-indigo-50 border-b border-indigo-100 text-[10px] font-black text-indigo-600 uppercase">
+            📄 {docTitle}
+          </div>
+          <table className="w-full text-left text-[11px]">
+            <thead className="bg-slate-50"><tr>{cols.map(c => <th key={c} className="px-3 py-1.5 font-black text-[9px] text-slate-400 uppercase">{c}</th>)}</tr></thead>
+            <tbody>{rawResults.map((row, i) => <tr key={i} className="border-t border-slate-50">{cols.map(c => <td key={c} className="px-3 py-1.5">{safeStr(row[c])}</td>)}</tr>)}</tbody>
+          </table>
+        </div>
+      );
+    }
+
+    return null;
+  }
+
+  return null;
+});
+VisualBlock.displayName = 'VisualBlock';
+
+// ─────────────────────────────────────────────
+// Sous-composant : MarkdownRenderer
+// ─────────────────────────────────────────────
+
+/** Rend le Markdown minimal (titres, listes, gras, tableaux, séparateurs) en JSX sûr */
+const MarkdownRenderer = memo(({ content }: { content: string }) => {
+  if (!content) return null;
+  const lines = content.split('\n');
+  const nodes: React.ReactNode[] = [];
+  let i = 0;
+
+  while (i < lines.length) {
+    const line = lines[i];
+    const next = lines[i + 1] ?? '';
+    const isTableHeader = line.includes('|') && /(^|\s)\|?\s*[-:]{3,}/.test(next.replace(/\s*\|\s*/g, '|'));
+
+    if (isTableHeader) {
+      const tableLines: string[] = [line, next];
+      i += 2;
+      while (i < lines.length && lines[i].includes('|')) tableLines.push(lines[i++]);
+      const splitRow = (l: string) => {
+        let cells = l.split('|').map(c => c.trim());
+        if (cells[0] === '') cells = cells.slice(1);
+        if (cells[cells.length - 1] === '') cells = cells.slice(0, -1);
+        return cells;
+      };
+      const parsedRows = tableLines.map(l => splitRow(l));
+      const header = parsedRows[0] ?? [];
+      const body = parsedRows.slice(2).map(r => header.map((_, ci) => r[ci] ?? ''));
+      nodes.push(
+        <div key={nodes.length} className="mt-2 border border-slate-100 rounded-lg overflow-auto">
+          <table className="w-full text-left text-[11px]" role="table">
+            <thead className="bg-slate-50">
+              <tr>{header.map((h, ci) => <th key={ci} scope="col" className="px-2 py-1.5 font-black uppercase text-[9px] text-slate-400">{h}</th>)}</tr>
+            </thead>
+            <tbody className="divide-y divide-slate-50">
+              {body.map((r, ri) => (
+                <tr key={ri} className="hover:bg-indigo-50/30">
+                  {r.map((c, ci) => <td key={ci} className="px-2 py-1.5 text-slate-700">{c}</td>)}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      );
+      continue;
+    }
+
+    if (/^###\s/.test(line)) { nodes.push(<h4 key={nodes.length} className="text-[12px] font-black text-slate-800 mt-2">{line.slice(4)}</h4>); i++; continue; }
+    if (/^##\s/.test(line)) { nodes.push(<h3 key={nodes.length} className="text-[13px] font-black text-slate-900 mt-2">{line.slice(3)}</h3>); i++; continue; }
+    if (/^#\s/.test(line)) { nodes.push(<h2 key={nodes.length} className="text-sm font-black text-slate-900 mt-2">{line.slice(2)}</h2>); i++; continue; }
+
+    if (/^\s*[-*+]\s/.test(line)) {
+      const items: string[] = [];
+      while (i < lines.length && /^\s*[-*+]\s/.test(lines[i])) {
+        items.push(lines[i].replace(/^\s*[-*+]\s/, ''));
+        i++;
+      }
+      nodes.push(
+        <ul key={nodes.length} className="mt-1 space-y-0.5" role="list">
+          {items.map((it, idx) => (
+            <li key={idx} className="flex items-start gap-2 text-[11px] font-medium text-slate-700">
+              <span className="mt-1 w-1.5 h-1.5 rounded-full bg-indigo-300 flex-shrink-0" />
+              <span dangerouslySetInnerHTML={{ __html: it.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>') }} />
+            </li>
+          ))}
+        </ul>
+      );
+      continue;
+    }
+
+    if (/^---+$/.test(line.trim())) { nodes.push(<hr key={nodes.length} className="my-2 border-slate-100" />); i++; continue; }
+    if (!line.trim()) { nodes.push(<div key={nodes.length} className="h-1" />); i++; continue; }
+
+    nodes.push(
+      <p key={nodes.length} className="text-[11px] leading-relaxed text-current"
+        dangerouslySetInnerHTML={{ __html: line.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>').replace(/`(.+?)`/g, '<code class="bg-slate-100 px-1 rounded text-[10px] font-mono">$1</code>') }}
+      />
+    );
+    i++;
+  }
+
+  return <div className="space-y-1">{nodes}</div>;
+});
+MarkdownRenderer.displayName = 'MarkdownRenderer';
+
+// ─────────────────────────────────────────────
+// Sous-composant : MessageBubble
+// ─────────────────────────────────────────────
+
+interface MessageBubbleProps {
+  msg: Message;
+  chartRef: (el: HTMLDivElement | null) => void;
+  exportKey: string;
+  onExportCSV: (data: Record<string, unknown>[], name: string) => void;
+  onExportXLSX: (data: Record<string, unknown>[], name: string) => void;
+}
+
+const MessageBubble = memo(({ msg, chartRef, exportKey, onExportCSV, onExportXLSX }: MessageBubbleProps) => {
+  const isUser = msg.role === 'user';
+  const isError = msg.status === 'ERROR';
+
+  // ── Anti-doublon : formats avec rawResults ──────────────────────────────
+  // Quand rawResults est présent ET que le format est un tableau/graphique/stats/liste,
+  // le formattedResponse contient souvent la même donnée en Markdown (générée par n8n).
+  // VisualBlock affiche déjà la version structurée → on ne passe à MarkdownRenderer
+  // que le texte introductif (titre + description), sans les lignes de tableau.
+  const VISUAL_FORMATS: MessageFormat[] = [
+    'table', 'stats', 'list',
+    'chart', 'bar_chart', 'histogram', 'donut_chart', 'multi_chart', 'heatmap',
+    'advanced_chart', 'advancedchart', 'chart_advanced',
+  ];
+  const hasVisualData = !!(msg.rawResults?.length && VISUAL_FORMATS.includes(msg.format));
+
+  // Calcule le texte à passer au MarkdownRenderer :
+  // - Si format visuel avec rawResults → ne garde QUE les lignes avant le premier "|"
+  //   (titre + description), supprime le tableau Markdown redondant
+  // - Sinon → texte complet
+  const displayText = (() => {
+    if (!hasVisualData) return msg.formattedResponse;
+    const lines = msg.formattedResponse.split('\n');
+    // Trouve la première ligne de tableau Markdown (commence par | ou ---) 
+    const firstTableLine = lines.findIndex(l => /^\s*\|/.test(l) || /^\s*\|?[-:]{3,}/.test(l));
+    if (firstTableLine === -1) return msg.formattedResponse; // pas de tableau Markdown → texte complet
+    // Garde uniquement ce qui précède le tableau
+    const before = lines.slice(0, firstTableLine).join('\n').trimEnd();
+    return before || msg.formattedResponse;
+  })();
+
+  // Export pour tableaux Markdown inline (seulement si pas de rawResults)
+  const tableData: Record<string, string>[] | null = (!msg.rawResults?.length)
+    ? parseMarkdownTableToData(msg.formattedResponse)
+    : null;
+  const hasExportableTable = tableData && tableData.length > 0;
+
+  const ts = new Date(msg.timestamp);
+  const now = new Date();
+  const timeStr = ts.toDateString() === now.toDateString()
+    ? ts.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
+    : ts.toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+
+  return (
+    <div className={`flex ${isUser ? 'justify-end' : 'justify-start'}`} role="listitem">
+      {/* Avatar IA */}
+      {!isUser && (
+        <div className="w-7 h-7 bg-indigo-600 rounded-xl flex items-center justify-center mr-2 mt-1 flex-shrink-0 shadow">
+          <Bot size={14} className="text-white" />
+        </div>
+      )}
+
+      <div
+        className={`
+          max-w-[92%] sm:max-w-[88%] px-3 sm:px-4 py-2.5 sm:py-3 rounded-3xl text-xs leading-relaxed shadow-sm border relative
+          ${isUser
+            ? 'bg-indigo-600 text-white rounded-br-lg border-indigo-500/50 font-semibold'
+            : isError
+              ? 'bg-rose-50 text-rose-800 border-rose-200 rounded-bl-lg'
+              : 'bg-white text-slate-900 border-slate-200/80 rounded-bl-lg font-medium'
+          }
+        `}
+      >
+        {/* Boutons d'export pour tableaux Markdown inline (sans rawResults) */}
+        {hasExportableTable && !isUser && (
+          <div className="flex gap-1.5 mb-2 justify-end">
+            <ExportButton label="CSV" icon={<Download size={10} />} onClick={() => onExportCSV(tableData as any, `export-${exportKey}.csv`)} />
+            <ExportButton label="XLSX" icon={<TableIcon size={10} />} onClick={() => onExportXLSX(tableData as any, `export-${exportKey}.xlsx`)} />
+          </div>
+        )}
+
+        {/* Icône d'erreur */}
+        {isError && (
+          <div className="flex items-center gap-1.5 mb-1 text-rose-600">
+            <AlertCircle size={12} />
+            <span className="text-[10px] font-black uppercase tracking-wide">Erreur</span>
+          </div>
+        )}
+
+        {/* Texte principal — tableau Markdown supprimé si VisualBlock prend le relais */}
+        {isUser
+          ? <span>{msg.formattedResponse}</span>
+          : <MarkdownRenderer content={displayText} />
+        }
+
+        {/* Bloc visuel — source de vérité pour tableaux, graphiques, stats, documents */}
+        {!isUser && (
+          <VisualBlock msg={msg} chartRef={chartRef} exportKey={exportKey} />
+        )}
+
+        {/* Timestamp */}
+        <div className={`text-right mt-2 ${isUser ? 'text-indigo-200' : 'text-slate-400'}`}>
+          <time dateTime={ts.toISOString()} className="text-[9px] font-bold">{timeStr}</time>
+        </div>
+      </div>
+    </div>
+  );
+});
+MessageBubble.displayName = 'MessageBubble';
+
+// ─────────────────────────────────────────────
+// Sous-composant : ChatHeader
+// ─────────────────────────────────────────────
+
+interface ChatHeaderProps {
+  isFullscreen: boolean;
+  onToggleFullscreen: () => void;
+  onClose: () => void;
+}
+
+const ChatHeader = memo(({ isFullscreen, onToggleFullscreen, onClose }: ChatHeaderProps) => (
+  <div className="bg-slate-900 px-3 sm:px-5 py-3 sm:py-4 text-white flex items-center justify-between flex-shrink-0">
+    <div className="flex items-center gap-3">
+      <div className="relative w-10 h-10 bg-indigo-600 rounded-2xl flex items-center justify-center shadow-lg">
+        <Bot size={20} />
+        {/* Indicateur "en ligne" */}
+        <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 bg-emerald-400 border-2 border-slate-900 rounded-full" aria-label="En ligne" />
+      </div>
+      <div>
+        <h4 className="font-black text-[13px] tracking-tight">Kernel IA Orchestrator</h4>
+        <p className="text-[8px] text-indigo-400 font-bold uppercase tracking-widest flex items-center gap-1 mt-0.5">
+          <Activity size={7} /> n8n · Live Analysis
+        </p>
+      </div>
+    </div>
+    <div className="flex items-center gap-1.5">
+      <button
+        onClick={onToggleFullscreen}
+        aria-label={isFullscreen ? 'Quitter le plein écran' : 'Plein écran'}
+        className="p-2 hover:bg-white/10 rounded-xl text-slate-400 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+      >
+        {isFullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+      </button>
+      <button
+        onClick={onClose}
+        aria-label="Fermer l'assistant"
+        className="p-2 hover:bg-white/10 rounded-xl text-slate-400 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+      >
+        <X size={18} />
+      </button>
+    </div>
+  </div>
+));
+ChatHeader.displayName = 'ChatHeader';
+
+// ─────────────────────────────────────────────
+// Sous-composant : ScrollToBottomButton
+// ─────────────────────────────────────────────
+
+const ScrollToBottomButton = memo(({ onClick, visible }: { onClick: () => void; visible: boolean }) => (
+  <button
+    onClick={onClick}
+    aria-label="Défiler vers le bas"
+    className={`
+      absolute bottom-4 left-1/2 -translate-x-1/2 z-20
+      flex items-center gap-1 px-3 py-1.5 bg-indigo-600 text-white text-[10px] font-bold rounded-full shadow-lg
+      transition-all duration-200
+      ${visible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-2 pointer-events-none'}
+    `}
+  >
+    <ChevronDown size={12} /> Bas
+  </button>
+));
+ScrollToBottomButton.displayName = 'ScrollToBottomButton';
+
+// ─────────────────────────────────────────────
+// Composant principal : ChatInterface
+// ─────────────────────────────────────────────
+
 const ChatInterface = ({ user }: { user: any }) => {
-  const isAdmin = !!(user && user.roles && (user.roles.includes(UserRole.ADMIN) || user.roles.includes(UserRole.SUPER_ADMIN)));
+  const isAdmin = !!(user?.roles?.includes(UserRole.ADMIN) || user?.roles?.includes(UserRole.SUPER_ADMIN));
+
   const [isOpen, setIsOpen] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [showScrollBtn, setShowScrollBtn] = useState(false);
+
   const scrollRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  // Refs pour les exports PNG des graphiques (clé = exportKey du message)
   const chartRefs = useRef<Record<string, HTMLDivElement | null>>({});
-  const [isFullscreen, setIsFullscreen] = useState(false);
 
-  // Utility: download a Blob as file
-  const downloadBlob = (blob: Blob, filename: string) => {
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-  };
-
-  const arrayToCSV = (arr: any[]) => {
-    if (!arr || !arr.length) return '';
-    const keys = Array.from(arr.reduce((acc, r) => { Object.keys(r || {}).forEach(k => acc.add(k)); return acc; }, new Set<string>()));
-    const rows = [keys.join(',')];
-    for (const r of arr) {
-      rows.push(keys.map(k => {
-        const v = r[k];
-        if (v === null || v === undefined) return '';
-        const s = typeof v === 'object' ? JSON.stringify(v) : String(v);
-        return '"' + s.replace(/"/g, '""') + '"';
-      }).join(','));
-    }
-    return rows.join('\n');
-  };
-
-  const exportDataAsCSV = (data: any[], filename = 'export.csv') => {
-    try {
-      const csv = arrayToCSV(data || []);
-      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-      downloadBlob(blob, filename);
-    } catch (e) {
-      // eslint-disable-next-line no-console
-      console.error('CSV export error', e);
-    }
-  };
-
-  const exportDataAsXLSX = async (data: any[], filename = 'export.xlsx') => {
-    try {
-      // dynamic import so project can still build if xlsx isn't installed; fallback to CSV
-      // Install with: npm install xlsx
-      const XLSX = (await import('xlsx')).default as any;
-      const ws = XLSX.utils.json_to_sheet(data || []);
-      const wb = { Sheets: { data: ws }, SheetNames: ['data'] } as any;
-      const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
-      const blob = new Blob([wbout], { type: 'application/octet-stream' });
-      downloadBlob(blob, filename);
-    } catch (e) {
-      // If library missing, fallback to CSV
-      // eslint-disable-next-line no-console
-      console.warn('xlsx not available, falling back to CSV', e);
-      exportDataAsCSV(data, filename.replace(/\.xlsx$/i, '.csv'));
-    }
-  };
-
-  const exportChartAsPNG = async (key: string, filename = 'chart.png') => {
-    const container = chartRefs.current[key];
-    if (!container) return;
-    try {
-      // Find svg inside container
-      const svg = container.querySelector('svg') as SVGSVGElement | null;
-      if (!svg) return;
-      const serializer = new XMLSerializer();
-      const svgStr = serializer.serializeToString(svg);
-      const canvas = document.createElement('canvas');
-      const rect = svg.getBoundingClientRect();
-      canvas.width = rect.width * 2; // higher res
-      canvas.height = rect.height * 2;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) return;
-      const img = new Image();
-      const svgBlob = new Blob([svgStr], { type: 'image/svg+xml;charset=utf-8' });
-      const url = URL.createObjectURL(svgBlob);
-      await new Promise<void>((res, rej) => {
-        img.onload = () => res();
-        img.onerror = () => rej();
-        img.src = url;
-      });
-      ctx.scale(2, 2);
-      ctx.drawImage(img, 0, 0);
-      URL.revokeObjectURL(url);
-      canvas.toBlob((b) => { if (b) downloadBlob(b, filename); }, 'image/png');
-    } catch (e) {
-      // eslint-disable-next-line no-console
-      console.error('Chart PNG export error', e);
-    }
-  };
-
-  const formatStatValue = (v: any) => {
-    if (v === null || v === undefined) return '-';
-    if (typeof v === 'number') return v.toLocaleString();
-    if (typeof v === 'string') {
-      const n = Number(v.replace(/[^0-9.-]+/g, ''));
-      if (!Number.isNaN(n) && String(v).trim().match(/^[-0-9,.]+$/)) return n.toLocaleString();
-      return v;
-    }
-    if (typeof v === 'object') return JSON.stringify(v);
-    return String(v);
-  };
-
-  const parseStructuredFormatted = (formatted: string) => {
-    if (!formatted || typeof formatted !== 'string') return { text: formatted, format: null, rawResults: undefined };
-    // Remove leading language markers and code fences (e.g. "json\n```json\n{...}```")
-    let trimmed = formatted.trim();
-    trimmed = trimmed.replace(/^\s*```(?:json|js|text)?\s*/i, '').replace(/\s*```\s*$/i, '').trim();
-    // Remove a leading literal "json" marker sometimes added by providers
-    trimmed = trimmed.replace(/^json\s+/i, '').trim();
-    if (!(trimmed.startsWith('{') || trimmed.startsWith('['))) return { text: trimmed, format: null, rawResults: undefined };
-    try {
-      const parsed: any = JSON.parse(trimmed);
-      if (Array.isArray(parsed)) {
-        return { text: null, format: 'list', rawResults: parsed };
-      }
-
-      const pickKey = (obj: any, keys: string[]) => keys.find(k => obj[k] !== undefined && obj[k] !== null && (typeof obj[k] !== 'string' || String(obj[k]).trim().length > 0));
-      const textKey = pickKey(parsed, ['response', 'formattedResponse', 'formatted_response', 'finalresponse', 'finalResponse', 'final_response', 'final', 'message', 'text']);
-      let text: string | null = textKey ? (typeof parsed[textKey] === 'string' ? parsed[textKey] : JSON.stringify(parsed[textKey])) : null;
-      const rawResults = parsed.rawResults || parsed.data || parsed.results || parsed.rows || undefined;
-      const format = parsed.format || parsed.type || (Array.isArray(rawResults) ? (rawResults.length && typeof rawResults[0] === 'object' ? 'table' : 'list') : null);
-
-      if (!text && rawResults) {
-        text = parsed.summary || parsed.title || `Résultats: ${Array.isArray(rawResults) ? rawResults.length : 1}`;
-      }
-
-      if (!text) {
-        // Build a readable summary instead of returning raw JSON
-        const keys = Object.keys(parsed).filter(k => !['data', 'results', 'rows', 'rawResults'].includes(k));
-        if (keys.length) {
-          text = keys.map(k => `**${k}**: ${typeof parsed[k] === 'object' ? JSON.stringify(parsed[k]) : String(parsed[k])}`).join('\n');
-        } else {
-          text = 'Réponse structurée reçue.';
-        }
-      }
-
-      return { text: String(text), format, rawResults };
-    } catch (e) {
-      // If parsing fails, avoid returning raw JSON string — show a concise fallback
-      return { text: 'Réponse structurée reçue (format non exploitable).', format: null, rawResults: undefined };
-    }
-  };
+  // ── Scroll auto ────────────────────────────
+  const scrollToBottom = useCallback(() => {
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
+  }, []);
 
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
-    }
+    scrollToBottom();
   }, [messages, isLoading]);
 
-  const formatTimestamp = (ts: Date) => {
-    const d = new Date(ts);
-    const now = new Date();
-    if (d.toDateString() === now.toDateString()) {
-      return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    }
-    return d.toLocaleString([], { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
-  };
+  // Détection scroll pour le bouton "Défiler vers le bas"
+  const handleScroll = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    setShowScrollBtn(distFromBottom > 120);
+  }, []);
 
+  // ── Chargement historique ──────────────────
   useEffect(() => {
     if (!isOpen) return;
+
     const fetchHistory = async () => {
+      setLoadingHistory(true);
       try {
-        setLoadingHistory(true);
-        // Use apiClient-backed helper which targets the backend URL (avoids Vite serving index.html)
         const data = await fetchChatHistory();
-        // Map backend messages to local Message shape, preserving structured payloads in metadata
-        let mapped: Message[] = data.map((m: any) => {
-          const meta = m.metadata || {};
-          const messageText = String(m.message || meta.text || '');
-          const parsed = parseStructuredFormatted(messageText);
-          const rawResults = meta.rawResults || meta.data || meta.results || parsed.rawResults || null;
-          const format = meta.format || meta.type || parsed.format || (rawResults ? (Array.isArray(rawResults[0]) || typeof rawResults[0] === 'object' ? (meta.chart ? 'chart' : 'table') : 'list') : 'general');
-          const rawSender = (m.sender || meta.sender || '').toString().toLowerCase();
-          const role = (rawSender === 'user' || rawSender === 'human') ? 'user' : 'ai';
-          const ts = m.created_at || m.createdAt || meta.created_at || meta.createdAt || null;
-          // Build a safe display text: prefer parsed.text, otherwise summarize structured results
-          let displayText = parsed.text;
-          if (!displayText) {
-            if (parsed.rawResults && Array.isArray(parsed.rawResults)) {
-              displayText = `Résultats structurés (${parsed.rawResults.length} éléments).`;
-            } else if (parsed.rawResults) {
-              displayText = 'Résultat structuré reçu.';
-            } else {
-              displayText = 'Réponse structurée reçue.';
+
+        /**
+         * AIController.getHistory (v2) retourne maintenant des objets enrichis :
+         * {
+         *   id, sender,
+         *   message:     string  — texte affiché dans la bulle
+         *   rawResults:  any[]   — données pour graphiques/tableaux (null pour texte simple)
+         *   metadata:    object  — chart_config, kpi_config, title, etc.
+         *   format:      string  — bar_chart, donut_chart, stats, table, general…
+         *   resultCount: number
+         *   created_at:  string
+         * }
+         *
+         * Les anciens enregistrements (avant migration) ont rawResults=null et format='general'.
+         * Le mapper gère les deux cas.
+         */
+        const mapped: Message[] = data
+          .map((m: any) => {
+            const role: 'user' | 'ai' = m.sender === 'user' ? 'user' : 'ai';
+            const ts = m.created_at ?? m.createdAt ?? null;
+
+            // ── rawResults ──────────────────────────────────────────────
+            // Vient directement du champ dédié retourné par AIController v2.
+            // Pour les anciens messages, peut être null.
+            const rawResults: any[] | undefined =
+              (Array.isArray(m.rawResults) && m.rawResults.length > 0)
+                ? m.rawResults
+                : undefined;
+
+            // ── Format ──────────────────────────────────────────────────
+            // Priorité : champ format dédié → metadata.format → fallback 'general'
+            const format = (
+              m.format
+              ?? m.metadata?.format
+              ?? (rawResults ? 'table' : 'general')
+            ) as MessageFormat;
+
+            // ── Texte affiché ────────────────────────────────────────────
+            // `m.message` est le formattedResponse stocké par n8n.
+            // Cas particuliers :
+            //  - '[GRAPH_DATA]' ou vide → générer un texte de contexte
+            //  - Contient du CSS/HTML (document reloadé avant fix) → utiliser le titre
+            let text = String(m.message ?? '').trim();
+
+            // Détecte si le texte est du CSS/HTML brut (bug historique pré-fix)
+            const looksLikeCssOrHtml = text.startsWith(':root')
+              || text.startsWith('<!DOCTYPE')
+              || text.startsWith('<html')
+              || text.includes('font-family:')
+              || text.includes('border-collapse:');
+
+            if (!text || text === '[GRAPH_DATA]' || looksLikeCssOrHtml) {
+              const title = m.metadata?.title ?? m.metadata?.document_type ?? '';
+              const docData = m.documentData ?? m.metadata?.documentData;
+              if (docData || looksLikeCssOrHtml) {
+                // Message document : afficher le titre proprement
+                text = title
+                  ? `📄 **${title}** généré avec succès.`
+                  : '📄 Document généré avec succès.';
+              } else {
+                text = rawResults?.length
+                  ? `${title || 'Données'} — ${rawResults.length} résultat(s)`
+                  : title || 'Réponse reçue.';
+              }
             }
-          }
 
-          return ({
+            return {
               role,
-              formattedResponse: cleanProfessionalText(String(displayText)),
-              format: format as any,
-              resultCount: rawResults ? (Array.isArray(rawResults) ? rawResults.length : 0) : 0,
-              rawResults: rawResults || undefined,
+              formattedResponse: cleanProfessionalText(text),
+              format,
+              rawResults,
+              // metadata : essentiel pour reconstruire graphiques et documents
+              metadata: m.metadata ?? undefined,
+              // documentData : rehydrate le composant DocumentPreview au rechargement
+              // Stocké dans metadata.documentData par le nœud n8n "Generate Document HTML"
+              documentData: m.documentData ?? m.metadata?.documentData ?? undefined,
+              // documentHtml non persisté en DB (trop volumineux) — PDF via bouton print
+              resultCount: m.resultCount ?? rawResults?.length ?? 0,
+              status: 'SUCCESS' as const,
               timestamp: ts ? new Date(ts) : new Date(),
-              status: meta.status || 'SUCCESS'
-            } as Message);
-        });
+            } satisfies Message;
+          })
+          .sort((a: Message, b: Message) => a.timestamp.getTime() - b.timestamp.getTime());
 
-        // Ensure chronological ordering by created_at
-        mapped = mapped.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
         setMessages(mapped);
       } catch (err) {
-        // Log error for debugging (client-side only)
-        // eslint-disable-next-line no-console
         console.error('Chat history fetch error:', err);
-        // Show friendly message with hint to open devtools
         setMessages([{
           role: 'ai',
-          formattedResponse: 'Nous rencontrons un problème, veuillez réessayer. (Vérifiez la console pour plus de détails.)',
+          formattedResponse: 'Impossible de charger l\'historique. Vérifiez votre connexion et réessayez.',
           format: 'general',
           resultCount: 0,
           status: 'ERROR',
-          timestamp: new Date()
-        }] as Message[]);
+          timestamp: new Date(),
+        }]);
       } finally {
         setLoadingHistory(false);
       }
@@ -248,499 +1467,293 @@ const ChatInterface = ({ user }: { user: any }) => {
     fetchHistory();
   }, [isOpen]);
 
-  const sendWebhook = async (accountId: string, message: string) => {
-    // Deprecated: we now use backend bridge to forward to n8n (avoid CORS)
-    // Keep function for compatibility but call backend bridge endpoint instead
-    try {
-      const res = await fetch('/api/ai/bridge', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chatInput: message, sessionId: accountId, message, id: accountId })
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => null);
-        // eslint-disable-next-line no-console
-        console.error('Bridge responded with non-ok:', res.status, body);
-        return false;
-      }
-      return true;
-    } catch (err) {
-      // eslint-disable-next-line no-console
-      console.error('sendWebhook error:', err);
-      return false;
-    }
-  };
+  // ── Envoi message ──────────────────────────
+  const handleSend = useCallback(async (overrideMsg?: string) => {
+    const raw = (overrideMsg ?? input).trim();
+    if (!raw || isLoading) return;
 
-  const sampleQuestions = [
-    'Top 5 produits vendus ce mois-ci',
-    'Montant total des factures impayées',
-    "Quels sont les articles en rupture de stock ?",
-    'Prévision de stock pour les 30 prochains jours'
-  ];
-
-  const handleSend = async (overrideMsg?: string) => {
-    const raw = overrideMsg ?? input;
-    if (!raw || !raw.trim() || isLoading) return;
-    
-    const userMsg = raw.trim();
-    const tenantId = user.tenantId || 'system-default';
-    const accountId = user.id ?? tenantId ?? 'system-default';
-
+    const tenantId = user.tenantId ?? 'system-default';
     setInput('');
-    setMessages(prev => [...prev, { 
-      role: 'user', 
-      formattedResponse: userMsg,
+    inputRef.current?.focus();
+
+    setMessages(prev => [...prev, {
+      role: 'user',
+      formattedResponse: raw,
       format: 'general',
       resultCount: 0,
       status: 'SUCCESS',
-      timestamp: new Date() 
+      timestamp: new Date(),
     }]);
-    
+
     setIsLoading(true);
     try {
-      const aiResponse = await getAIResponse(userMsg, tenantId);
-      // Normalize possible JSON-wrapped formattedResponse
-      const { formattedResponse, format, rawResults, downloadUrl, resultCount, status, mode } = aiResponse as AIChatResponse & any;
-      const parsed = parseStructuredFormatted(formattedResponse as string);
-      const finalFormat = (format || parsed.format) as any || 'general';
-      const finalRaw = rawResults || parsed.rawResults;
+      const aiResponse = await getAIResponse(raw, tenantId) as AIChatResponse & Record<string, any>;
 
-      // Determine safe display text: prefer parsed.text; if absent, summarize structured results
-      let finalText = parsed.text;
-      if (!finalText) {
-        if (finalRaw && Array.isArray(finalRaw)) finalText = `Résultats structurés (${finalRaw.length} éléments).`;
-        else if (finalRaw) finalText = 'Résultat structuré reçu.';
-        else finalText = 'Réponse structurée reçue.';
+      // ── Format : priorité absolue à la valeur du workflow n8n ──
+      // parseStructuredFormatted ne sert que si aiResponse.formattedResponse est du JSON brut
+      // (cas de workflows qui envoient le JSON en texte). Si le format est déjà dans aiResponse,
+      // on ne le réinterprète pas — c'est le workflow qui fait autorité.
+      const finalFormat = (aiResponse.format ?? 'general') as MessageFormat;
+      const finalRaw = aiResponse.rawResults?.length ? aiResponse.rawResults : undefined;
+
+      // Texte affiché : si rawResults dispo et formattedResponse non vide → afficher le texte
+      // Si formattedResponse est '[GRAPH_DATA]' ou vide, on met une phrase de contexte
+      let finalText = aiResponse.formattedResponse ?? '';
+      if (!finalText || finalText === '[GRAPH_DATA]') {
+        finalText = finalRaw?.length
+          ? `${aiResponse.metadata?.title ?? 'Données'} — ${finalRaw.length} résultat(s)`
+          : 'Données reçues.';
       }
 
-      setMessages(prev => [...prev, { 
+      setMessages(prev => [...prev, {
+        role: 'ai',
         formattedResponse: finalText,
         format: finalFormat,
         rawResults: finalRaw,
-        downloadUrl,
-        resultCount: (finalRaw && Array.isArray(finalRaw)) ? finalRaw.length : (resultCount || 0),
-        status: status || 'SUCCESS',
-        mode: mode || 'BRIDGE',
-        role: 'ai', 
-        timestamp: new Date() 
+        downloadUrl: aiResponse.downloadUrl,
+        documentHtml: aiResponse.documentHtml,
+        documentData: aiResponse.documentData,
+        resultCount: finalRaw?.length ?? aiResponse.resultCount ?? 0,
+        status: aiResponse.status ?? 'SUCCESS',
+        mode: aiResponse.mode ?? 'BRIDGE',
+        metadata: aiResponse.metadata,
+        timestamp: new Date(),
       }]);
-    } catch (err) {
+    } catch {
       setMessages(prev => [...prev, {
         role: 'ai',
-        formattedResponse: 'Nous rencontrons un problème, veuillez réessayer.',
+        formattedResponse: 'Une erreur est survenue. Veuillez réessayer.',
         format: 'general',
         resultCount: 0,
         status: 'ERROR',
-        timestamp: new Date()
-      }] as Message[]);
+        timestamp: new Date(),
+      }]);
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [input, isLoading, user]);
 
-  const renderVisuals = (msg: Message) => {
-    const { format, rawResults } = msg;
-    const key = String((msg.timestamp && (msg.timestamp as any).getTime && (msg.timestamp as any).getTime()) || Math.random());
-    if (!rawResults || rawResults.length === 0) return null;
+  // ── Render ─────────────────────────────────
+  if (!isAdmin) return null;
 
-    if (format === 'table') {
-      const cols = Object.keys(rawResults[0]);
-      return (
-        <div className="mt-4 border border-slate-100 rounded-2xl overflow-hidden shadow-sm bg-white">
-            <div className="flex justify-end gap-2 p-2">
-              <button aria-label="Exporter CSV" onClick={() => exportDataAsCSV(rawResults, `table-export-${key}.csv`)} className="px-3 py-1 text-[11px] bg-white border border-slate-200 rounded-full text-slate-700 flex items-center gap-2 shadow-sm hover:bg-slate-50 transition">
-                <Download size={14} />
-                <span className="font-bold">CSV</span>
-              </button>
-              <button aria-label="Exporter XLSX" onClick={() => exportDataAsXLSX(rawResults, `table-export-${key}.xlsx`)} className="px-3 py-1 text-[11px] bg-white border border-slate-200 rounded-full text-slate-700 flex items-center gap-2 shadow-sm hover:bg-slate-50 transition">
-                <TableIcon size={14} />
-                <span className="font-bold">XLSX</span>
-              </button>
-            </div>
-          <div className="overflow-x-auto max-h-60 custom-scrollbar">
-            <table className="w-full text-left text-[10px]">
-              <thead className="bg-slate-50 border-b border-slate-100 sticky top-0">
-                <tr>
-                  {cols.map(c => <th key={c} className="px-3 py-2 font-black uppercase text-slate-400">{c}</th>)}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-50">
-                {rawResults.map((row, i) => (
-                  <tr key={i} className="hover:bg-indigo-50/30 transition-colors">
-                    {cols.map(c => <td key={c} className="px-3 py-2 font-bold text-current">{row[c]?.toString()}</td>)}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      );
-    }
+  if (!isOpen) {
+    return (
+      <div className="fixed bottom-4 right-4 sm:bottom-8 sm:right-8 z-[1000]">
+        <button
+          onClick={() => setIsOpen(true)}
+          aria-label="Ouvrir l'assistant IA"
+          className="
+            w-14 h-14 sm:w-16 sm:h-16 bg-slate-900 text-white rounded-[1.75rem]
+            flex items-center justify-center shadow-2xl
+            hover:scale-105 active:scale-95 transition-all duration-200
+            focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-indigo-500
+            relative
+          "
+        >
+          <MessageSquare size={22} />
+          <span
+            className="absolute -top-0.5 -right-0.5 sm:-top-1 sm:-right-1 w-6 h-6 bg-indigo-600 border-4 border-slate-50 rounded-full flex items-center justify-center text-[7px] font-black uppercase"
+            aria-hidden="true"
+          >
+            IA
+          </span>
+        </button>
+      </div>
+    );
+  }
 
-    if (format === 'chart') {
-      const keys = Object.keys(rawResults[0]);
-      const x = keys[0];
-      const y = keys[1] || keys[0];
-      return (
-        <div ref={(el) => { chartRefs.current[key] = el; }} className="mt-4 p-4 bg-slate-900 rounded-2xl border border-slate-800 h-44 w-full shadow-inner relative">
-          <div className="absolute top-2 right-2 flex gap-2 z-10">
-            <button aria-label="Exporter données CSV" onClick={() => exportDataAsCSV(rawResults, `chart-data-${key}.csv`)} className="px-2.5 py-1 text-[10px] bg-white/10 border border-white/20 rounded-full text-white flex items-center gap-2 shadow-sm hover:bg-white/20 transition">
-              <Download size={12} />
-              <span className="font-bold">CSV</span>
-            </button>
-            <button aria-label="Exporter données XLSX" onClick={() => exportDataAsXLSX(rawResults, `chart-data-${key}.xlsx`)} className="px-2.5 py-1 text-[10px] bg-white/10 border border-white/20 rounded-full text-white flex items-center gap-2 shadow-sm hover:bg-white/20 transition">
-              <TableIcon size={12} />
-              <span className="font-bold">XLSX</span>
-            </button>
-            <button aria-label="Exporter graphique PNG" onClick={() => exportChartAsPNG(key, `chart-${key}.png`)} className="px-2.5 py-1 text-[10px] bg-white/10 border border-white/20 rounded-full text-white flex items-center gap-2 shadow-sm hover:bg-white/20 transition">
-              <Download size={12} />
-              <span className="font-bold">PNG</span>
-            </button>
-          </div>
-          <p className="text-[8px] font-black text-indigo-400 uppercase mb-2 flex items-center gap-1">
-            <BarChart3 size={10} /> Analyse Analytique
-          </p>
-          <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={rawResults}>
-              <defs>
-                <linearGradient id="colorIA" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#6366f1" stopOpacity={0.3}/>
-                  <stop offset="95%" stopColor="#6366f1" stopOpacity={0}/>
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
-              <XAxis dataKey={x} hide />
-              <Tooltip contentStyle={{ backgroundColor: '#0f172a', border: 'none', borderRadius: '10px', fontSize: '9px', color: '#fff' }} />
-              <Area type="monotone" dataKey={y} stroke="#818cf8" fillOpacity={1} fill="url(#colorIA)" strokeWidth={2} />
-            </AreaChart>
-          </ResponsiveContainer>
-        </div>
-      );
-    }
-
-    if (format === 'stats') {
-      // Normalize stats payload into list of {label, value}
-      const stats = rawResults;
-      const items: Array<{ label: string; value: any }> = [];
-      if (Array.isArray(stats)) {
-        if (stats.length && typeof stats[0] === 'object') {
-          if ('label' in stats[0] || 'value' in stats[0]) {
-            for (const s of stats) items.push({ label: String(s.label ?? s.name ?? s.title ?? ''), value: s.value ?? s.v ?? s.count ?? s.amount ?? s });
-          } else {
-            for (const s of stats) {
-              const keys = Object.keys(s || {});
-              if (keys.length === 1) items.push({ label: keys[0], value: s[keys[0]] });
-              else items.push({ label: s.title || s.name || keys[0], value: s.value ?? s[ keys[1] || keys[0] ] });
-            }
-          }
-        } else {
-          for (let i = 0; i < stats.length; i++) items.push({ label: `Item ${i + 1}`, value: stats[i] });
-        }
-      } else if (stats && typeof stats === 'object') {
-        for (const k of Object.keys(stats)) items.push({ label: k, value: stats[k] });
-      }
-
-      return (
-        <div className="mt-4 grid grid-cols-2 gap-3">
-          {items.map((it, idx) => (
-            <div key={idx} className="p-3 bg-indigo-50 border border-indigo-100 rounded-xl">
-              <div className="text-[9px] font-black text-indigo-400 uppercase tracking-widest">{it.label}</div>
-              <div className="text-lg font-extrabold text-indigo-900 mt-1">{formatStatValue(it.value)}</div>
-              {typeof it.value === 'number' && (
-                <div className="mt-2 h-2 w-full rounded-full bg-slate-100 overflow-hidden">
-                  <div className="h-full bg-indigo-400" style={{ width: `${Math.min(100, Math.abs(it.value))}%` }} />
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-      );
-    }
-
-    if (format === 'list') {
-      return (
-        <ul className="mt-3 list-disc pl-5 text-[12px] space-y-1">
-          {rawResults.map((item: any, idx: number) => (
-            <li key={idx} className="text-slate-700 font-medium">{typeof item === 'string' ? item : JSON.stringify(item)}</li>
-          ))}
-        </ul>
-      );
-    }
-
-    if (format === 'excel') {
-      return (
-        <div className="mt-3">
-          <a href={msg.downloadUrl || '#'} className="text-indigo-600 font-bold underline">Télécharger le fichier</a>
-        </div>
-      );
-    }
-
-    return null;
-  };
-
-  const renderMarkdownWithTable = (content: string | undefined) => {
-    if (!content) return null;
-    const lines = content.split('\n');
-
-    const nodes: any[] = [];
-    let i = 0;
-    while (i < lines.length) {
-      const line = lines[i];
-
-      // Detect table header (a line with | and next line contains ---)
-      const next = lines[i + 1] || '';
-      const isTableHeader = line.includes('|') && /(^|\s)\|?\s*[-:]{3,}/.test(next.replace(/\s*\|\s*/g, '|'));
-
-      if (isTableHeader) {
-        // Consume table block: header + separator + rows until blank line or non-| line
-        const tableLines: string[] = [];
-        // header
-        tableLines.push(line);
-        // separator
-        tableLines.push(next);
-        i += 2;
-        while (i < lines.length && lines[i].includes('|')) {
-          tableLines.push(lines[i]);
-          i += 1;
-        }
-
-        // Parse table robustly: split on '|' and remove empty edge cells
-        const splitRow = (l: string) => {
-          let cells = l.split('|').map(c => c.trim());
-          if (cells.length > 0 && cells[0] === '') cells = cells.slice(1);
-          if (cells.length > 0 && cells[cells.length - 1] === '') cells = cells.slice(0, -1);
-          return cells;
-        };
-
-        const parsedRows = tableLines.map(l => splitRow(l));
-        const header = parsedRows[0] || [];
-        // rows after separator (index 2...)
-        const body = parsedRows.slice(2).map(r => {
-          // Ensure each row has exactly header.length cells (pad with empty strings if needed)
-          const out = [] as string[];
-          for (let ci = 0; ci < header.length; ci++) {
-            out.push(r[ci] !== undefined ? r[ci] : '');
-          }
-          return out;
-        });
-
-        nodes.push(
-          <div key={nodes.length} className="mt-3 border border-slate-100 rounded-lg overflow-auto bg-white">
-            <table className="w-full text-left text-[12px]">
-              <thead className="bg-slate-50 border-b border-slate-100">
-                <tr>
-                  {header.map((h, idx) => <th key={idx} className="px-3 py-2 font-black uppercase text-slate-400">{h}</th>)}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-50">
-                {body.map((r, ri) => (
-                  <tr key={ri} className="hover:bg-indigo-50/30 transition-colors">
-                    {r.map((c, ci) => <td key={ci} className="px-3 py-2 font-medium text-current">{c}</td>)}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        );
-        continue;
-      }
-
-      // Render headings
-      if (/^###\s+/.test(line)) {
-        nodes.push(<h4 key={nodes.length} className="text-sm font-black">{line.replace(/^###\s+/, '')}</h4>);
-        i += 1; continue;
-      }
-      if (/^##\s+/.test(line)) {
-        nodes.push(<h3 key={nodes.length} className="text-sm font-black">{line.replace(/^##\s+/, '')}</h3>);
-        i += 1; continue;
-      }
-
-      // Bullet lists
-      if (/^\s*[-*+]\s+/.test(line)) {
-        const items: string[] = [];
-        while (i < lines.length && /^\s*[-*+]\s+/.test(lines[i])) {
-          items.push(lines[i].replace(/^\s*[-*+]\s+/, ''));
-          i += 1;
-        }
-        nodes.push(
-          <ul key={nodes.length} className="list-disc pl-5 text-[12px] space-y-1">
-            {items.map((it, idx) => <li key={idx} className="font-medium">{it}</li>)}
-          </ul>
-        );
-        continue;
-      }
-
-      // Horizontal rule
-      if (/^---+$/.test(line.trim())) {
-        nodes.push(<hr key={nodes.length} className="my-3 border-slate-100" />);
-        i += 1; continue;
-      }
-
-      // Normal paragraph with inline bold **text**
-      const paragraph = line.replace(/\*\*(.+?)\*\*/g, (_, p1) => `<strong>${p1}</strong>`);
-      // Use dangerouslySetInnerHTML for small sanitized snippet (input is generated server-side)
-      nodes.push(<p key={nodes.length} className="text-[12px]" dangerouslySetInnerHTML={{ __html: paragraph }} />);
-      i += 1;
-    }
-
-    return <div className="prose-sm max-w-full">{nodes}</div>;
-  };
-
-  // Try to parse the first markdown table in content into an array of objects
-  const parseMarkdownTableToData = (content: string | undefined) => {
-    if (!content) return null;
-    const lines = content.split('\n');
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-      const next = lines[i + 1] || '';
-      const isTableHeader = line.includes('|') && /(^|\s)\|?\s*[-:]{3,}/.test(next.replace(/\s*\|\s*/g, '|'));
-      if (isTableHeader) {
-        const tableLines: string[] = [];
-        tableLines.push(line);
-        tableLines.push(next);
-        let j = i + 2;
-        while (j < lines.length && lines[j].includes('|')) {
-          tableLines.push(lines[j]);
-          j += 1;
-        }
-
-        const splitRow = (l: string) => {
-          let cells = l.split('|').map(c => c.trim());
-          if (cells.length > 0 && cells[0] === '') cells = cells.slice(1);
-          if (cells.length > 0 && cells[cells.length - 1] === '') cells = cells.slice(0, -1);
-          return cells;
-        };
-
-        const parsedRows = tableLines.map(l => splitRow(l));
-        const header = parsedRows[0] || [];
-        const body = parsedRows.slice(2).map(r => {
-          const out: any = {};
-          for (let ci = 0; ci < header.length; ci++) {
-            out[header[ci] || `col${ci}`] = r[ci] !== undefined ? r[ci] : '';
-          }
-          return out;
-        });
-        return body;
-      }
-    }
-    return null;
-  };
+  const panelCls = isFullscreen
+    ? 'fixed inset-0 rounded-none z-[2000]'
+    : 'fixed inset-x-3 bottom-3 sm:inset-x-auto sm:bottom-8 sm:right-8 sm:w-[440px] sm:h-[640px] h-[calc(100dvh-5rem)] rounded-[2rem] sm:rounded-[2.5rem] z-[1000]';
 
   return (
-    <div className="fixed bottom-8 right-8 z-[1000]">
-      {isOpen ? (
-        <div className={isFullscreen ? 'bg-white fixed inset-0 rounded-none shadow-2xl border border-slate-200 flex flex-col overflow-hidden animate-in duration-500 z-[2000]' : 'bg-white w-[420px] h-[600px] rounded-[3rem] shadow-2xl border border-slate-200 flex flex-col overflow-hidden animate-in slide-in-from-bottom-4 duration-500'}>
-          <div className="bg-slate-900 p-6 text-white flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="w-12 h-12 bg-indigo-600 rounded-2xl flex items-center justify-center shadow-lg relative">
-                <Bot size={24} />
-                <span className="absolute -bottom-1 -right-1 w-3 h-3 bg-emerald-500 border-2 border-slate-900 rounded-full"></span>
-              </div>
-              <div>
-                <h4 className="font-black text-sm uppercase tracking-tight">Kernel IA Orchestrator</h4>
-                <p className="text-[8px] text-indigo-400 font-bold uppercase tracking-widest flex items-center gap-1">
-                  <Activity size={8} /> n8n Live Analysis
-                </p>
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <button onClick={() => setIsFullscreen(prev => !prev)} className="p-2 hover:bg-white/10 rounded-xl text-slate-400" aria-label="Basculer plein écran">
-                {isFullscreen ? <Minimize size={18} /> : <Maximize size={18} />}
-              </button>
-              <button onClick={() => setIsOpen(false)} className="p-2 hover:bg-white/10 rounded-xl text-slate-400"><X size={20} /></button>
-            </div>
-          </div>
+    <div
+      className={`${panelCls} bg-white shadow-2xl border border-slate-200 flex flex-col overflow-hidden`}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Assistant IA Kernel"
+    >
+      {/* ── Header ── */}
+      <ChatHeader
+        isFullscreen={isFullscreen}
+        onToggleFullscreen={() => setIsFullscreen(p => !p)}
+        onClose={() => setIsOpen(false)}
+      />
 
-          <div ref={scrollRef} className="flex-1 overflow-y-auto p-6 space-y-6 bg-slate-50/30 custom-scrollbar">
-            {messages.length === 0 && !loadingHistory && (
-              <div className="text-center py-8 space-y-6">
-                <Sparkles size={56} className="text-indigo-600 mx-auto animate-pulse" />
-                <h3 className="text-sm font-black text-slate-700">Venez chattez avec moi</h3>
-                <p className="text-[10px] text-slate-400 font-medium px-6">Je peux aider à analyser vos ventes, factures et stocks. Essayez une des propositions ci-dessous :</p>
-                <div className="flex flex-wrap gap-2 justify-center mt-2">
-                  {sampleQuestions.map((q, idx) => (
-                    <button key={idx} onClick={() => handleSend(q)} className="px-3 py-2 bg-indigo-50 text-indigo-700 rounded-full text-xs font-bold hover:bg-indigo-100">{q}</button>
-                  ))}
-                </div>
-              </div>
-            )}
-            {loadingHistory && (
-              <div className="text-center text-[10px] text-slate-400">Chargement de l'historique...</div>
-            )}
-            {messages.map((m, i) => (
-              <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'} animate-in fade-in slide-in-from-bottom-1`}>
-                <div className={`max-w-[90%] p-3 rounded-[2rem] text-xs leading-relaxed shadow-sm border ${
-                  m.role === 'user' ? 'bg-indigo-600 text-white rounded-br-none border-indigo-600 font-semibold shadow-md' :
-                  m.status === 'ERROR' ? 'bg-rose-100 text-rose-800 border-rose-200 rounded-bl-none' :
-                  'bg-white text-slate-900 border-slate-200 rounded-bl-none font-medium'
-                }`}>
-                  <div>
-                          {/* Export controls when message contains table data (rawResults) or markdown table */}
-                          {(() => {
-                            const tableData = (m.rawResults && Array.isArray(m.rawResults) && m.rawResults.length) ? m.rawResults : parseMarkdownTableToData(m.formattedResponse);
-                            if (tableData && Array.isArray(tableData) && tableData.length) {
-                              const key = String((m.timestamp && (m.timestamp as any).getTime && (m.timestamp as any).getTime()) || Math.random());
-                              return (
-                                <div className="relative">
-                                  <div className="absolute top-2 right-2 flex gap-2 z-20">
-                                    <button aria-label="Exporter CSV" onClick={() => exportDataAsCSV(tableData, `export-${key}.csv`)} className="px-2.5 py-0.5 text-[10px] bg-white border border-slate-200 rounded-md text-slate-700 flex items-center gap-2 shadow-sm hover:bg-slate-50 transition"> 
-                                      <Download size={12} />
-                                    </button>
-                                    <button aria-label="Exporter XLSX" onClick={() => exportDataAsXLSX(tableData, `export-${key}.xlsx`)} className="px-2.5 py-0.5 text-[10px] bg-white border border-slate-200 rounded-md text-slate-700 flex items-center gap-2 shadow-sm hover:bg-slate-50 transition"> 
-                                      <TableIcon size={12} />
-                                    </button>
-                                  </div>
-                                  <div className="pt-2">
-                                    {renderMarkdownWithTable(m.formattedResponse)}
-                                    {renderVisuals(m)}
-                                  </div>
-                                </div>
-                              );
-                            }
-                            return (<>
-                              {renderMarkdownWithTable(m.formattedResponse)}
-                              {renderVisuals(m)}
-                            </>);
-                          })()}
-                  </div>
-                  <div className="text-right mt-2">
-                    <span className="text-[9px] text-slate-400 font-bold">{formatTimestamp(m.timestamp)}</span>
-                  </div>
-                </div>
-              </div>
-            ))}
-            {isLoading && (
-              <div className="flex gap-2 p-4 bg-white rounded-2xl w-fit shadow-sm border border-slate-100">
-                <Loader2 className="animate-spin text-indigo-600" size={16} />
-                <span className="text-[10px] font-black text-slate-400 uppercase">Génération en cours...</span>
-              </div>
-            )}
-          </div>
-
-          <div className="p-6 bg-white border-t border-slate-100">
-            <div className="relative">
-              <input 
-                type="text" value={input} onChange={(e) => setInput(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-                placeholder="Ex: Top 5 produits vendus..."
-                className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-6 py-4 text-xs font-bold focus:ring-4 focus:ring-indigo-500/10 outline-none pr-14"
-              />
-              <button onClick={handleSend} disabled={isLoading || !input.trim()} className="absolute right-2 top-1/2 -translate-y-1/2 p-2.5 bg-slate-900 text-white rounded-xl hover:bg-indigo-600 transition-all active:scale-90">
-                <Send size={16} />
-              </button>
+      {/* ── Zone messages ── */}
+      <div
+        ref={scrollRef}
+        onScroll={handleScroll}
+        className="flex-1 overflow-y-auto overscroll-contain px-3 sm:px-5 py-4 sm:py-5 space-y-4 bg-slate-50/40 relative"
+        role="list"
+        aria-label="Historique de conversation"
+        aria-live="polite"
+        aria-atomic="false"
+      >
+        {/* État vide */}
+        {messages.length === 0 && !loadingHistory && (
+          <div className="flex flex-col items-center justify-center h-full py-4 sm:py-8 text-center">
+            <div className="w-14 h-14 bg-indigo-100 rounded-3xl flex items-center justify-center mb-4 shadow-inner">
+              <Sparkles size={28} className="text-indigo-600" />
+            </div>
+            <h3 className="text-[13px] font-black text-slate-700 mb-1">Bonjour, comment puis-je vous aider ?</h3>
+            <p className="text-[10px] text-slate-400 font-medium max-w-[90%] sm:max-w-[260px] mb-4 sm:mb-5">
+              Analysez vos ventes, factures et stocks. Commencez par une question ou essayez :
+            </p>
+            <div className="flex flex-wrap gap-1.5 sm:gap-2 justify-center px-2">
+              {SAMPLE_QUESTIONS.map((q, idx) => (
+                <button
+                  key={idx}
+                  onClick={() => handleSend(q)}
+                  className="px-2.5 sm:px-3 py-1.5 sm:py-2 bg-white border border-indigo-100 text-indigo-700 rounded-full text-[9px] sm:text-[10px] font-bold hover:bg-indigo-50 hover:border-indigo-300 transition-all shadow-sm"
+                >
+                  {q}
+                </button>
+              ))}
             </div>
           </div>
-        </div>
-      ) : (
-        isAdmin ? (
-          <button onClick={() => setIsOpen(true)} className="w-20 h-20 bg-slate-900 text-white rounded-[2.5rem] flex items-center justify-center shadow-2xl hover:scale-105 active:scale-95 transition-all group relative">
-            <MessageSquare size={28} />
-            <span className="absolute -top-1 -right-1 w-7 h-7 bg-indigo-600 border-4 border-slate-50 rounded-full flex items-center justify-center text-[8px] font-black uppercase">IA</span>
+        )}
+
+        {/* Chargement historique */}
+        {loadingHistory && (
+          <div className="flex items-center justify-center gap-2 py-6 text-slate-400">
+            <Loader2 size={14} className="animate-spin" />
+            <span className="text-[10px] font-bold uppercase tracking-wide">Chargement de l'historique…</span>
+          </div>
+        )}
+
+        {/* Messages */}
+        {messages.map((msg, idx) => {
+          const exportKey = `${msg.timestamp.getTime()}-${idx}`;
+          return (
+            <MessageBubble
+              key={exportKey}
+              msg={msg}
+              exportKey={exportKey}
+              chartRef={el => { chartRefs.current[exportKey] = el; }}
+              onExportCSV={exportCSV}
+              onExportXLSX={exportXLSX}
+            />
+          );
+        })}
+
+        {/* Indicateur de chargement IA */}
+        {isLoading && (
+          <div className="flex items-center gap-2 justify-start" aria-live="assertive" role="status">
+            <div className="w-7 h-7 bg-indigo-600 rounded-xl flex items-center justify-center flex-shrink-0">
+              <Bot size={14} className="text-white" />
+            </div>
+            <div className="flex gap-1.5 px-4 py-3 bg-white rounded-3xl rounded-bl-lg border border-slate-200 shadow-sm">
+              {[0, 150, 300].map(delay => (
+                <span
+                  key={delay}
+                  className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-bounce"
+                  style={{ animationDelay: `${delay}ms` }}
+                />
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Bouton "Défiler vers le bas" */}
+        <ScrollToBottomButton onClick={scrollToBottom} visible={showScrollBtn} />
+      </div>
+
+      {/* ── Zone input ── */}
+      <div className="flex-shrink-0 px-3 sm:px-4 py-3 sm:py-4 bg-white border-t border-slate-100">
+        <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-2xl px-3 sm:px-4 py-2 sm:py-2.5 focus-within:ring-4 focus-within:ring-indigo-500/10 focus-within:border-indigo-300 transition-all">
+          <input
+            ref={inputRef}
+            type="text"
+            value={input}
+            onChange={e => setInput(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
+            placeholder="Ex: Top 5 produits vendus ce mois-ci…"
+            aria-label="Message pour l'assistant"
+            disabled={isLoading}
+            className="flex-1 bg-transparent text-[12px] font-medium text-slate-800 placeholder:text-slate-400 outline-none disabled:opacity-50"
+          />
+          <button
+            onClick={() => handleSend()}
+            disabled={isLoading || !input.trim()}
+            aria-label="Envoyer le message"
+            className="
+              w-9 h-9 flex-shrink-0 bg-slate-900 text-white rounded-xl
+              flex items-center justify-center
+              hover:bg-indigo-600 disabled:opacity-40 disabled:cursor-not-allowed
+              transition-all duration-150 active:scale-90
+              focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500
+            "
+          >
+            <Send size={14} />
           </button>
-        ) : null
-      )}
+        </div>
+        <p className="text-center text-[8px] text-slate-300 font-medium mt-2">
+          Entrée pour envoyer · Propulsé par n8n + Gemini
+        </p>
+      </div>
     </div>
   );
 };
 
 export default ChatInterface;
+
+// ─────────────────────────────────────────────
+// Tests unitaires (Jest / Vitest)
+// ─────────────────────────────────────────────
+// Pour exécuter : npx vitest run ChatInterface.test.ts
+//
+// import { safeStr, formatStatValue, arrayToCSV, parseStructuredFormatted, detectChartType, parseMarkdownTableToData } from './ChatInterface';
+//
+// describe('safeStr', () => {
+//   it('gère null/undefined', () => { expect(safeStr(null)).toBe('—'); expect(safeStr(undefined)).toBe('—'); });
+//   it('gère les nombres', () => { expect(safeStr(1000)).toBe('1 000'); });
+//   it('stringifie les objets', () => { expect(safeStr({ a: 1 })).toBe('{"a":1}'); });
+// });
+//
+// describe('arrayToCSV', () => {
+//   it('crée un CSV valide', () => {
+//     const result = arrayToCSV([{ name: 'Alice', age: 30 }]);
+//     expect(result).toContain('"Alice"');
+//     expect(result).toContain('"30"');
+//   });
+//   it('retourne vide pour tableau vide', () => { expect(arrayToCSV([])).toBe(''); });
+// });
+//
+// describe('parseStructuredFormatted', () => {
+//   it('parse un JSON valide', () => {
+//     const r = parseStructuredFormatted('{"response":"Bonjour","format":"general"}');
+//     expect(r.text).toBe('Bonjour');
+//     expect(r.format).toBe('general');
+//   });
+//   it('retourne le texte brut si pas de JSON', () => {
+//     const r = parseStructuredFormatted('Bonjour monde');
+//     expect(r.text).toBe('Bonjour monde');
+//   });
+//   it('gère les code fences', () => {
+//     const r = parseStructuredFormatted('```json\n{"response":"ok"}\n```');
+//     expect(r.text).toBe('ok');
+//   });
+// });
+//
+// describe('detectChartType', () => {
+//   it('respecte meta.chartType', () => {
+//     expect(detectChartType([{}], { chartType: 'bar' }, 'chart')).toBe('bar');
+//     expect(detectChartType([{}], { chartType: 'pie' }, 'chart')).toBe('pie');
+//   });
+//   it('détecte pie auto (string + number)', () => {
+//     expect(detectChartType([{ cat: 'A', val: 10 }], {}, 'chart')).toBe('pie');
+//   });
+// });
+//
+// describe('parseMarkdownTableToData', () => {
+//   it('extrait un tableau Markdown', () => {
+//     const md = '| Nom | Score |\n|---|---|\n| Alice | 42 |\n| Bob | 7 |';
+//     const data = parseMarkdownTableToData(md);
+//     expect(data).toHaveLength(2);
+//     expect(data![0]['Nom']).toBe('Alice');
+//   });
+//   it('retourne null si pas de tableau', () => {
+//     expect(parseMarkdownTableToData('Pas de tableau ici.')).toBeNull();
+//   });
+// });

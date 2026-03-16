@@ -138,9 +138,9 @@ const CategoryManager: React.FC<{ plan?: SubscriptionPlan }> = ({ plan }) => {
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500 pb-20">
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
         <div>
-          <h2 className="text-3xl font-black text-slate-900 tracking-tighter uppercase flex items-center gap-3">
+          <h2 className="text-xl md:text-2xl font-black text-slate-900 tracking-tighter uppercase flex items-center gap-3">
             <Layers className="text-indigo-600" size={32} /> Architecture Catalogue
           </h2>
           <p className="text-slate-500 text-[10px] font-black uppercase tracking-[0.3em] mt-1">
@@ -149,25 +149,25 @@ const CategoryManager: React.FC<{ plan?: SubscriptionPlan }> = ({ plan }) => {
         </div>
         {canModify ? (
           isLimitReached ? (
-            <div className="flex items-center gap-3 px-6 py-4 bg-rose-50 text-rose-600 rounded-2xl border border-rose-100 text-[10px] font-black uppercase tracking-widest shadow-sm">
+            <div className="flex items-center gap-3 px-4 md:px-6 py-4 bg-rose-50 text-rose-600 rounded-2xl border border-rose-100 text-[10px] font-black uppercase tracking-widest shadow-sm">
               <Lock size={16} /> Limite 3 catégories atteinte (Trial)
             </div>
           ) : (
-            <button 
+            <button
               onClick={() => { setFormData({ name: '', description: '' }); setShowModal('CREATE'); }}
-              className="bg-slate-900 text-white px-8 py-4 rounded-2xl font-black hover:bg-indigo-600 transition-all shadow-xl flex items-center gap-3 text-xs uppercase tracking-widest"
+              className="bg-slate-900 text-white px-4 md:px-8 py-4 rounded-2xl font-black hover:bg-indigo-600 transition-all shadow-xl flex items-center gap-3 text-xs uppercase tracking-widest"
             >
               <Plus size={18} /> CRÉER UNE CATÉGORIE
             </button>
           )
         ) : (
-          <div className="flex items-center gap-3 px-6 py-3 bg-slate-100 text-slate-400 rounded-2xl border border-slate-200 text-[10px] font-black uppercase tracking-widest">
+          <div className="flex items-center gap-3 px-4 md:px-6 py-3 bg-slate-100 text-slate-400 rounded-2xl border border-slate-200 text-[10px] font-black uppercase tracking-widest">
             <Lock size={14} /> Mode Lecture Seule
           </div>
         )}
       </div>
 
-      <div className="bg-white p-4 rounded-[2rem] border border-slate-100 shadow-sm flex items-center gap-4">
+      <div className="bg-white p-4 rounded-[2rem] border border-slate-100 shadow-sm flex flex-wrap items-center gap-4">
         <div className="relative flex-1">
           <Search className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
           <input 
@@ -179,7 +179,7 @@ const CategoryManager: React.FC<{ plan?: SubscriptionPlan }> = ({ plan }) => {
           />
         </div>
 
-        <div className="hidden sm:flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <button
             onClick={() => setViewMode('CARD')}
             className={`px-4 py-2 rounded-2xl text-xs font-black uppercase tracking-widest ${viewMode === 'CARD' ? 'bg-indigo-600 text-white' : 'bg-slate-50 text-slate-600'}`}
@@ -213,7 +213,7 @@ const CategoryManager: React.FC<{ plan?: SubscriptionPlan }> = ({ plan }) => {
 
       {/* Filtres avancés (similaire à Payments) */}
       {showFilters && (
-        <div className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-xl animate-in slide-in-from-top-4 duration-300 grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-xl animate-in slide-in-from-top-4 duration-300 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
           <div className="space-y-2">
             <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest px-2">Recherche</label>
             <input
@@ -391,8 +391,8 @@ const CategoryManager: React.FC<{ plan?: SubscriptionPlan }> = ({ plan }) => {
       {/* CREATE / EDIT MODAL */}
       {showModal && (
         <div className="fixed inset-0 z-[600] flex items-center justify-center p-6 bg-slate-950/80 backdrop-blur-md animate-in fade-in duration-300">
-          <div className="bg-white w-full max-w-lg rounded-[3.5rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-500">
-             <div className={`px-10 py-8 text-white flex justify-between items-center ${showModal === 'CREATE' ? 'bg-slate-900' : 'bg-amber-500'}`}>
+          <div className="bg-white w-full max-w-lg mx-4 md:mx-auto rounded-[3.5rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-500">
+             <div className={`px-6 md:px-10 py-8 text-white flex justify-between items-center ${showModal === 'CREATE' ? 'bg-slate-900' : 'bg-amber-500'}`}>
                 <div className="flex items-center gap-4">
                   {showModal === 'CREATE' ? <Plus size={28}/> : <Edit3 size={28}/>}
                   <h3 className="text-xl font-black uppercase tracking-tight">
@@ -402,7 +402,7 @@ const CategoryManager: React.FC<{ plan?: SubscriptionPlan }> = ({ plan }) => {
                 <button onClick={() => setShowModal(null)} className="p-3 hover:bg-white/10 rounded-2xl transition-all"><X size={24}/></button>
              </div>
              
-             <form onSubmit={handleSubmit} className="p-10 space-y-8">
+             <form onSubmit={handleSubmit} className="p-5 md:p-10 space-y-8">
                 <div className="space-y-6">
                    <div>
                       <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-2">Désignation de la catégorie <span className="text-rose-500">*</span></label>
@@ -426,17 +426,17 @@ const CategoryManager: React.FC<{ plan?: SubscriptionPlan }> = ({ plan }) => {
                    </div>
                 </div>
 
-                <div className="flex gap-4">
-                  <button 
-                    type="button" 
-                    onClick={() => setShowModal(null)} 
+                <div className="flex flex-wrap gap-4">
+                  <button
+                    type="button"
+                    onClick={() => setShowModal(null)}
                     className="flex-1 py-5 border-2 border-slate-100 text-slate-400 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-slate-50 transition-all"
                   >
                     ANNULER
                   </button>
-                  <button 
-                    type="submit" 
-                    disabled={actionLoading} 
+                  <button
+                    type="submit"
+                    disabled={actionLoading}
                     className={`flex-1 py-5 text-white rounded-2xl font-black text-[10px] uppercase tracking-[0.2em] shadow-xl transition-all flex items-center justify-center gap-3 ${showModal === 'CREATE' ? 'bg-indigo-600 hover:bg-slate-900' : 'bg-amber-600 hover:bg-amber-700'}`}
                   >
                     {actionLoading ? <RefreshCw className="animate-spin" size={18} /> : (
@@ -452,7 +452,7 @@ const CategoryManager: React.FC<{ plan?: SubscriptionPlan }> = ({ plan }) => {
       {/* CONFIRM DELETE MODAL */}
       {showDeleteConfirm && (
         <div className="fixed inset-0 z-[700] flex items-center justify-center p-6 bg-slate-950/90 backdrop-blur-md animate-in fade-in duration-300">
-           <div className="bg-white w-full max-w-md rounded-[3rem] shadow-2xl overflow-hidden p-10 text-center animate-in zoom-in-95">
+           <div className="bg-white w-full max-w-md mx-4 md:mx-auto rounded-[3rem] shadow-2xl overflow-hidden p-6 md:p-10 text-center animate-in zoom-in-95">
               <div className="w-20 h-20 bg-rose-50 text-rose-500 rounded-[2rem] flex items-center justify-center mx-auto mb-6 shadow-inner">
                 <ShieldAlert size={40} />
               </div>
@@ -485,20 +485,20 @@ const CategoryManager: React.FC<{ plan?: SubscriptionPlan }> = ({ plan }) => {
       {/* DETAILS MODAL */}
       {showDetailsCategory && (
         <div className="fixed inset-0 z-[800] flex items-center justify-center p-6 bg-slate-950/95 backdrop-blur-md animate-in fade-in duration-300">
-           <div className="bg-white w-full max-w-4xl rounded-[3rem] shadow-2xl overflow-hidden flex flex-col max-h-[90vh] animate-in zoom-in-95">
-              <div className="px-10 py-8 bg-slate-900 text-white flex justify-between items-center">
+           <div className="bg-white w-full max-w-4xl mx-4 md:mx-auto rounded-[3rem] shadow-2xl overflow-hidden flex flex-col max-h-[90vh] animate-in zoom-in-95">
+              <div className="px-6 md:px-10 py-6 md:py-8 bg-slate-900 text-white flex justify-between items-center">
                  <div className="flex items-center gap-4">
                    <div className="w-16 h-16 bg-indigo-600 rounded-2xl flex items-center justify-center text-2xl shadow-inner">
                      <Layers size={28} />
                    </div>
                    <div>
-                     <h3 className="text-2xl font-black uppercase tracking-tight">{showDetailsCategory.name}</h3>
+                     <h3 className="text-xl md:text-2xl font-black uppercase tracking-tight">{showDetailsCategory.name}</h3>
                      <p className="text-xs text-indigo-200 uppercase tracking-widest mt-1">ID: {showDetailsCategory.id.slice(0,8)}</p>
                    </div>
                  </div>
                  <button onClick={() => setShowDetailsCategory(null)} className="p-3 hover:bg-white/10 rounded-2xl transition-all"><X size={24} /></button>
               </div>
-              <div className="flex-1 overflow-y-auto p-8 bg-slate-50 custom-scrollbar">
+              <div className="flex-1 overflow-y-auto p-4 md:p-8 bg-slate-50 custom-scrollbar">
                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                    <div className="lg:col-span-1 bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
                      <h4 className="text-xs font-black uppercase text-slate-400">Détails</h4>

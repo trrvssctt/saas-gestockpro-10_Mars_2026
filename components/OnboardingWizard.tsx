@@ -125,7 +125,7 @@ const OnboardingWizard: React.FC<Props> = ({ onComplete, companyName, user }) =>
   ];
 
   return (
-    <div className="fixed inset-0 z-[200] bg-slate-950 flex items-center justify-center p-6 overflow-hidden font-sans">
+    <div className="fixed inset-0 z-[200] bg-slate-950 flex items-center justify-center p-3 sm:p-6 overflow-hidden font-sans">
       <style>{`
         :root { --primary-kernel: ${formData.primaryColor}; --button-kernel: ${formData.buttonColor || '#63452c'}; }
         .bg-kernel { background-color: var(--primary-kernel); }
@@ -134,18 +134,31 @@ const OnboardingWizard: React.FC<Props> = ({ onComplete, companyName, user }) =>
         .ring-kernel { --tw-ring-color: var(--primary-kernel); }
       `}</style>
 
-      <div className="max-w-5xl w-full grid grid-cols-1 lg:grid-cols-12 gap-0 bg-white rounded-[4rem] shadow-[0_40px_100px_rgba(0,0,0,0.4)] overflow-hidden animate-in zoom-in-95 duration-700">
-        
-        <div className="lg:col-span-4 bg-slate-900 p-12 text-white flex flex-col justify-between relative overflow-hidden">
+      <div className="max-w-5xl w-full flex flex-col lg:grid lg:grid-cols-12 gap-0 bg-white rounded-[2rem] md:rounded-[4rem] shadow-[0_40px_100px_rgba(0,0,0,0.4)] overflow-hidden max-h-[92dvh] animate-in zoom-in-95 duration-700">
+
+        {/* Barre de progression mobile uniquement */}
+        <div className="flex lg:hidden items-center justify-between px-5 pt-4 pb-3 bg-slate-900 text-white shrink-0">
+          <div>
+            <p className="text-[8px] font-black uppercase tracking-widest text-slate-400">Configuration</p>
+            <p className="text-xs font-black uppercase tracking-tight">{steps.find(s => s.id === step)?.label}</p>
+          </div>
+          <div className="flex items-center gap-1.5">
+            {steps.map(s => (
+              <div key={s.id} className={`h-1.5 rounded-full transition-all duration-500 ${step === s.id ? 'w-6 bg-white' : (step > s.id || s.id === 1) ? 'w-3 bg-emerald-400' : 'w-3 bg-slate-600'}`} />
+            ))}
+          </div>
+        </div>
+
+        <div className="hidden lg:flex lg:col-span-4 bg-slate-900 p-12 text-white flex-col justify-between relative overflow-hidden">
           <div className="absolute top-0 right-0 p-8 opacity-5"><Zap size={200} /></div>
-          
-          <div className="space-y-12 relative z-10">
+
+          <div className="space-y-8 relative z-10">
             <div>
               <div className="inline-flex items-center gap-2 px-3 py-1 bg-emerald-600 rounded-full mb-4">
                 <ShieldCheck size={14} className="text-white" />
                 <span className="text-[10px] font-black uppercase tracking-widest">Instance Activée</span>
               </div>
-              <h2 className="text-3xl font-black tracking-tighter leading-tight">Configuration <span className="text-kernel text-nowrap">GeStockPro</span></h2>
+              <h2 className="text-2xl font-black tracking-tighter leading-tight">Configuration <span className="text-kernel text-nowrap">GeStockPro</span></h2>
               <p className="text-slate-400 text-xs font-medium mt-3 leading-relaxed uppercase tracking-widest">Initialisation des assets de {companyName}.</p>
             </div>
 
@@ -165,7 +178,7 @@ const OnboardingWizard: React.FC<Props> = ({ onComplete, companyName, user }) =>
           </div>
         </div>
 
-        <div className="lg:col-span-8 p-16 flex flex-col justify-between h-[80vh] overflow-y-auto">
+        <div className="lg:col-span-8 p-5 sm:p-8 lg:p-16 flex flex-col justify-between flex-1 overflow-y-auto custom-scrollbar">
           <div className="flex-1">
             {error && (
               <div className="mb-6 p-4 bg-rose-50 border border-rose-100 rounded-2xl text-rose-600 text-[10px] font-black uppercase flex items-center gap-3 animate-in shake">
@@ -176,10 +189,10 @@ const OnboardingWizard: React.FC<Props> = ({ onComplete, companyName, user }) =>
             {step === 2 && (
               <div className="space-y-10 animate-in slide-in-from-right-8 duration-500">
                 <div>
-                  <h3 className="text-3xl font-black text-slate-900 tracking-tight uppercase">Pilotage Financier</h3>
+                  <h3 className="text-xl md:text-3xl font-black text-slate-900 tracking-tight uppercase">Pilotage Financier</h3>
                   <p className="text-slate-400 text-xs font-bold uppercase tracking-widest mt-2">Définit vos calculs de marge et de taxes par défaut.</p>
                 </div>
-                <div className="grid grid-cols-2 gap-8">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 md:gap-8">
                   <div>
                     <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3 px-2">Devise Système</label>
                       <select value={formData.currency} onChange={e => setFormData({...formData, currency: e.target.value})} className="w-full bg-slate-50 border border-slate-100 rounded-3xl px-6 py-5 text-sm font-black outline-none focus:ring-4 focus:ring-kernel/10 shadow-inner appearance-none cursor-pointer">
@@ -203,7 +216,7 @@ const OnboardingWizard: React.FC<Props> = ({ onComplete, companyName, user }) =>
             {step === 3 && (
               <div className="space-y-10 animate-in slide-in-from-right-8 duration-500">
                 <div>
-                  <h3 className="text-3xl font-black text-slate-900 tracking-tight uppercase">Identité Visuelle</h3>
+                  <h3 className="text-xl md:text-3xl font-black text-slate-900 tracking-tight uppercase">Identité Visuelle</h3>
                   <p className="text-slate-400 text-xs font-bold uppercase tracking-widest mt-2">Uploadez vos visuels vers le cloud Cloudinary.</p>
                 </div>
 
@@ -260,7 +273,7 @@ const OnboardingWizard: React.FC<Props> = ({ onComplete, companyName, user }) =>
             {step === 4 && (
               <div className="space-y-10 animate-in slide-in-from-right-8 duration-500">
                 <div>
-                  <h3 className="text-3xl font-black text-slate-900 tracking-tight uppercase">Conformité & Légal</h3>
+                  <h3 className="text-xl md:text-3xl font-black text-slate-900 tracking-tight uppercase">Conformité & Légal</h3>
                   <p className="text-slate-400 text-xs font-bold uppercase tracking-widest mt-2">Paramétrez le pied de vos documents commerciaux.</p>
                 </div>
 
@@ -278,12 +291,12 @@ const OnboardingWizard: React.FC<Props> = ({ onComplete, companyName, user }) =>
             )}
           </div>
 
-          <div className="mt-12 flex items-center gap-6 pt-10 border-t border-slate-100">
+          <div className="mt-6 md:mt-10 flex items-center gap-3 md:gap-6 pt-5 md:pt-8 border-t border-slate-100 shrink-0">
             {step > 2 && (
               <button 
                 onClick={() => setStep(prev => prev - 1)} 
                 disabled={isFinalizing}
-                className="px-10 py-5 bg-white border-2 border-slate-100 text-slate-400 rounded-3xl font-black text-[10px] uppercase tracking-widest"
+                className="px-5 md:px-10 py-4 md:py-5 bg-white border-2 border-slate-100 text-slate-400 rounded-3xl font-black text-[10px] uppercase tracking-widest"
               >
                 RETOUR
               </button>

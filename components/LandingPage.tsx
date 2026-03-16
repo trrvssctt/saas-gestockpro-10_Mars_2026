@@ -1,37 +1,166 @@
 
 import React, { useState } from 'react';
-import { 
-  CheckCircle2, 
-  ArrowRight, 
-  Zap, 
-  ShieldCheck, 
-  BarChart3, 
-  Users, 
-  Package, 
-  CreditCard, 
-  Layers, 
-  Lock, 
-  RefreshCw, 
-  Globe, 
-  Cpu, 
-  MessageSquare, 
-  Mail, 
-  Phone, 
+import {
+  CheckCircle2,
+  ArrowRight,
+  Zap,
+  ShieldCheck,
+  BarChart3,
+  Users,
+  Package,
+  CreditCard,
+  Layers,
+  Lock,
+  RefreshCw,
+  Globe,
+  Cpu,
+  MessageSquare,
+  Mail,
+  Phone,
   MapPin,
   ChevronDown,
   Star,
   Plus,
   Minus,
   ShieldAlert,
-  FileText
+  FileText,
+  Send,
+  Loader2
 } from 'lucide-react';
+
+import logo from '../assets/logo_gestockpro.png';
+import logo_removebg from '../assets/logo_gestockpro-removebg-preview.png';
+import MentionsLegales from './legal/MentionsLegales';
+import PolitiqueConfidentialite from './legal/PolitiqueConfidentialite';
+import CGU from './legal/CGU';
+import PolitiqueCookies from './legal/PolitiqueCookies';
 
 interface LandingPageProps {
   onLogin: (opts?: { openRegister?: boolean; planId?: string; regStep?: number }) => void;
 }
 
+const buildTimeBackend = (import.meta as any).env?.VITE_BACKEND_URL;
+let rawBackend: string;
+
+if (buildTimeBackend) {
+  // Variable d'environnement explicite définie
+  rawBackend = buildTimeBackend;
+} else {
+  try {
+    const origin = (typeof window !== 'undefined' && window.location && window.location.origin) ? window.location.origin : '';
+    // En développement avec Vite (localhost:5173-5179), pointer vers le backend sur port 3000
+    if (origin && /localhost:517[3-9]/.test(origin)) {
+      rawBackend = 'https://gestockpro.realtechprint.com';
+    } else if (origin && !/localhost|127\.0\.0\.1/.test(origin)) {
+      // Production: API co-localisée sous la même origine
+      rawBackend = origin;
+    } else {
+      // Fallback pour développement
+      rawBackend = 'https://gestockpro.realtechprint.com';
+    }
+  } catch (e) {
+    rawBackend = 'https://gestockpro.realtechprint.com';
+  }
+}
+
+type LegalPage = 'mentions' | 'confidentialite' | 'cgu' | 'cookies' | null;
+
 const LandingPage: React.FC<LandingPageProps> = ({ onLogin }) => {
+  const [activeLegalPage, setActiveLegalPage] = useState<LegalPage>(null);
   const [activeFaq, setActiveFaq] = useState<number | null>(null);
+  
+  // État du formulaire de contact
+  const [contactForm, setContactForm] = useState({
+    fullName: '',
+    email: '',
+    phone: '',
+    message: ''
+  });
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitStatus, setSubmitStatus] = useState<'idle' | 'success' | 'error'>('idle');
+  const [submitMessage, setSubmitMessage] = useState('');
+
+  // Fonction pour gérer les changements dans le formulaire
+  const handleContactInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    const { name, value } = e.target;
+    setContactForm(prev => ({
+      ...prev,
+      [name]: value
+    }));
+  };
+
+  // Fonction pour envoyer le message de contact
+  const handleContactSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    // Validation basique côté client
+    if (!contactForm.fullName.trim() || contactForm.fullName.trim().length < 2) {
+      setSubmitStatus('error');
+      setSubmitMessage('Le nom complet est requis et doit contenir au moins 2 caractères.');
+      return;
+    }
+    
+    if (!contactForm.email.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactForm.email)) {
+      setSubmitStatus('error');
+      setSubmitMessage('Veuillez saisir une adresse email valide.');
+      return;
+    }
+    
+    if (!contactForm.message.trim() || contactForm.message.trim().length < 10) {
+      setSubmitStatus('error');
+      setSubmitMessage('Le message doit contenir au moins 10 caractères.');
+      return;
+    }
+
+    setIsSubmitting(true);
+    setSubmitStatus('idle');
+    setSubmitMessage('');
+
+    try {
+      const response = await fetch(`${rawBackend}/api/contact`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(contactForm),
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        setSubmitStatus('success');
+        setSubmitMessage(data.message || 'Votre message a été envoyé avec succès. Nous vous répondrons dans les plus brefs délais.');
+        // Réinitialiser le formulaire
+        setContactForm({
+          fullName: '',
+          email: '',
+          phone: '',
+          message: ''
+        });
+      } else {
+        setSubmitStatus('error');
+        setSubmitMessage(data.error || 'Une erreur s\'est produite lors de l\'envoi du message.');
+      }
+    } catch (error) {
+      console.error('Erreur lors de l\'envoi du message:', error);
+      setSubmitStatus('error');
+      setSubmitMessage('Impossible de se connecter au serveur. Veuillez vérifier votre connexion et réessayer.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // Auto-clear des messages de statut
+  React.useEffect(() => {
+    if (submitStatus !== 'idle') {
+      const timer = setTimeout(() => {
+        setSubmitStatus('idle');
+        setSubmitMessage('');
+      }, 8000); // Message affiché pendant 8 secondes
+      
+      return () => clearTimeout(timer);
+    }
+  }, [submitStatus]);
 
   const features = [
     {
@@ -105,30 +234,52 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLogin }) => {
     }
   ];
 
+  const openLegal = (page: LegalPage) => {
+    setActiveLegalPage(page);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const closeLegal = () => {
+    setActiveLegalPage(null);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  if (activeLegalPage === 'mentions') return <MentionsLegales onBack={closeLegal} />;
+  if (activeLegalPage === 'confidentialite') return <PolitiqueConfidentialite onBack={closeLegal} />;
+  if (activeLegalPage === 'cgu') return <CGU onBack={closeLegal} />;
+  if (activeLegalPage === 'cookies') return <PolitiqueCookies onBack={closeLegal} />;
+
   return (
-    <div className="min-h-screen bg-white text-slate-900 font-sans selection:bg-indigo-100 selection:text-indigo-900">
+    <div className="min-h-screen bg-white text-slate-900 selection:bg-indigo-100 selection:text-indigo-900" style={{ 
+      fontFamily: 'ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji"',
+      fontSize: '16px',
+      lineHeight: '1.5',
+      fontWeight: '400'
+    }}>
       {/* Navigation */}
-      <nav className="fixed top-0 w-full z-50 bg-white/80 backdrop-blur-md border-b border-slate-100">
-        <div className="max-w-7xl mx-auto px-6 h-20 flex items-center justify-between">
+      <nav className="fixed top-0 w-full z-50 bg-white border-b border-slate-200" style={{ fontFamily: 'inherit', fontSize: '14px' }}>
+        <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between" style={{ fontFamily: 'inherit' }}>
           <div className="flex items-center gap-3">
-            <img src="../../assets/logo_gestockpro-removebg-preview.png" alt="GeStockPro" className="h-12 w-auto" />
+            <img src={logo_removebg} alt="GeStockPro" className="h-10 w-auto" />
           </div>
-          <div className="hidden md:flex items-center gap-8 text-sm font-semibold text-slate-600">
-            <a href="#features" className="hover:text-slate-900 transition-colors">Fonctionnalités</a>
-            <a href="#pricing" className="hover:text-slate-900 transition-colors">Tarifs</a>
-            <a href="#about" className="hover:text-slate-900 transition-colors">À propos</a>
-            <a href="#contact" className="hover:text-slate-900 transition-colors">Contact</a>
+          <div className="hidden md:flex items-center gap-6 text-sm font-medium text-slate-600" style={{ fontSize: '14px', fontWeight: '500' }}>
+            <a href="#features" className="hover:text-slate-900 transition-colors" style={{ textDecoration: 'none', fontSize: 'inherit', fontWeight: 'inherit' }}>Fonctionnalités</a>
+            <a href="#pricing" className="hover:text-slate-900 transition-colors" style={{ textDecoration: 'none', fontSize: 'inherit', fontWeight: 'inherit' }}>Tarifs</a>
+            <a href="#about" className="hover:text-slate-900 transition-colors" style={{ textDecoration: 'none', fontSize: 'inherit', fontWeight: 'inherit' }}>À propos</a>
+            <a href="#contact" className="hover:text-slate-900 transition-colors" style={{ textDecoration: 'none', fontSize: 'inherit', fontWeight: 'inherit' }}>Contact</a>
           </div>
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3">
             <button 
               onClick={onLogin}
-              className="px-6 py-2.5 text-sm font-bold text-slate-900 hover:bg-slate-50 rounded-xl transition-all"
+              className="px-4 py-2 text-sm font-medium text-slate-700 hover:text-slate-900 transition-colors"
+              style={{ fontSize: '14px', fontWeight: '500', border: 'none', background: 'transparent', cursor: 'pointer', fontFamily: 'inherit' }}
             >
               Connexion
             </button>
             <button 
               onClick={onLogin}
-              className="px-6 py-2.5 text-sm font-bold bg-slate-900 text-white rounded-xl shadow-lg shadow-slate-200 hover:bg-indigo-600 transition-all active:scale-95"
+              className="px-4 py-2 text-sm font-medium bg-slate-900 text-white hover:bg-slate-800 transition-colors"
+              style={{ fontSize: '14px', fontWeight: '500', border: 'none', cursor: 'pointer', fontFamily: 'inherit' }}
             >
               Essayer gratuitement
             </button>
@@ -137,65 +288,66 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLogin }) => {
       </nav>
 
       {/* Hero Section */}
-      <section className="pt-40 pb-20 px-6">
+      <section className="pt-28 md:pt-40 pb-12 md:pb-20 px-4 md:px-6" style={{ fontFamily: 'inherit' }}>
         <div className="max-w-7xl mx-auto grid lg:grid-cols-2 gap-16 items-center">
           <div>
-            <div className="inline-flex items-center gap-2 px-3 py-1 bg-indigo-50 text-indigo-600 rounded-full text-[10px] font-black uppercase tracking-widest mb-6">
+            <div className="inline-flex items-center gap-2 px-3 py-1 bg-indigo-50 text-indigo-600 rounded-full text-[10px] font-black uppercase tracking-widest mb-6" style={{ fontSize: '10px', fontWeight: '900', fontFamily: 'inherit' }}>
               <Zap size={12} /> AI-Native ERP for Modern Business
             </div>
-            <h1 className="text-6xl md:text-7xl font-black tracking-tighter leading-[0.9] mb-8 uppercase">
+            <h1 className="text-3xl md:text-5xl lg:text-6xl xl:text-7xl font-black tracking-tighter leading-[0.9] mb-8 uppercase" style={{ fontSize: 'clamp(1.875rem, 8vw, 7rem)', fontWeight: '900', lineHeight: '0.9', fontFamily: 'inherit', margin: '0 0 2rem 0' }}>
               Pilotez votre entreprise avec <span className="text-indigo-600">intelligence.</span>
             </h1>
-            <p className="text-xl text-slate-500 font-medium leading-relaxed mb-10 max-w-lg">
+            <p className="text-xl text-slate-500 font-medium leading-relaxed mb-10 max-w-lg" style={{ fontSize: '20px', fontWeight: '500', lineHeight: '1.7', fontFamily: 'inherit', margin: '0 0 2.5rem 0' }}>
               GeStockPro est un ERP léger intelligent conçu pour simplifier la gestion des ventes, stocks, clients et trésorerie des TPE et PME africaines.
             </p>
             <div className="flex flex-wrap gap-4">
               <button 
                 onClick={() => onLogin({ openRegister: true, planId: 'BASIC', regStep: 1 })}
                 className="px-8 py-4 bg-slate-900 text-white rounded-2xl font-black text-sm uppercase tracking-widest flex items-center gap-3 hover:bg-indigo-600 transition-all shadow-2xl shadow-slate-200"
+                style={{ fontSize: '14px', fontWeight: '900', fontFamily: 'inherit', border: 'none', cursor: 'pointer' }}
               >
                 Essayer gratuitement <ArrowRight size={18} />
               </button>
               <a 
                 href="#pricing"
                 className="px-8 py-4 bg-white border-2 border-slate-100 text-slate-900 rounded-2xl font-black text-sm uppercase tracking-widest hover:border-slate-900 transition-all"
+                style={{ fontSize: '14px', fontWeight: '900', fontFamily: 'inherit', textDecoration: 'none', display: 'inline-flex', alignItems: 'center' }}
               >
                 Voir les tarifs
               </a>
             </div>
-            <div className="mt-12 flex items-center gap-6">
-              <div className="flex -space-x-3">
-                <div className="w-10 h-10 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-600 font-bold border-2 border-white">M</div>
-                <div className="w-10 h-10 bg-emerald-100 rounded-full flex items-center justify-center text-emerald-600 font-bold border-2 border-white">A</div>
-                <div className="w-10 h-10 bg-amber-100 rounded-full flex items-center justify-center text-amber-600 font-bold border-2 border-white">S</div>
-                <div className="w-10 h-10 bg-rose-100 rounded-full flex items-center justify-center text-rose-600 font-bold border-2 border-white">+</div>
+            <div className="mt-8 flex items-center gap-4">
+              <div className="flex -space-x-2">
+                <div className="w-8 h-8 bg-slate-200 rounded-full flex items-center justify-center text-slate-600 text-sm font-medium border border-white" style={{ fontSize: '14px', fontWeight: '500', fontFamily: 'inherit' }}>M</div>
+                <div className="w-8 h-8 bg-slate-200 rounded-full flex items-center justify-center text-slate-600 text-sm font-medium border border-white" style={{ fontSize: '14px', fontWeight: '500', fontFamily: 'inherit' }}>A</div>
+                <div className="w-8 h-8 bg-slate-200 rounded-full flex items-center justify-center text-slate-600 text-sm font-medium border border-white" style={{ fontSize: '14px', fontWeight: '500', fontFamily: 'inherit' }}>S</div>
+                <div className="w-8 h-8 bg-slate-200 rounded-full flex items-center justify-center text-slate-600 text-sm font-medium border border-white" style={{ fontSize: '14px', fontWeight: '500', fontFamily: 'inherit' }}>+</div>
               </div>
-              <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">
-                Rejoint par +500 entreprises en 2024
+              <p className="text-sm text-slate-500" style={{ fontSize: '14px', fontWeight: '400', fontFamily: 'inherit' }}>
+                Utilisé par +500 entreprises
               </p>
             </div>
           </div>
-          <div className="relative">
-            <div className="absolute -inset-4 bg-indigo-500/10 blur-3xl rounded-full"></div>
-            <div className="relative bg-slate-900 rounded-[3rem] p-4 shadow-2xl border border-slate-800 overflow-hidden">
-              <div className="bg-slate-800/50 h-8 flex items-center gap-2 px-6 border-b border-slate-700">
-                <div className="w-2 h-2 rounded-full bg-rose-500"></div>
-                <div className="w-2 h-2 rounded-full bg-amber-500"></div>
-                <div className="w-2 h-2 rounded-full bg-emerald-500"></div>
+          <div className="relative mt-10 lg:mt-0">
+            <div className="bg-slate-100 border border-slate-200 p-3">
+              <div className="bg-white h-6 flex items-center gap-2 px-4 border-b border-slate-100">
+                <div className="w-2 h-2 rounded-full bg-slate-400"></div>
+                <div className="w-2 h-2 rounded-full bg-slate-400"></div>
+                <div className="w-2 h-2 rounded-full bg-slate-400"></div>
               </div>
-              <div className="w-full h-96 bg-gradient-to-br from-indigo-500/20 to-purple-500/20 rounded-b-[2rem] flex items-center justify-center">
-                <img src="../../assets/logo_gestockpro.png" alt="GeStockPro Dashboard" className="h-32 w-auto opacity-80" />
+              <div className="w-full h-80 bg-slate-50 flex items-center justify-center">
+                <img src={logo} alt="GeStockPro Dashboard" className="h-24 w-auto opacity-60" />
               </div>
             </div>
             {/* Floating Stats */}
-            <div className="absolute -bottom-10 -left-10 bg-white p-6 rounded-3xl shadow-2xl border border-slate-100">
+            <div className="absolute -bottom-10 -left-4 md:-left-10 bg-white p-4 md:p-6 rounded-3xl shadow-2xl border border-slate-100">
               <div className="flex items-center gap-4">
                 <div className="w-12 h-12 bg-emerald-100 rounded-2xl flex items-center justify-center">
                   <BarChart3 className="text-emerald-600" size={24} />
                 </div>
                 <div>
-                  <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Ventes aujourd'hui</p>
-                  <p className="text-lg font-black text-slate-900">+24.5%</p>
+                  <p className="text-xs font-bold text-slate-400 uppercase tracking-wider" style={{ fontSize: '12px', fontWeight: '700', fontFamily: 'inherit' }}>Ventes aujourd'hui</p>
+                  <p className="text-lg font-black text-slate-900" style={{ fontSize: '18px', fontWeight: '900', fontFamily: 'inherit' }}>+24.5%</p>
                 </div>
               </div>
             </div>
@@ -204,13 +356,13 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLogin }) => {
       </section>
 
       {/* Problem Section */}
-      <section className="py-24 bg-slate-50">
-        <div className="max-w-7xl mx-auto px-6">
-          <div className="text-center max-w-3xl mx-auto mb-20">
-            <h2 className="text-4xl font-black tracking-tighter uppercase mb-6">Pourquoi changer maintenant ?</h2>
-            <p className="text-slate-500 font-medium">Les méthodes traditionnelles freinent votre croissance. Identifiez les goulots d'étranglement avant qu'ils ne deviennent critiques.</p>
+      <section className="py-8 md:py-16 bg-slate-50" style={{ fontFamily: 'inherit' }}>
+        <div className="max-w-6xl mx-auto px-4 md:px-6">
+          <div className="text-center max-w-3xl mx-auto mb-12">
+            <h2 className="text-2xl md:text-3xl lg:text-4xl font-bold mb-4" style={{ fontWeight: '700', fontFamily: 'inherit', margin: '0 0 1rem 0' }}>Pourquoi changer maintenant ?</h2>
+            <p className="text-slate-600" style={{ fontSize: '16px', fontWeight: '400', fontFamily: 'inherit' }}>Les méthodes traditionnelles freinent votre croissance. Identifiez les goulots d'étranglement avant qu'ils ne deviennent critiques.</p>
           </div>
-          <div className="grid md:grid-cols-3 gap-8">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {[
               { title: "Perte de temps", desc: "Des heures perdues sur des fichiers Excel complexes et des saisies manuelles répétitives." },
               { title: "Stocks opaques", desc: "Des ruptures imprévues ou des surstocks immobilisant votre précieuse trésorerie." },
@@ -219,12 +371,12 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLogin }) => {
               { title: "Manque de vision", desc: "Prendre des décisions à l'aveugle sans données analytiques fiables en temps réel." },
               { title: "Sécurité fragile", desc: "Risque de perte de données critiques sans système de sauvegarde automatisé." }
             ].map((item, i) => (
-              <div key={i} className="bg-white p-8 rounded-3xl border border-slate-100 hover:shadow-xl transition-all group">
-                <div className="w-12 h-12 bg-rose-50 text-rose-500 rounded-2xl flex items-center justify-center mb-6 group-hover:bg-rose-500 group-hover:text-white transition-colors">
-                  <ShieldAlert size={24} />
+              <div key={i} className="bg-white p-6 border border-slate-200 hover:shadow-sm transition-all">
+                <div className="w-10 h-10 bg-slate-100 text-slate-600 flex items-center justify-center mb-4">
+                  <ShieldAlert size={20} />
                 </div>
-                <h3 className="text-lg font-black uppercase tracking-tight mb-4">{item.title}</h3>
-                <p className="text-sm text-slate-500 leading-relaxed font-medium">{item.desc}</p>
+                <h3 className="text-lg font-semibold mb-3" style={{ fontSize: '18px', fontWeight: '600', fontFamily: 'inherit', margin: '0 0 0.75rem 0' }}>{item.title}</h3>
+                <p className="text-sm text-slate-600 leading-relaxed" style={{ fontSize: '14px', fontWeight: '400', lineHeight: '1.6', fontFamily: 'inherit' }}>{item.desc}</p>
               </div>
             ))}
           </div>
@@ -232,20 +384,20 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLogin }) => {
       </section>
 
       {/* Solution Section */}
-      <section className="py-24 overflow-hidden">
-        <div className="max-w-7xl mx-auto px-6">
+      <section className="py-12 md:py-24 overflow-hidden">
+        <div className="max-w-7xl mx-auto px-4 md:px-6">
           <div className="grid lg:grid-cols-2 gap-20 items-center">
             <div className="relative">
               <div className="absolute -inset-10 bg-indigo-500/5 blur-3xl rounded-full"></div>
               <div className="relative w-full rounded-[4rem] shadow-2xl border border-slate-100 bg-gradient-to-br from-slate-50 to-indigo-50 flex items-center justify-center p-20">
-                <img src="../../assets/logo_gestockpro.png" alt="GeStockPro Solution" className="h-74 w-auto" />
+                <img src={logo} alt="GeStockPro Solution" className="h-74 w-auto" />
               </div>
             </div>
             <div>
               <div className="inline-flex items-center gap-2 px-3 py-1 bg-emerald-50 text-emerald-600 rounded-full text-[10px] font-black uppercase tracking-widest mb-6">
                 <CheckCircle2 size={12} /> La Solution Ultime
               </div>
-              <h2 className="text-5xl font-black tracking-tighter leading-[0.9] mb-8 uppercase">
+              <h2 className="text-2xl md:text-4xl lg:text-5xl font-black tracking-tighter leading-[0.9] mb-8 uppercase">
                 L'ERP qui pense <span className="text-indigo-600">pour vous.</span>
               </h2>
               <div className="space-y-8">
@@ -272,23 +424,23 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLogin }) => {
       </section>
 
       {/* Features Section */}
-      <section id="features" className="py-24 bg-slate-950 text-white">
-        <div className="max-w-7xl mx-auto px-6">
-          <div className="text-center max-w-3xl mx-auto mb-20">
-            <h2 className="text-4xl font-black tracking-tighter uppercase mb-6">Fonctionnalités Puissantes</h2>
-            <p className="text-slate-400 font-medium">Un arsenal complet d'outils conçus pour l'excellence opérationnelle.</p>
+      <section id="features" className="py-8 md:py-16 bg-slate-900 text-white" style={{ fontFamily: 'inherit' }}>
+        <div className="max-w-6xl mx-auto px-4 md:px-6">
+          <div className="text-center max-w-3xl mx-auto mb-12">
+            <h2 className="text-2xl md:text-3xl lg:text-4xl font-bold mb-4" style={{ fontWeight: '700', fontFamily: 'inherit', margin: '0 0 1rem 0' }}>Fonctionnalités</h2>
+            <p className="text-slate-400" style={{ fontSize: '16px', fontWeight: '400', fontFamily: 'inherit' }}>Un arsenal complet d'outils conçus pour votre efficacité opérationnelle.</p>
           </div>
-          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {features.map((f, i) => (
-              <div 
+              <div
                 key={i}
-                className="p-8 bg-slate-900/50 border border-slate-800 rounded-3xl hover:border-indigo-500/50 transition-all"
+                className="p-4 md:p-6 bg-slate-800 border border-slate-700 hover:border-slate-600 transition-all"
               >
-                <div className="w-12 h-12 bg-indigo-500/10 rounded-2xl flex items-center justify-center mb-6">
+                <div className="w-10 h-10 bg-slate-700 flex items-center justify-center mb-4">
                   {f.icon}
                 </div>
-                <h3 className="text-lg font-black uppercase tracking-tight mb-4">{f.title}</h3>
-                <p className="text-sm text-slate-400 leading-relaxed font-medium">{f.description}</p>
+                <h3 className="text-lg font-semibold mb-3" style={{ fontSize: '18px', fontWeight: '600', fontFamily: 'inherit', margin: '0 0 0.75rem 0' }}>{f.title}</h3>
+                <p className="text-sm text-slate-400 leading-relaxed" style={{ fontSize: '14px', fontWeight: '400', lineHeight: '1.6', fontFamily: 'inherit' }}>{f.description}</p>
               </div>
             ))}
           </div>
@@ -296,54 +448,54 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLogin }) => {
       </section>
 
       {/* Pricing Section */}
-      <section id="pricing" className="py-24">
-        <div className="max-w-7xl mx-auto px-6">
-          <div className="text-center max-w-3xl mx-auto mb-20">
-            <h2 className="text-4xl font-black tracking-tighter uppercase mb-6">Tarification Transparente</h2>
-            <p className="text-slate-500 font-medium">Choisissez le plan qui correspond à l'ambition de votre entreprise.</p>
+      <section id="pricing" className="py-8 md:py-16">
+        <div className="max-w-6xl mx-auto px-4 md:px-6">
+          <div className="text-center max-w-3xl mx-auto mb-12">
+            <h2 className="text-2xl md:text-3xl font-bold mb-4">Tarification</h2>
+            <p className="text-slate-600">Choisissez le plan qui correspond à votre entreprise.</p>
           </div>
-          <div className="grid md:grid-cols-3 gap-8">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {/* Starter */}
-            <div className="p-10 bg-white border border-slate-100 rounded-[3rem] hover:shadow-2xl transition-all flex flex-col">
-              <div className="mb-8">
-                <span className="px-3 py-1 bg-emerald-50 text-emerald-600 rounded-full text-[10px] font-black uppercase tracking-widest">Starter AI</span>
-                <div className="mt-6 flex items-baseline gap-1">
-                  <span className="text-4xl font-black tracking-tighter">9 900</span>
-                  <span className="text-slate-400 font-bold text-sm">FCFA / mois</span>
+            <div className="p-6 md:p-8 bg-white border border-slate-200 flex flex-col">
+              <div className="mb-6">
+                <span className="px-3 py-1 bg-slate-100 text-slate-600 text-xs font-medium">Starter</span>
+                <div className="mt-4 flex items-baseline gap-1">
+                  <span className="text-3xl font-bold">9 900</span>
+                  <span className="text-slate-600 text-sm">FCFA / mois</span>
                 </div>
               </div>
-              <ul className="space-y-4 mb-10 flex-grow">
+              <ul className="space-y-3 mb-8 flex-grow">
                 {["3 Utilisateurs", "5 Clients", "Modules Essentiels", "Support Standard", "Dashboard Basique"].map((item, i) => (
-                  <li key={i} className="flex items-center gap-3 text-sm font-medium text-slate-600">
-                    <CheckCircle2 size={18} className="text-emerald-500" /> {item}
+                  <li key={i} className="flex items-center gap-2 text-sm text-slate-600">
+                    <CheckCircle2 size={16} className="text-slate-600" /> {item}
                   </li>
                 ))}
               </ul>
-              <button onClick={() => onLogin({ openRegister: true, planId: 'BASIC', regStep: 1 })} className="w-full py-4 bg-slate-50 text-slate-900 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-slate-900 hover:text-white transition-all">Commencer</button>
+              <button onClick={() => onLogin({ openRegister: true, planId: 'BASIC', regStep: 1 })} className="w-full py-3 bg-slate-900 text-white text-sm font-medium hover:bg-slate-800 transition-colors" style={{ fontSize: '14px', fontWeight: '500', fontFamily: 'inherit', border: 'none', cursor: 'pointer' }}>Commencer</button>
             </div>
 
             {/* PRO */}
-            <div className="p-10 bg-slate-900 text-white border border-slate-800 rounded-[3rem] shadow-2xl relative transform lg:scale-105 z-10 flex flex-col">
-              <div className="absolute -top-4 left-1/2 -translate-x-1/2 bg-indigo-600 text-white px-4 py-1 rounded-full text-[10px] font-black uppercase tracking-widest">Le plus populaire</div>
-              <div className="mb-8">
-                <span className="px-3 py-1 bg-indigo-500/20 text-indigo-400 rounded-full text-[10px] font-black uppercase tracking-widest">PRO</span>
-                <div className="mt-6 flex items-baseline gap-1">
-                  <span className="text-4xl font-black tracking-tighter">24 900</span>
-                  <span className="text-slate-500 font-bold text-sm">FCFA / mois</span>
+            <div className="p-6 md:p-8 bg-slate-900 text-white border border-slate-800 relative flex flex-col">
+              <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-slate-800 text-white px-3 py-1 text-xs font-medium">Populaire</div>
+              <div className="mb-6">
+                <span className="px-3 py-1 bg-slate-800 text-slate-300 text-xs font-medium">PRO</span>
+                <div className="mt-4 flex items-baseline gap-1">
+                  <span className="text-3xl font-bold">49 000</span>
+                  <span className="text-slate-400 text-sm">FCFA / mois</span>
                 </div>
               </div>
-              <ul className="space-y-4 mb-10 flex-grow">
+              <ul className="space-y-3 mb-8 flex-grow">
                 {["10 Utilisateurs", "12 Clients", "Security + Recovery", "Support Prioritaire", "Chatbot", "Facturation Factur-X"].map((item, i) => (
-                  <li key={i} className="flex items-center gap-3 text-sm font-medium text-slate-300">
-                    <CheckCircle2 size={18} className="text-indigo-400" /> {item}
+                  <li key={i} className="flex items-center gap-2 text-sm">
+                    <CheckCircle2 size={16} className="text-slate-400" /> {item}
                   </li>
                 ))}
               </ul>
-              <button onClick={() => onLogin({ openRegister: true, planId: 'PRO', regStep: 1 })} className="w-full py-4 bg-indigo-600 text-white rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-indigo-500 transition-all shadow-xl shadow-indigo-500/20">Commencer</button>
+              <button onClick={() => onLogin({ openRegister: true, planId: 'PRO', regStep: 1 })} className="w-full py-3 bg-white text-slate-900 text-sm font-medium hover:bg-slate-100 transition-colors" style={{ fontSize: '14px', fontWeight: '500', fontFamily: 'inherit', border: 'none', cursor: 'pointer' }}>Commencer</button>
             </div>
 
             {/* Enterprise */}
-            <div className="p-10 bg-white border border-slate-100 rounded-[3rem] hover:shadow-2xl transition-all flex flex-col">
+            <div className="p-6 md:p-10 bg-white border border-slate-100 rounded-[3rem] hover:shadow-2xl transition-all flex flex-col">
               <div className="mb-8">
                 <span className="px-3 py-1 bg-purple-50 text-purple-600 rounded-full text-[10px] font-black uppercase tracking-widest">Enterprise Cloud</span>
                 <div className="mt-6 flex items-baseline gap-1">
@@ -365,11 +517,11 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLogin }) => {
       </section>
 
       {/* Why Us Section */}
-      <section className="py-24 bg-slate-50">
-        <div className="max-w-7xl mx-auto px-6">
+      <section className="py-12 md:py-24 bg-slate-50">
+        <div className="max-w-7xl mx-auto px-4 md:px-6">
           <div className="grid lg:grid-cols-2 gap-20 items-center">
             <div>
-              <h2 className="text-4xl font-black tracking-tighter uppercase mb-12">Pourquoi choisir <span className="text-indigo-600">GeStockPro ?</span></h2>
+              <h2 className="text-2xl md:text-3xl lg:text-4xl font-black tracking-tighter uppercase mb-12">Pourquoi choisir <span className="text-indigo-600">GeStockPro ?</span></h2>
               <div className="grid sm:grid-cols-2 gap-8">
                 {[
                   { title: "Sécurité Renforcée", desc: "Protocoles de sécurité militaires pour vos données.", icon: <ShieldCheck /> },
@@ -387,7 +539,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLogin }) => {
                 ))}
               </div>
             </div>
-            <div className="bg-slate-900 rounded-[3rem] p-12 text-white relative overflow-hidden">
+            <div className="bg-slate-900 rounded-[3rem] p-6 md:p-12 text-white relative overflow-hidden">
               <div className="absolute top-0 right-0 w-64 h-64 bg-indigo-500/10 blur-3xl rounded-full"></div>
               <h3 className="text-3xl font-black tracking-tighter uppercase mb-8 leading-tight">Optimisez votre trésorerie dès aujourd'hui.</h3>
               <p className="text-slate-400 font-medium mb-10 leading-relaxed">
@@ -413,21 +565,21 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLogin }) => {
       </section>
 
       {/* Testimonials */}
-      <section className="py-24">
-        <div className="max-w-7xl mx-auto px-6">
-          <div className="text-center mb-20">
-            <h2 className="text-4xl font-black tracking-tighter uppercase mb-6">Ils nous font confiance</h2>
+      <section className="py-12 md:py-24">
+        <div className="max-w-7xl mx-auto px-4 md:px-6">
+          <div className="text-center mb-12 md:mb-20">
+            <h2 className="text-2xl md:text-3xl lg:text-4xl font-black tracking-tighter uppercase mb-6">Ils nous font confiance</h2>
             <div className="flex justify-center gap-1">
               {[1,2,3,4,5].map(i => <Star key={i} className="text-amber-400 fill-amber-400" size={20} />)}
             </div>
           </div>
-          <div className="grid md:grid-cols-3 gap-8">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
             {[
               { name: "Moussa Diop", role: "CEO, TechSolutions Dakar", text: "GeStockPro a radicalement changé notre façon de gérer nos stocks. L'IA nous prévient avant même que nous soyons en rupture." },
               { name: "Awa Ndiaye", role: "Gérante, Mode & Style", text: "La facturation est devenue un plaisir. Mes clients reçoivent des factures professionnelles et je suis payée plus rapidement." },
               { name: "Jean-Marc Koffi", role: "Directeur, AgroBusiness CI", text: "Un outil puissant, intuitif et surtout sécurisé. Le support client est réactif et très professionnel." }
             ].map((t, i) => (
-              <div key={i} className="p-8 bg-white border border-slate-100 rounded-3xl shadow-sm hover:shadow-md transition-all">
+              <div key={i} className="p-4 md:p-8 bg-white border border-slate-100 rounded-3xl shadow-sm hover:shadow-md transition-all">
                 <p className="text-slate-600 italic mb-8 leading-relaxed text-sm">"{t.text}"</p>
                 <div className="flex items-center gap-4">
                   <div className={`w-12 h-12 rounded-full flex items-center justify-center font-bold text-white ${i === 0 ? 'bg-indigo-500' : i === 1 ? 'bg-emerald-500' : 'bg-amber-500'}`}>
@@ -445,17 +597,17 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLogin }) => {
       </section>
 
       {/* About Section */}
-      <section id="about" className="py-24 bg-slate-900 text-white overflow-hidden relative">
+      <section id="about" className="py-12 md:py-24 bg-slate-900 text-white overflow-hidden relative">
         <div className="absolute top-0 left-0 w-full h-full opacity-10 pointer-events-none">
           <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-indigo-500 blur-[120px] rounded-full"></div>
         </div>
-        <div className="max-w-7xl mx-auto px-6 relative z-10">
+        <div className="max-w-7xl mx-auto px-4 md:px-6 relative z-10">
           <div className="grid lg:grid-cols-2 gap-20 items-center">
             <div>
-              <h2 className="text-5xl font-black tracking-tighter leading-[0.9] mb-10 uppercase">
+              <h2 className="text-2xl md:text-4xl lg:text-5xl font-black tracking-tighter leading-[0.9] mb-10 uppercase">
                 Notre Vision pour <span className="text-indigo-400">l'Afrique.</span>
               </h2>
-              <p className="text-xl text-slate-400 font-medium leading-relaxed mb-12">
+              <p className="text-lg md:text-xl text-slate-400 font-medium leading-relaxed mb-12">
                 GeStockPro est né pour aider les TPE/PME africaines à entrer dans l'ère numérique avec un outil moderne, sécurisé et intelligent.
               </p>
               <div className="space-y-8">
@@ -490,9 +642,9 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLogin }) => {
       </section>
 
       {/* FAQ Section */}
-      <section className="py-24">
-        <div className="max-w-3xl mx-auto px-6">
-          <h2 className="text-4xl font-black tracking-tighter uppercase text-center mb-16">Questions Fréquentes</h2>
+      <section className="py-12 md:py-24">
+        <div className="max-w-3xl mx-auto px-4 md:px-6">
+          <h2 className="text-2xl md:text-3xl lg:text-4xl font-black tracking-tighter uppercase text-center mb-10 md:mb-16">Questions Fréquentes</h2>
           <div className="space-y-4">
             {faqs.map((faq, i) => (
               <div key={i} className="border border-slate-100 rounded-2xl overflow-hidden">
@@ -515,11 +667,11 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLogin }) => {
       </section>
 
       {/* Contact Section */}
-      <section id="contact" className="py-24 bg-slate-50">
-        <div className="max-w-7xl mx-auto px-6">
-          <div className="grid lg:grid-cols-2 gap-20">
+      <section id="contact" className="py-12 md:py-24 bg-slate-50">
+        <div className="max-w-7xl mx-auto px-4 md:px-6">
+          <div className="grid lg:grid-cols-2 gap-10 md:gap-20">
             <div>
-              <h2 className="text-4xl font-black tracking-tighter uppercase mb-8">Contactez-nous</h2>
+              <h2 className="text-2xl md:text-3xl lg:text-4xl font-black tracking-tighter uppercase mb-8">Contactez-nous</h2>
               <p className="text-slate-500 font-medium mb-12">Notre équipe d'experts est à votre écoute pour vous accompagner dans votre transformation digitale.</p>
               
               <div className="space-y-8">
@@ -553,27 +705,101 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLogin }) => {
               </div>
             </div>
 
-            <div className="bg-white p-10 rounded-[3rem] shadow-2xl border border-slate-100">
-              <form className="space-y-6">
+            <div className="bg-white p-6 md:p-10 rounded-[3rem] shadow-2xl border border-slate-100">
+              {/* Message de statut */}
+              {submitStatus !== 'idle' && (
+                <div className={`mb-6 p-4 rounded-2xl border ${
+                  submitStatus === 'success' 
+                    ? 'bg-emerald-50 border-emerald-200 text-emerald-800' 
+                    : 'bg-red-50 border-red-200 text-red-800'
+                }`}>
+                  <div className="flex items-center gap-3">
+                    {submitStatus === 'success' ? (
+                      <CheckCircle2 size={20} className="text-emerald-600" />
+                    ) : (
+                      <ShieldAlert size={20} className="text-red-600" />
+                    )}
+                    <p className="font-medium text-sm" style={{ fontSize: '14px', fontWeight: '500', fontFamily: 'inherit' }}>{submitMessage}</p>
+                  </div>
+                </div>
+              )}
+              
+              <form onSubmit={handleContactSubmit} className="space-y-6">
                 <div className="grid sm:grid-cols-2 gap-6">
                   <div className="space-y-2">
-                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Nom complet</label>
-                    <input type="text" className="w-full px-6 py-4 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-indigo-500 transition-all font-medium" placeholder="Ex: Moussa Diop" />
+                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-400" style={{ fontSize: '10px', fontWeight: '900', fontFamily: 'inherit' }}>Nom complet *</label>
+                    <input 
+                      type="text" 
+                      name="fullName"
+                      value={contactForm.fullName}
+                      onChange={handleContactInputChange}
+                      disabled={isSubmitting}
+                      required
+                      className="w-full px-6 py-4 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-indigo-500 transition-all font-medium disabled:opacity-50 disabled:cursor-not-allowed" 
+                      placeholder="Ex: Moussa Diop"
+                      style={{ fontSize: '14px', fontWeight: '500', fontFamily: 'inherit' }} 
+                    />
                   </div>
                   <div className="space-y-2">
-                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Email</label>
-                    <input type="email" className="w-full px-6 py-4 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-indigo-500 transition-all font-medium" placeholder="Ex: m.diop@tech.com" />
+                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Email *</label>
+                    <input 
+                      type="email" 
+                      name="email"
+                      value={contactForm.email}
+                      onChange={handleContactInputChange}
+                      disabled={isSubmitting}
+                      required
+                      className="w-full px-6 py-4 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-indigo-500 transition-all font-medium disabled:opacity-50 disabled:cursor-not-allowed" 
+                      placeholder="Ex: m.diop@tech.com" 
+                    />
                   </div>
                 </div>
                 <div className="space-y-2">
                   <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Téléphone</label>
-                  <input type="tel" className="w-full px-6 py-4 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-indigo-500 transition-all font-medium" placeholder="+221 ..." />
+                  <input 
+                    type="tel" 
+                    name="phone"
+                    value={contactForm.phone}
+                    onChange={handleContactInputChange}
+                    disabled={isSubmitting}
+                    className="w-full px-6 py-4 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-indigo-500 transition-all font-medium disabled:opacity-50 disabled:cursor-not-allowed" 
+                    placeholder="+221 ..." 
+                  />
                 </div>
                 <div className="space-y-2">
-                  <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Message</label>
-                  <textarea rows={4} className="w-full px-6 py-4 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-indigo-500 transition-all font-medium resize-none" placeholder="Comment pouvons-nous vous aider ?"></textarea>
+                  <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Message *</label>
+                  <textarea 
+                    name="message"
+                    value={contactForm.message}
+                    onChange={handleContactInputChange}
+                    disabled={isSubmitting}
+                    required
+                    rows={4} 
+                    className="w-full px-6 py-4 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-indigo-500 transition-all font-medium resize-none disabled:opacity-50 disabled:cursor-not-allowed" 
+                    placeholder="Comment pouvons-nous vous aider ?"
+                  />
                 </div>
-                <button type="button" className="w-full py-5 bg-slate-900 text-white rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-indigo-600 transition-all shadow-xl shadow-slate-200">Envoyer le message</button>
+                <button 
+                  type="submit" 
+                  disabled={isSubmitting}
+                  className="w-full py-5 bg-slate-900 text-white rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-indigo-600 disabled:bg-slate-400 disabled:cursor-not-allowed transition-all shadow-xl shadow-slate-200 flex items-center justify-center gap-3"
+                >
+                  {isSubmitting ? (
+                    <>
+                      <Loader2 size={18} className="animate-spin" />
+                      Envoi en cours...
+                    </>
+                  ) : (
+                    <>
+                      <Send size={18} />
+                      Envoyer le message
+                    </>
+                  )}
+                </button>
+                
+                <p className="text-center text-[10px] font-medium text-slate-400 uppercase tracking-widest">
+                  * Champs obligatoires
+                </p>
               </form>
             </div>
           </div>
@@ -583,24 +809,24 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLogin }) => {
       {/* Final CTA */}
       <section className="py-24">
         <div className="max-w-7xl mx-auto px-6">
-          <div className="bg-indigo-600 rounded-[4rem] p-16 text-center text-white relative overflow-hidden">
+          <div className="bg-indigo-600 rounded-2xl md:rounded-[4rem] px-4 py-8 sm:px-8 sm:py-12 md:p-16 text-center text-white relative overflow-hidden">
             <div className="absolute top-0 left-0 w-full h-full opacity-20 pointer-events-none">
               <div className="absolute -top-20 -left-20 w-96 h-96 bg-white blur-[100px] rounded-full"></div>
               <div className="absolute -bottom-20 -right-20 w-96 h-96 bg-slate-900 blur-[100px] rounded-full"></div>
             </div>
             <div className="relative z-10">
-              <h2 className="text-5xl md:text-6xl font-black tracking-tighter uppercase mb-8 leading-tight">Prêt à transformer <br />votre gestion ?</h2>
+              <h2 className="text-2xl sm:text-4xl md:text-5xl lg:text-6xl font-black tracking-tighter uppercase mb-8 leading-tight">Prêt à transformer <br />votre gestion ?</h2>
               <p className="text-xl text-indigo-100 font-medium mb-12 max-w-2xl mx-auto">Rejoignez des centaines d'entrepreneurs qui ont déjà fait le choix de l'intelligence et de la simplicité.</p>
               <div className="flex flex-wrap justify-center gap-6">
-                <button 
+                <button
                   onClick={onLogin}
-                  className="px-10 py-5 bg-white text-indigo-600 rounded-2xl font-black text-sm uppercase tracking-widest hover:bg-slate-900 hover:text-white transition-all shadow-2xl"
+                  className="px-6 md:px-10 py-3 md:py-5 bg-white text-indigo-600 rounded-2xl font-black text-xs md:text-sm uppercase tracking-widest hover:bg-slate-900 hover:text-white transition-all shadow-2xl"
                 >
                   Essayer gratuitement
                 </button>
-                <button 
+                <button
                   onClick={onLogin}
-                  className="px-10 py-5 bg-indigo-700 text-white border-2 border-indigo-500 rounded-2xl font-black text-sm uppercase tracking-widest hover:bg-indigo-800 transition-all"
+                  className="px-6 md:px-10 py-3 md:py-5 bg-indigo-700 text-white border-2 border-indigo-500 rounded-2xl font-black text-xs md:text-sm uppercase tracking-widest hover:bg-indigo-800 transition-all"
                 >
                   Parler à un expert
                 </button>
@@ -617,7 +843,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLogin }) => {
             <div className="col-span-2">
               <div className="flex items-center gap-2 mb-8">
                 <div className="flex items-center gap-3">
-            <img src="../../assets/logo_gestockpro-removebg-preview.png" alt="GeStockPro" className="h-12 w-auto" />
+            <img src={logo_removebg} alt="GeStockPro" className="h-12 w-auto" />
           </div>
               </div>
               <p className="text-slate-500 font-medium max-w-sm leading-relaxed mb-8">
@@ -643,10 +869,10 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLogin }) => {
             <div>
               <h4 className="text-sm font-black uppercase tracking-widest mb-8">Légal</h4>
               <ul className="space-y-4 text-sm font-bold text-slate-500">
-                <li><a href="#" className="hover:text-indigo-600 transition-colors">Confidentialité</a></li>
-                <li><a href="#" className="hover:text-indigo-600 transition-colors">Conditions d'utilisation</a></li>
-                <li><a href="#" className="hover:text-indigo-600 transition-colors">Cookies</a></li>
-                <li><a href="#" className="hover:text-indigo-600 transition-colors">Sécurité</a></li>
+                <li><button onClick={() => openLegal('confidentialite')} className="hover:text-indigo-600 transition-colors text-left">Confidentialité & RGPD</button></li>
+                <li><button onClick={() => openLegal('cgu')} className="hover:text-indigo-600 transition-colors text-left">Conditions d'utilisation</button></li>
+                <li><button onClick={() => openLegal('cookies')} className="hover:text-indigo-600 transition-colors text-left">Politique de Cookies</button></li>
+                <li><button onClick={() => openLegal('mentions')} className="hover:text-indigo-600 transition-colors text-left">Mentions Légales</button></li>
               </ul>
             </div>
           </div>

@@ -243,8 +243,8 @@ const Settings: React.FC<SettingsProps> = ({ settings, onSave }) => {
           </h2>
           <p className="text-slate-500 text-[10px] font-black uppercase tracking-[0.3em] mt-1">Architecture & Identité Visuelle de votre espace</p>
         </div>
-        <div className="flex gap-4">
-          <button 
+        <div className="flex justify-end flex-wrap gap-3">
+          <button
             onClick={handleSave}
             disabled={isSaving}
             className={`px-10 py-4 rounded-2xl font-black text-xs uppercase tracking-widest transition-all shadow-xl flex items-center gap-3 ${success ? 'bg-emerald-500 text-white shadow-emerald-200' : 'bg-slate-900 text-white hover:bg-indigo-600 shadow-slate-200'}`}
@@ -255,27 +255,29 @@ const Settings: React.FC<SettingsProps> = ({ settings, onSave }) => {
         </div>
       </div>
 
-      <div className="flex flex-wrap gap-2 p-1.5 bg-white border border-slate-100 rounded-[2rem] w-fit shadow-sm">
-        {[
-          { id: 'general', label: 'Profil Structure', icon: Building2 },
-          { id: 'branding', label: 'Design & Branding', icon: Palette },
-          { id: 'fiscal', label: 'Fiscalité & Factures', icon: FileText },
-          { id: 'profile', label: 'Accès Sécurité', icon: Lock },
-        ].map(tab => (
-          <button 
-            key={tab.id}
-            onClick={() => setActiveSubTab(tab.id as any)}
-            className={`px-6 py-3 rounded-2xl font-black text-[9px] uppercase tracking-widest transition-all flex items-center gap-3 ${activeSubTab === tab.id ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-200' : 'text-slate-400 hover:text-slate-900 hover:bg-slate-50'}`}
-          >
-            <tab.icon size={16} />
-            {tab.label}
-          </button>
-        ))}
+      <div className="overflow-x-auto pb-1">
+        <div className="flex flex-wrap gap-2 p-1.5 bg-white border border-slate-100 rounded-[2rem] w-fit shadow-sm min-w-0">
+          {[
+            { id: 'general', label: 'Profil Structure', icon: Building2 },
+            { id: 'branding', label: 'Design & Branding', icon: Palette },
+            { id: 'fiscal', label: 'Fiscalité & Factures', icon: FileText },
+            { id: 'profile', label: 'Accès Sécurité', icon: Lock },
+          ].map(tab => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveSubTab(tab.id as any)}
+              className={`px-6 py-3 rounded-2xl font-black text-[9px] uppercase tracking-widest transition-all flex items-center gap-3 ${activeSubTab === tab.id ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-200' : 'text-slate-400 hover:text-slate-900 hover:bg-slate-50'}`}
+            >
+              <tab.icon size={16} />
+              {tab.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {activeSubTab === 'general' && (
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 animate-in slide-in-from-bottom-4">
-          <div className="lg:col-span-8 bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm space-y-8">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 md:gap-8 animate-in slide-in-from-bottom-4">
+          <div className="lg:col-span-8 bg-white p-5 md:p-10 rounded-[3rem] border border-slate-100 shadow-sm space-y-8">
             <h3 className="text-xs font-black uppercase tracking-widest text-indigo-600 flex items-center gap-2 mb-4"><Globe size={16}/> Identité Légale</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
               <div className="space-y-2">
@@ -300,18 +302,18 @@ const Settings: React.FC<SettingsProps> = ({ settings, onSave }) => {
               </div>
             </div>
           </div>
-          <div className="lg:col-span-4 bg-indigo-900 rounded-[3rem] p-10 text-white relative overflow-hidden flex flex-col justify-center">
+          <div className="lg:col-span-4 bg-indigo-900 rounded-[3rem] p-5 md:p-10 text-white relative overflow-hidden flex flex-col justify-center">
             <div className="absolute top-0 right-0 p-8 opacity-10"><Building2 size={120}/></div>
-            <h4 className="text-xl font-black uppercase mb-4">Isolation Multi-Tenant</h4>
+            <h4 className="text-lg md:text-xl font-black uppercase mb-4">Isolation Multi-Tenant</h4>
             <p className="text-xs text-indigo-200 leading-relaxed font-medium uppercase tracking-widest">Vos données sont stockées dans un schéma PostgreSQL dédié. L'exactitude de ces informations garantit la validité de vos documents Factur-X.</p>
           </div>
         </div>
       )}
 
       {activeSubTab === 'branding' && (
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 animate-in slide-in-from-bottom-4">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 md:gap-8 animate-in slide-in-from-bottom-4">
            {/* Section Couleurs */}
-           <div className="lg:col-span-6 bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm space-y-10">
+           <div className="lg:col-span-6 bg-white p-5 md:p-10 rounded-[3rem] border border-slate-100 shadow-sm space-y-10">
             <div className="flex items-center justify-between">
               <h3 className="text-xs font-black uppercase tracking-widest text-indigo-600 flex items-center gap-2"><Palette size={16}/> Personnalisation des Couleurs</h3>
               <Pipette size={18} className="text-slate-300" />
@@ -330,7 +332,7 @@ const Settings: React.FC<SettingsProps> = ({ settings, onSave }) => {
                         document.documentElement.style.setProperty('--primary-kernel', v);
                         window.dispatchEvent(new CustomEvent('tenant-theme-updated'));
                       }}
-                      className={`w-14 h-14 rounded-2xl transition-all relative flex items-center justify-center ${localTenant.primaryColor === color ? 'ring-4 ring-indigo-100 scale-110' : 'hover:scale-105'}`}
+                      className={`w-10 h-10 md:w-14 md:h-14 rounded-2xl transition-all relative flex items-center justify-center ${localTenant.primaryColor === color ? 'ring-4 ring-indigo-100 scale-110' : 'hover:scale-105'}`}
                       style={{ backgroundColor: color }}
                     >
                       {localTenant.primaryColor === color && <Check size={24} className="text-white drop-shadow-md" />}
@@ -462,7 +464,7 @@ const Settings: React.FC<SettingsProps> = ({ settings, onSave }) => {
           </div>
 
           {/* Section Logos */}
-          <div className="lg:col-span-6 bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm space-y-8">
+          <div className="lg:col-span-6 bg-white p-5 md:p-10 rounded-[3rem] border border-slate-100 shadow-sm space-y-8">
              <h3 className="text-xs font-black uppercase tracking-widest text-indigo-600 flex items-center gap-2 mb-4"><ImageIcon size={16}/> Assets Visuels (Cloud Storage)</h3>
              
              <div className="grid grid-cols-1 gap-8">
@@ -471,7 +473,7 @@ const Settings: React.FC<SettingsProps> = ({ settings, onSave }) => {
                   <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest px-2">Logo Principal de la Plateforme</label>
                   <div className="relative group">
                     <input type="file" id="logo_up_settings" hidden onChange={e => handleFileUpload(e, 'logoUrl')} accept="image/*" />
-                    <label htmlFor="logo_up_settings" className={`block p-8 border-4 border-dashed rounded-[2.5rem] text-center cursor-pointer transition-all relative overflow-hidden group ${localTenant.logoUrl ? 'border-emerald-100 bg-emerald-50/20' : 'border-slate-100 hover:border-indigo-400 hover:bg-slate-50'}`}>
+                    <label htmlFor="logo_up_settings" className={`block w-full p-8 border-4 border-dashed rounded-[2.5rem] text-center cursor-pointer transition-all relative overflow-hidden group ${localTenant.logoUrl ? 'border-emerald-100 bg-emerald-50/20' : 'border-slate-100 hover:border-indigo-400 hover:bg-slate-50'}`}>
                       {isUploading === 'logoUrl' ? (
                         <div className="py-10"><Loader2 className="animate-spin mx-auto text-indigo-600" size={32} /></div>
                       ) : localTenant.logoUrl ? (
@@ -492,7 +494,7 @@ const Settings: React.FC<SettingsProps> = ({ settings, onSave }) => {
                   <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest px-2">Cachet "PAYÉ" ou Signature Digitale</label>
                   <div className="relative group">
                     <input type="file" id="cachet_up_settings" hidden onChange={e => handleFileUpload(e, 'cachetUrl')} accept="image/*" />
-                    <label htmlFor="cachet_up_settings" className={`block p-8 border-4 border-dashed rounded-[2.5rem] text-center cursor-pointer transition-all relative overflow-hidden group ${localTenant.cachetUrl ? 'border-emerald-100 bg-emerald-50/20' : 'border-slate-100 hover:border-indigo-400 hover:bg-slate-50'}`}>
+                    <label htmlFor="cachet_up_settings" className={`block w-full p-8 border-4 border-dashed rounded-[2.5rem] text-center cursor-pointer transition-all relative overflow-hidden group ${localTenant.cachetUrl ? 'border-emerald-100 bg-emerald-50/20' : 'border-slate-100 hover:border-indigo-400 hover:bg-slate-50'}`}>
                       {isUploading === 'cachetUrl' ? (
                         <div className="py-10"><Loader2 className="animate-spin mx-auto text-indigo-600" size={32} /></div>
                       ) : localTenant.cachetUrl ? (
@@ -519,10 +521,10 @@ const Settings: React.FC<SettingsProps> = ({ settings, onSave }) => {
       )}
 
       {activeSubTab === 'fiscal' && (
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 animate-in slide-in-from-bottom-4">
-          <div className="lg:col-span-8 bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm space-y-8">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 md:gap-8 animate-in slide-in-from-bottom-4">
+          <div className="lg:col-span-8 bg-white p-5 md:p-10 rounded-[3rem] border border-slate-100 shadow-sm space-y-8">
             <h3 className="text-xs font-black uppercase tracking-widest text-indigo-600 flex items-center gap-2 mb-4"><CreditCard size={16}/> Paramètres de Facturation</h3>
-            <div className="grid grid-cols-2 gap-8">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-8">
                <div className="space-y-2">
                 <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest px-2">Devise Système</label>
                 <select value={localTenant.currency} onChange={e => setLocalTenant({...localTenant, currency: e.target.value})} className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 text-sm font-black outline-none focus:ring-4 focus:ring-indigo-500/10">
@@ -545,26 +547,26 @@ const Settings: React.FC<SettingsProps> = ({ settings, onSave }) => {
               </div>
             </div>
           </div>
-          <div className="lg:col-span-4 bg-slate-900 rounded-[3rem] p-10 text-white flex flex-col justify-center relative overflow-hidden">
+          <div className="lg:col-span-4 bg-slate-900 rounded-[3rem] p-5 md:p-10 text-white flex flex-col justify-center relative overflow-hidden">
              <div className="absolute top-0 right-0 p-8 opacity-5"><FileText size={120}/></div>
-             <h4 className="text-xl font-black uppercase mb-4 tracking-tighter">Moteur Factur-X</h4>
+             <h4 className="text-lg md:text-xl font-black uppercase mb-4 tracking-tighter">Moteur Factur-X</h4>
              <p className="text-xs text-slate-400 leading-relaxed font-bold uppercase tracking-widest">Chaque réglage fiscal ici impacte la signature électronique de vos factures pour la conformité européenne et africaine.</p>
           </div>
         </div>
       )}
 
       {activeSubTab === 'profile' && (
-        <div className="bg-white p-10 rounded-[3rem] border border-slate-100 shadow-sm max-w-2xl animate-in slide-in-from-bottom-4">
+        <div className="bg-white p-5 md:p-10 rounded-[3rem] border border-slate-100 shadow-sm max-w-2xl animate-in slide-in-from-bottom-4">
            <h3 className="text-xs font-black uppercase tracking-widest text-indigo-600 flex items-center gap-2 mb-8"><Lock size={16}/> Sécurité de votre Session Administrateur</h3>
            <div className="space-y-6">
-              <div className="flex items-center justify-between p-6 bg-slate-50 rounded-3xl border border-slate-100">
+              <div className="flex flex-wrap items-center justify-between gap-4 p-6 bg-slate-50 rounded-3xl border border-slate-100">
                  <div>
                     <p className="text-sm font-black text-slate-900 uppercase">Double Authentification (MFA)</p>
                     <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-1">Sécurise l'accès par code mobile</p>
                  </div>
                  <button className="px-6 py-2 bg-indigo-600 text-white rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-slate-900 transition-all">GÉRER LE MFA</button>
               </div>
-              <div className="flex items-center justify-between p-6 bg-slate-50 rounded-3xl border border-slate-100">
+              <div className="flex flex-wrap items-center justify-between gap-4 p-6 bg-slate-50 rounded-3xl border border-slate-100">
                  <div>
                     <p className="text-sm font-black text-slate-900 uppercase">Registre de connexion</p>
                     <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-1">Historique des accès de l'instance</p>
