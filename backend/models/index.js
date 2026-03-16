@@ -18,6 +18,7 @@ import { SaleItem } from './SaleItem.js';
 import { Payment } from './Payment.js';
 import { Administrator } from './Administrator.js';
 import { Service } from './Service.js';
+import { ContactMessage } from './ContactMessage.js';
 import { Message } from './Message.js';
 import { PromptTemplate } from './PromptTemplate.js';
 import { Employee } from './Employee.js';
@@ -38,6 +39,7 @@ import { CompanyDeclarationSettings } from './CompanyDeclarationSettings.js';
 import { Declaration } from './Declaration.js';
 import { Advance } from './Advance.js';
 import { Prime } from './Prime.js';
+import { Session } from './Session.js';
 
 /**
  * ARCHITECTURE KERNEL V3.2.3
@@ -77,6 +79,7 @@ Tenant.hasMany(PerformanceReview, { foreignKey: 'tenant_id' });
 Tenant.hasMany(Advance, { foreignKey: 'tenant_id' });
 Tenant.hasMany(Prime, { foreignKey: 'tenant_id' });
 Tenant.hasOne(PayrollSettings, { foreignKey: 'tenant_id' });
+Tenant.hasMany(Session, { foreignKey: 'tenant_id' });
 
 User.belongsTo(Tenant, { foreignKey: 'tenant_id' });
 StockItem.belongsTo(Tenant, { foreignKey: 'tenant_id' });
@@ -105,6 +108,11 @@ Employee.hasOne(User, { foreignKey: 'employee_id', as: 'userAccount' });
 
 // User-Employee relation (for ENTERPRISE plan)
 User.belongsTo(Employee, { foreignKey: 'employee_id', as: 'employeeProfile' });
+
+// User-Session relations
+User.hasMany(Session, { foreignKey: 'user_id', as: 'sessions' });
+Session.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
+Session.belongsTo(Tenant, { foreignKey: 'tenant_id' });
 
 // Department relations  
 Department.belongsTo(Tenant, { foreignKey: 'tenant_id' });
@@ -208,10 +216,10 @@ export {
   Tenant, User, StockItem, ProductMovement, 
   Customer, Invoice, InvoiceItem, Subscription, 
   Plan, AuditLog, Backup, Document, Category, Subcategory,
-  Sale, SaleItem, Payment, Administrator, Service,
+  Sale, SaleItem, Payment, Administrator, Service, ContactMessage,
   Message, PromptTemplate,
   Employee, Department, Contract, Payroll, PayrollSettings, PayrollItem, Attendance,
   Leave, EmployeeDocument, JobOffer, Candidate, Training, 
   TrainingParticipant, PerformanceReview, CompanyDeclarationSettings, Declaration,
-  Advance, Prime
+  Advance, Prime, Session
 };
