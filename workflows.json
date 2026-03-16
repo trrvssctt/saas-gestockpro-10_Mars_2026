@@ -1,0 +1,850 @@
+{
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "booba/gestock-ia",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "d72daffb-6027-4015-a871-e3d400f74103",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        2448,
+        3552
+      ],
+      "webhookId": "4b9c9ad2-372a-4a3b-8de0-eec2aba0c1b0"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=# Assistant IA GeStockPro - Guide de classification\n\n## 🔍 Analyse de la question\n**Question :** « {{ $('Webhook').item.json.body.message }} »\n\n## 🗃️ **STRUCTURE DE LA BASE DE DONNÉES**\n\n**Tenant ID pour filtre :** `{{ $('Webhook').item.json.body.id }}`\n**Plan utilisateur :** `{{ $('Webhook').item.json.body.planId }}`\n\n### **📊 Tables principales (schéma public) :**\n1. `sales` - Ventes : id, tenant_id, customer_id, sale_date, total_ttc, status\n2. `customers` - Clients : id, tenant_id, company_name, email, main_contact\n3. `stock_items` - Produits : id, tenant_id, name, sku, current_level, unit_price\n4. `sale_items` - Lignes de vente : id, sale_id, stock_item_id, quantity, unit_price\n5. `invoices` - Factures : id, tenant_id, customer_id, invoice_date, amount, status\n6. `categories/subcategories` - Classification produits\n7. `product_movements` - Mouvements de stock\n8. `services` - id, tenant_id, name, description, price, is_active, created_at, updated_at, status, deleted_at, image_url\n9. `users` - id, tenant_id, name, email, password, mfa_enabled, last_login, active_session, is_active, created_at, updated_at, roles\n\n### **🧑‍💼 Tables RH (ressources humaines) :**\n**⚠️ Accès RH réservé aux plans ENTERPRISE uniquement !**\n10. `employees` - id, tenant_id, first_name, last_name, email, phone, dob, hire_date, position, department_id, contract_type, status, meta, created_at, updated_at, birth_date, gender, address, city, country, manager_id, base_salary, bank_info, photo_url\n11. `departments` - id, tenant_id, name, description, manager_id, created_at, updated_at\n12. `employee_documents` - id, tenant_id, employee_id, name, type, category, file_url, file_size, mime_type, uploaded_at, uploaded_by, created_at, updated_at\n13. `contracts` - id, tenant_id, employee_id, type, start_date, end_date, salary, status, trial_period_end, document_url, signed_date, working_hours, created_at, updated_at, contract_type, currency, meta, termination_date, termination_reason, suspension_date, suspension_reason\n14. `leaves` - id, tenant_id, employee_id, type, start_date, end_date, days_count, status, reason, approved_by, approved_at, rejection_reason, created_at, updated_at, document_url, document_name\n15. `payroll_items` - id, tenant_id, name, code, type, category, calculation_type, default_value, percentage, formula, is_active, is_system_item, description, sort_order, created_at, updated_at\n16. `payroll_settings` - id, tenant_id, tax_rate, minimum_wage, currency, payment_day, overtime_rate, updated_at, employer_social_charge_rate, employee_social_charge_rate, social_charge_rate, created_at\n17. `primes` - id, employee_id, amount, reason, type, currency, status, approved_by, approved_at, rejection_reason, payroll_month, is_paid, paid_at, category, tenant_id, created_at, updated_at\n\n## 🔒 **RESTRICTION RH**\n**Seuls les plans ENTERPRISE peuvent interroger les tables RH (paie, contrats, congés, génération de fiche de paie, etc).**\n\n### **🔗 Relations clés :**\n- `sales.customer_id` → `customers.id`\n- `sale_items.sale_id` → `sales.id`\n- `sale_items.stock_item_id` → `stock_items.id`\n- `invoices.customer_id` → `customers.id`\n\n## 🎯 **SYSTÈME DE CLASSIFICATION**\n\n### **1. 📊 Questions techniques (SQL REQUIRED)**\n**Exemples :** \n- \"Liste des ventes\"\n- \"Chiffre d'affaires du mois\"\n- \"Top 10 produits\"\n- \"Clients avec factures impayées\"\n\n### **2. 💬 Conversations générales (NO SQL)**\n**Exemples :** \n- \"Salut\", \"Bonjour\", \"Comment ça va ?\"\n- \"Que peux-tu faire ?\"\n- \"Merci\", \"Aurevoir\"\n\n### **3. 🏢 Informations entreprise (NO SQL)**\n**Exemples :** \n- \"C'est quoi GeStockPro ?\"\n- \"Vos fonctionnalités\"\n- \"Comment ça marche ?\"\n\n## 🛡️ **RÈGLES DE SÉCURITÉ**\n- ❌ **INTERDIT** : INSERT, UPDATE, DELETE, DROP, ALTER\n- ✅ **UNIQUEMENT SELECT**\n- 🔒 **TOUJOURS** inclure : `WHERE tenant_id = '{{ $('Webhook').item.json.body.id }}'`\n\n\n## 📋 **FORMATS DE RÉPONSE**\n- `list` → Liste simple (≤10 éléments)\n- `table` → Données structurées\n- `stats` → Métriques numériques\n- `chart` → Évolution temporelle (pour graphiques interactifs, exportables PNG/XLSX)\n- `excel` → Export complet\n- `advanced_chart` → Graphique interactif avancé (multi-axes, drilldown, histogramme, heatmap, etc.)\n- `document` → Génération de document téléchargeable (facture, reçu, bon de livraison, fiche de paie, contrat RH, mouvement de stock, historique de paiement, etc.)\n\n**Pour tout format graphique (`chart`, `advanced_chart`) :**\n- Structure les données pour un affichage interactif (labels, datasets, axes, légendes, couleurs, etc.)\n- Ajoute des métadonnées pour l'export (ex : titre, type, axes, séries)\n- Prévois l'export image (PNG) et Excel (XLSX)\n\n**Pour le format `document` :**\n- Génère un document PDF ou équivalent à télécharger (facture, reçu, bon de livraison, fiche de paie, contrat RH, document financier, etc.)\n- Utilise les informations de l'entreprise (nom, logo, couleurs, coordonnées, etc.) fournies par le tenant (voir TenantController.js)\n- Respecte la charte graphique (code couleur, logo, etc.)\n- Pour le module RH, permet la génération de fiche de paie, contrat, attestation, etc. (plans ENTERPRISE uniquement)\n- Pour la finance, permet la génération de documents de mouvement de stock, historique de paiement, etc.\n\n## ⚠️ **IMPORTANT : UNE SEULE REQUÊTE**\n**RÈGLE ABSOLUE :** Générer UNE SEULE requête SQL valide dans le tableau `sql`\n\n## ✨ **EXEMPLES DE CLASSIFICATION**\n\n### **💬 Conversation générale**\n**\"Bonjour\"** →\n```json\n{\n  \"type\": \"general_conversation\",\n  \"response\": \"Bonjour ! 👋 Je suis l'assistant IA de GeStockPro. Je peux analyser vos données métier ou répondre à vos questions sur nos services. Comment puis-je vous aider ?\"\n}\n```\n\n### **📊 Requête technique SIMPLE**\n**\"Liste des ventes\"** →\n```json\n{\n  \"type\": \"sql_query\",\n  \"sql\": [\"SELECT s.reference, s.sale_date, s.total_ttc, c.company_name FROM public.sales s JOIN public.customers c ON s.customer_id = c.id WHERE s.tenant_id = '{{ $('Webhook').item.json.body.id }}' ORDER BY s.sale_date DESC LIMIT 20\"],\n  \"format\": \"table\"\n}\n```\n\n### **📈 Requête pour graphique**\n**\"Ventes par jour\"** →\n```json\n{\n  \"type\": \"sql_query\",\n  \"sql\": [\"SELECT DATE(sale_date) as jour, COUNT(*) as nombre_ventes, SUM(total_ttc) as chiffre_affaires FROM public.sales WHERE tenant_id = '{{ $('Webhook').item.json.body.id }}' AND sale_date >= CURRENT_DATE - INTERVAL '30 days' GROUP BY DATE(sale_date) ORDER BY jour\"],\n  \"format\": \"chart\"\n}\n```\n\n### **🏢 Infos entreprise**\n**\"Qu'est-ce que GeStockPro ?\"** →\n```json\n{\n  \"type\": \"company_info\",\n  \"response\": \"GeStockPro est une solution SaaS complète de gestion de stock et de vente avec tracking temps réel, prévisions IA et tableaux de bord analytiques.\"\n}\n```\n\n## 🚨 **ERREURS À ÉVITER**\n1. ❌ **Plusieurs requêtes** : UNE SEULE requête dans le tableau\n2. ❌ **Oublier tenant_id** : Toujours filtrer par tenant\n3. ❌ **Modifications** : Uniquement SELECT\n4. ❌ **Format incorrect** : Respecter les formats définis\n\n## 📝 **CONSIGNES FINALES**\n1. Analyser le type de question\n2. Pour SQL : générer UNE SEULE requête valide\n3. Inclure systématiquement `tenant_id = '{{ $('Webhook').item.json.body.id }}'`\n4. Choisir le format adapté\n5. Répondre UNIQUEMENT en JSON\n\n**Format de réponse : JSON uniquement, sans texte supplémentaire.**\n\n**Si planId est fourni, adapte la profondeur, le volume ou la granularité des résultats selon le plan (BASIC, PRO, ENTERPRISE).**\n- BASIC : Limite à 10 résultats, graphiques simples\n- PRO : Jusqu'à 50 résultats, graphiques détaillés\n- ENTERPRISE : Pas de limite, graphiques avancés, export complet\n\n**Pour toute demande de graphique, privilégie le format `advanced_chart` si la question le justifie.**\n\nRéponds toujours en français meme si l'utilisateur te pose une question dans d'autres langue.\n\nTu dois etre capable de generer des statistique poussés avec des graphics très soffistiqué avec le \nTu dois pouvoir calculer le chiffre d'affaire de l'entreprise sans aucun soucis en te basants sur son id : {{ $('Webhook').item.json.body.id }}",
+        "options": {}
+      },
+      "id": "ad734b9b-b3b2-458d-8678-17c685690702",
+      "name": "AI Agent de Classification1",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3,
+      "position": [
+        3840,
+        2832
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "route-condition-1",
+              "leftValue": "={{ $json.type }}",
+              "rightValue": "sql_query",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "or"
+        },
+        "options": {}
+      },
+      "id": "ac3e22b3-c607-4ecf-ba3e-7d96937e010a",
+      "name": "Routeur de questions1",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        4144,
+        2944
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "general-response",
+              "name": "formattedResponse",
+              "value": "={{ $json.output }}",
+              "type": "string"
+            },
+            {
+              "id": "response-type",
+              "name": "responseType",
+              "value": "=general",
+              "type": "string"
+            },
+            {
+              "id": "result-count",
+              "name": "resultCount",
+              "value": "=0",
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "6ca3c3fc-1540-40b2-b704-f7e699587f39",
+      "name": "Format réponse générale1",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        5440,
+        3056
+      ]
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{ $('Webhook').item.json.body.id }}",
+        "contextWindowLength": 10
+      },
+      "id": "8000b069-1185-4274-8dd7-3afc26a36e04",
+      "name": "Simple Memory",
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "position": [
+        4000,
+        3216
+      ],
+      "typeVersion": 1.3
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatDeepSeek",
+      "typeVersion": 1,
+      "position": [
+        3712,
+        3184
+      ],
+      "id": "35dfcd61-2c30-4710-b378-69b04788eccd",
+      "name": "DeepSeek Chat Model4",
+      "credentials": {
+        "deepSeekApi": {
+          "id": "7xifHFmlSOW7XjwP",
+          "name": "DeepSeek 5 Mars 2026"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "{\n  \"preferredFormat\": \"{{ $('Webhook1').item.json.body.format || 'auto' }}\"\n}",
+        "options": {}
+      },
+      "id": "70465545-7cb5-4028-9364-bdbda4817d3c",
+      "name": "Format Selector",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        3360,
+        3376
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={\n  \"message\": {\n    \"text\": \"{{ $json.body.message }}\"\n  },\n  \"messageSource\": \"web\",\n  \"sessionId\": \"{{ $json.body.sessionId }}\"\n}",
+        "options": {}
+      },
+      "id": "a63f555d-f595-4133-afaa-f15c0d6ba6f5",
+      "name": "Edit Fields1",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        2992,
+        3424
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "allIncomingItems",
+        "options": {}
+      },
+      "id": "3db7db5d-5702-4b09-bab2-66cbb30a7a76",
+      "name": "Respond to Webhook1",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        7248,
+        2816
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "e8e10d45-a7e4-4b81-a229-d77d207b40ea",
+              "name": "formattedResponse",
+              "value": "={{ $json.formattedResponse }}",
+              "type": "string"
+            },
+            {
+              "id": "34c12fef-9006-48da-bac9-716032a7fe0c",
+              "name": "format",
+              "value": "={{ $('Format SQL Results Enhanced').item.json.format }}",
+              "type": "string"
+            },
+            {
+              "id": "77941959-cc86-4e4d-9bb7-ec7346c766f4",
+              "name": "resultCount",
+              "value": "={{ $('Format SQL Results Enhanced').item.json.resultCount }}",
+              "type": "number"
+            },
+            {
+              "id": "rawResults",
+              "name": "rawResults",
+              "value": "={{ $('Format SQL Results Enhanced').item.json.rawResults }}",
+              "type": "json"
+            },
+            {
+              "id": "metadata",
+              "name": "metadata",
+              "value": "={{ $('Format SQL Results Enhanced').item.json.metadata }}",
+              "type": "json"
+            },
+            {
+              "id": "chart_metadata",
+              "name": "chart_metadata",
+              "value": "={{ $('Format SQL Results Enhanced').item.json.chart_metadata }}",
+              "type": "json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "744890ab-4229-4f2f-a9ad-2d1b0c7d105f",
+      "name": "Prepare Response2",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        6592,
+        2784
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Formatte les résultats selon le type spécifié\nconst allResults = $input.all();\nconst userQuestion = $('Webhook').first().json.body.chatInput;\nconst sessionId = $('Webhook').first().json.body.sessionId;\n\n// Récupère les métadonnées\nconst metadata = allResults[0]?.json?._metadata || {};\nconst formatType = metadata.format || 'list';\nconst stats = metadata.stats;\nconst resultCount = allResults.length;\n\nif (resultCount === 0) {\n  return [{\n    json: {\n      formattedResponse: `Désolé, je n'ai trouvé aucune donnée correspondant à votre requête : \"${userQuestion}\".`,\n      sessionId: sessionId,\n      format: 'text',\n      resultCount: 0\n    }\n  }];\n}\n\nlet rawData = allResults.map(item => item.json);\n\n// Correction : transmettre le JSON natif pour chart/advanced_chart, et sécuriser l'accès aux propriétés\nif (formatType === 'chart' || formatType === 'advanced_chart') {\n  return [{\n    json: {\n      formattedResponse: '[GRAPH_DATA]',\n      sessionId: sessionId,\n      format: formatType,\n      resultCount: resultCount,\n      rawResults: rawData,\n      metadata: metadata,\n      chart_metadata: metadata.chart_metadata || null\n    }\n  }];\n}\n\nlet response = '';\n\nswitch(formatType) {\n  case 'simple':\n    if (allResults[0] && allResults[0].json) {\n      const value = Object.values(allResults[0].json)[0];\n      response = `**Résultat :** ${value}`;\n    }\n    break;\n\n  case 'list':\n    response = `**Résultats (${resultCount}) :**\\n\\n`;\n    allResults.forEach((item, index) => {\n      const data = item.json || {};\n      const columns = Object.keys(data);\n      if (columns.length === 1) {\n        response += `• ${data[columns[0]]}\\n`;\n      } else {\n        const values = columns.map(col => `${data[col]}`).join(' - ');\n        response += `${index + 1}. ${values}\\n`;\n      }\n    });\n    break;\n\n  case 'table':\n    if (allResults[0] && allResults[0].json) {\n      const columns = Object.keys(allResults[0].json);\n      response = `**Tableau des résultats (${resultCount} lignes) :**\\n\\n`;\n      response += '| ' + columns.join(' | ') + ' |\\n';\n      response += '|' + columns.map(() => '---').join('|') + '|\\n';\n      allResults.forEach(item => {\n        const row = columns.map(col => item.json[col] || '').join(' | ');\n        response += `| ${row} |\\n`;\n      });\n    }\n    break;\n\n  case 'stats':\n    response = `**Statistiques :**\\n\\n`;\n    response += `Total : ${resultCount} enregistrement(s)\\n\\n`;\n    if (stats) {\n      Object.keys(stats).forEach(col => {\n        const s = stats[col];\n        response += `**${col} :**\\n`;\n        response += `  • Somme : ${s.sum.toFixed(2)}\\n`;\n        response += `  • Moyenne : ${s.avg.toFixed(2)}\\n`;\n        response += `  • Min : ${s.min.toFixed(2)}\\n`;\n        response += `  • Max : ${s.max.toFixed(2)}\\n\\n`;\n      });\n    }\n    if (resultCount <= 20) {\n      response += `**Détails :**\\n`;\n      allResults.forEach((item, index) => {\n        const data = item.json || {};\n        const values = Object.entries(data).map(([key, value]) => `${key}: ${value}`).join(', ');\n        response += `${index + 1}. ${values}\\n`;\n      });\n    }\n    break;\n\n  default:\n    response = `**Résultats pour :** ${userQuestion}\\n\\n`;\n    allResults.forEach((item, index) => {\n      const data = item.json || {};\n      const values = Object.entries(data).map(([key, value]) => `**${key}** : ${value}`).join(', ');\n      response += `${index + 1}. ${values}\\n`;\n    });\n}\n\nresponse += `\\n---\\n*${resultCount} résultat(s) trouvé(s)*`;\n\nreturn [{\n  json: {\n    formattedResponse: response,\n    sessionId: sessionId,\n    format: formatType,\n    resultCount: resultCount,\n    rawResults: rawData,\n    metadata: metadata\n  }\n}];"
+      },
+      "id": "82dc44ed-23f2-4664-aee7-4d47441f4ee0",
+      "name": "Format SQL Results Enhanced",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5664,
+        2560
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Analyse le type de données et détermine le format optimal\nconst sqlQuery = $('Edit Fields5').first().json.sql[0];\nconst aiResponse = $('AI Agent de Classification1').first().json.output;\nconst queryResults = $input.all();\nconst userQuestion = $('Webhook').first().json.body.chatInput;\n\n// Récupère le format depuis la réponse de l'agent\nlet format = $('Edit Fields5').first().json.format || 'auto';\n\n// Correction : priorité absolue aux formats chart/advanced_chart si détectés dans la réponse AI\nif (aiResponse.format === 'chart' || aiResponse.format === 'advanced_chart') {\n  format = aiResponse.format;\n}\n\n// Détection automatique si 'auto' (mais ne jamais écraser chart/advanced_chart)\nif (format === 'auto') {\n  const results = queryResults[0]?.json || {};\n  const columns = Object.keys(results);\n  const rowCount = queryResults.length;\n\n  if (rowCount === 1 && columns.length === 1) {\n    format = 'simple';\n  } else if (columns.includes('count') || columns.includes('total') || columns.includes('sum') || columns.includes('avg')) {\n    format = 'stats';\n  } else if (rowCount <= 10 && columns.length <= 4) {\n    format = 'list';\n  } else if (rowCount > 10 || columns.length > 4) {\n    format = 'table';\n  } else {\n    format = 'list';\n  }\n}\n\n// Analyse les données pour les statistiques\nlet stats = null;\nif (format === 'stats' || format === 'chart' || format === 'advanced_chart') {\n  const numericColumns = {};\n  queryResults.forEach(item => {\n    const data = item.json || {};\n    Object.keys(data).forEach(key => {\n      if (!isNaN(parseFloat(data[key])) && data[key] !== null) {\n        if (!numericColumns[key]) numericColumns[key] = [];\n        numericColumns[key].push(parseFloat(data[key]));\n      }\n    });\n  });\n\n  if (Object.keys(numericColumns).length > 0) {\n    stats = {};\n    Object.keys(numericColumns).forEach(col => {\n      const values = numericColumns[col];\n      stats[col] = {\n        sum: values.reduce((a, b) => a + b, 0),\n        avg: values.reduce((a, b) => a + b, 0) / values.length,\n        min: Math.min(...values),\n        max: Math.max(...values),\n        count: values.length\n      };\n    });\n  }\n}\n\nreturn queryResults.map(item => ({\n  ...item,\n  json: {\n    ...item.json,\n    _metadata: {\n      format: format,\n      stats: stats,\n      userQuestion: userQuestion,\n      query: sqlQuery,\n      resultCount: queryResults.length,\n      columnCount: Object.keys(item.json || {}).length\n    }\n  }\n}));"
+      },
+      "id": "033a9194-ab55-4e7f-a5bb-3e1a3d3e993e",
+      "name": "Analyze Data Type",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5248,
+        2560
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={{ $json.output }}",
+        "options": {}
+      },
+      "id": "993cc5c1-a4dc-4e7f-8253-17e00703977d",
+      "name": "Edit Fields5",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        4304,
+        2736
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "{{ $json.sql }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        4672,
+        2864
+      ],
+      "id": "76cc4736-3ae6-46d5-bbb5-ace4cd804312",
+      "name": "SaaS GESTOCKPRO",
+      "credentials": {
+        "postgres": {
+          "id": "XsmPz0YKsvPhIWkK",
+          "name": "gestionapp_stockgestion_13_janv_2026"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "error-check",
+              "leftValue": "={{ $json.error }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "exists"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "614d2dad-9c6f-4c84-a672-f6a2dc68d09f",
+      "name": "Error Handler1",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        4912,
+        2752
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Gère les erreurs de requête SQL\nconst error = $('SaaS GESTOCKPRO').first().json.error;\nconst userQuestion = $('Webhook').first().json.body.chatInput;\nconst sessionId = $('Webhook').first().json.body.sessionId;\n\nlet errorMessage = \"Une erreur est survenue lors de l'exécution de la requête SQL.\";\n\nif (error && error.message) {\n  if (error.message.includes(\"syntax error\")) {\n    errorMessage = \"Désolé, il y a une erreur de syntaxe dans la requête SQL générée. Veuillez reformuler votre question.\";\n  } else if (error.message.includes(\"tenant_id\")) {\n    errorMessage = \"Erreur d'accès aux données. Vérifiez que vous avez les bonnes autorisations.\";\n  } else if (error.message.includes(\"does not exist\")) {\n    errorMessage = \"La table ou colonne demandée n'existe pas dans la base de données.\";\n  }\n}\n\nreturn [{\n  json: {\n    formattedResponse: `❌ ${errorMessage}\\n\\n**Question :** ${userQuestion}\\n\\nVeuillez reformuler votre demande ou contacter le support si le problème persiste.`,\n    sessionId: sessionId,\n    format: 'error',\n    resultCount: 0\n  }\n}];"
+      },
+      "id": "06420be7-eafc-4b8a-85c7-acc44f4208d3",
+      "name": "Format Error1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5264,
+        2832
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "e8e10d45-a7e4-4b81-a229-d77d207b40ea",
+              "name": "formattedResponse",
+              "value": "={{ $json.formattedResponse }}",
+              "type": "string"
+            },
+            {
+              "id": "34c12fef-9006-48da-bac9-716032a7fe0c",
+              "name": "format",
+              "value": "={{ $json.responseType }}",
+              "type": "string"
+            },
+            {
+              "id": "77941959-cc86-4e4d-9bb7-ec7346c766f4",
+              "name": "resultCount",
+              "value": "={{ $json.resultCount }}",
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "78e94c9d-34ec-4117-bc8d-1dabb9cf496a",
+      "name": "Prepare Response3",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        6320,
+        3200
+      ]
+    },
+    {
+      "parameters": {
+        "schema": {
+          "__rl": true,
+          "value": "public",
+          "mode": "list",
+          "cachedResultName": "public"
+        },
+        "table": {
+          "__rl": true,
+          "value": "n8n_chat_histories",
+          "mode": "list",
+          "cachedResultName": "n8n_chat_histories"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "session_id": "={{ $json.body.sessionId }}",
+            "message": "={{ $json.body.message }}",
+            "sender": "user"
+          },
+          "matchingColumns": [
+            "id"
+          ],
+          "schema": [
+            {
+              "id": "id",
+              "displayName": "id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "session_id",
+              "displayName": "session_id",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "message",
+              "displayName": "message",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "object",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "sender",
+              "displayName": "sender",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        2816,
+        2912
+      ],
+      "id": "4aec231a-78b6-4303-aeba-1e032c415232",
+      "name": "Insert rows in a table3",
+      "credentials": {
+        "postgres": {
+          "id": "XsmPz0YKsvPhIWkK",
+          "name": "gestionapp_stockgestion_13_janv_2026"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "schema": {
+          "__rl": true,
+          "value": "public",
+          "mode": "list",
+          "cachedResultName": "public"
+        },
+        "table": {
+          "__rl": true,
+          "value": "n8n_chat_histories",
+          "mode": "list",
+          "cachedResultName": "n8n_chat_histories"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "session_id": "={{ $('Format SQL Results Enhanced').item.json.sessionId }}",
+            "message": "={{ $json.formattedResponse }}",
+            "sender": "assistant"
+          },
+          "matchingColumns": [
+            "id"
+          ],
+          "schema": [
+            {
+              "id": "id",
+              "displayName": "id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "session_id",
+              "displayName": "session_id",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "message",
+              "displayName": "message",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "object",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "sender",
+              "displayName": "sender",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        7232,
+        2512
+      ],
+      "id": "679db731-08e7-4fb7-9325-96c7edd0ffed",
+      "name": "Insert rows in a table4",
+      "credentials": {
+        "postgres": {
+          "id": "XsmPz0YKsvPhIWkK",
+          "name": "gestionapp_stockgestion_13_janv_2026"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "schema": {
+          "__rl": true,
+          "value": "public",
+          "mode": "list",
+          "cachedResultName": "public"
+        },
+        "table": {
+          "__rl": true,
+          "value": "n8n_chat_histories",
+          "mode": "list",
+          "cachedResultName": "n8n_chat_histories"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "session_id": "={{ $('Edit Fields1').item.json.sessionId }}",
+            "message": "={{ $('Formateur de réponse générale1').item.json.output }}",
+            "sender": "assistant"
+          },
+          "matchingColumns": [
+            "id"
+          ],
+          "schema": [
+            {
+              "id": "id",
+              "displayName": "id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "session_id",
+              "displayName": "session_id",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "message",
+              "displayName": "message",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "object",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "sender",
+              "displayName": "sender",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        7296,
+        3152
+      ],
+      "id": "a948a263-eb3c-456b-9b17-d76623dffd71",
+      "name": "Insert rows in a table5",
+      "credentials": {
+        "postgres": {
+          "id": "XsmPz0YKsvPhIWkK",
+          "name": "gestionapp_stockgestion_13_janv_2026"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Workflows avec formattage IA \n## Entre 19 et 23 sécondes",
+        "height": 1616,
+        "width": 5648
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        2144,
+        2384
+      ],
+      "typeVersion": 1,
+      "id": "d483d99c-218e-4d6a-84e6-f821df8f2ac1",
+      "name": "Sticky Note"
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Insert rows in a table3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent de Classification1": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields5",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Routeur de questions1": {
+      "main": [
+        [
+          {
+            "node": "SaaS GESTOCKPRO",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Format réponse générale1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format réponse générale1": {
+      "main": [
+        [
+          {
+            "node": "Prepare Response3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Simple Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "AI Agent de Classification1",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DeepSeek Chat Model4": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent de Classification1",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields1": {
+      "main": [
+        [
+          {
+            "node": "Format Selector",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "AI Agent de Classification1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Response2": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Insert rows in a table4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format SQL Results Enhanced": {
+      "main": [
+        [
+          {
+            "node": "Prepare Response2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Analyze Data Type": {
+      "main": [
+        [
+          {
+            "node": "Format SQL Results Enhanced",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields5": {
+      "main": [
+        [
+          {
+            "node": "Routeur de questions1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SaaS GESTOCKPRO": {
+      "main": [
+        [
+          {
+            "node": "Error Handler1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Error Handler1": {
+      "main": [
+        [
+          {
+            "node": "Format Error1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Analyze Data Type",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Error1": {
+      "main": [
+        [
+          {
+            "node": "Prepare Response2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Response3": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Insert rows in a table5",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "915e32914f81ccfd57b182e801f5741b5d3cf32b786354a1ad1a34c6c276aa1d"
+  }
+}
