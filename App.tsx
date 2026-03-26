@@ -32,11 +32,17 @@ import DocumentCenter from './components/rh/DocumentCenter';
 import OrgChart from './components/rh/OrgChart';
 import DepartmentManager from './components/rh/DepartmentManager';
 import ModulePlaceholder from './components/rh/ModulePlaceholder';
+import Attendance from './components/rh/Attendance';
+import TimeDeductionSettings from './components/rh/TimeDeductionSettings';
+import EmployeePointage from './components/rh/EmployeePointage';
 import Login from './components/Login';
 import RegistrationSuccess from './components/RegistrationSuccess';
 import Checkout from './components/Checkout';
 import OnboardingWizard from './components/OnboardingWizard';
 import AIAnalysis from './components/AIAnalysis';
+import { StripeSuccessPage, StripeCancelPage, StripeErrorPage } from './components/StripeRedirect';
+import Support from './components/Support';
+import Info from './components/Info';
 import { MOCK_USERS, MOCK_TENANTS, SUBSCRIPTION_PLANS } from './constants';
 import { UserRole, AppSettings, User, Tenant, SubscriptionPlan } from './types';
 import { authBridge } from './services/authBridge';
@@ -100,6 +106,8 @@ const App: React.FC = () => {
   const [isInitializing, setIsInitializing] = useState(true);
   const [showLanding, setShowLanding] = useState(true);
   const [activeTab, setActiveTab] = useState('dashboard');
+  // Permet de sortir des pages de redirection Stripe sans rechargement complet
+  const [stripeHandled, setStripeHandled] = useState(false);
   const [navigationMetadata, setNavigationMetadata] = useState<any>(null);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
 
@@ -109,6 +117,11 @@ const App: React.FC = () => {
   const [showOnboarding, setShowOnboarding] = useState<{ companyName: string, user: User, mustPay: boolean, planId: string, planObj?: SubscriptionPlan } | null>(null);
   const [activationPending, setActivationPending] = useState(false);
   const [initialLoginOptions, setInitialLoginOptions] = useState<{ mode?: string; planId?: string; regStep?: number } | null>(null);
+  // Upgrade de plan depuis Subscription.tsx → Checkout.tsx
+  const [upgradeContext, setUpgradeContext] = useState<{ planObj: SubscriptionPlan } | null>(null);
+
+  // Rappel pointage pour les employés
+  const [pointageReminder, setPointageReminder] = useState(false);
 
   const [appSettings, setAppSettings] = useState<AppSettings>({
     language: 'Français',
@@ -184,9 +197,27 @@ const App: React.FC = () => {
         if (freshUser && freshUser.isActive) {
           // Ensure planId is present: resolve from all sources
           (freshUser as any).planId = resolvePlanId(freshUser);
+          await syncTenantSettings(freshUser);
+
+          // Vérifier si l'onboarding est terminé (restauration de progression si non)
+          try {
+            const settings = await apiClient.get('/settings');
+            if (settings && settings.onboardingCompleted === false) {
+              setShowLanding(false);
+              setShowOnboarding({
+                companyName: settings.name || (freshUser as any).companyName || 'Ma Société',
+                user: freshUser,
+                mustPay: false,
+                planId: (freshUser as any).planId || 'BASIC',
+                planObj: undefined
+              });
+              setIsInitializing(false);
+              return;
+            }
+          } catch {}
+
           setCurrentUser(freshUser);
           setIsLoggedIn(true);
-          await syncTenantSettings(freshUser);
           if (freshUser.role === UserRole.SUPER_ADMIN) setActiveTab('superadmin');
         } else {
           authBridge.clearSession();
@@ -196,6 +227,28 @@ const App: React.FC = () => {
     };
     initAuth();
   }, []);
+
+  // Vérifie si l'employé connecté n'a pas encore pointé aujourd'hui (si déductions activées)
+  // Seulement pour les plans ENTERPRISE
+  useEffect(() => {
+    if (!isLoggedIn || !currentUser) return;
+    const role = currentUser.role || (currentUser as any).roles?.[0];
+    if (role !== UserRole.EMPLOYEE) return;
+    const planId = String((currentUser as any)?.planId || '').toUpperCase();
+    if (!planId.includes('ENTERPRISE')) return;
+
+    const check = async () => {
+      try {
+        const res = await apiClient.get('/hr/attendance/my/today');
+        if (res?.settings?.deductionEnabled && !res?.attendance?.clockIn) {
+          setPointageReminder(true);
+        } else {
+          setPointageReminder(false);
+        }
+      } catch { /* silencieux si pas encore d'employé lié */ }
+    };
+    check();
+  }, [isLoggedIn, currentUser]);
 
   const handleLoginSuccess = async (user: User) => {
     const registerMeta = user as any;
@@ -252,6 +305,30 @@ const App: React.FC = () => {
   const currentTenant = MOCK_TENANTS.find(t => t.id === currentUser?.tenantId);
   const currentPlan = SUBSCRIPTION_PLANS.find(p => p.id === (currentUser?.planId || currentTenant?.plan));
 
+  // Restriction d'accès quand l'abonnement est expiré.
+  // IMPORTANT : 'PENDING' = nouveau compte (pas encore payé la 1ère fois) → jamais bloqué.
+  // On ne bloque que sur des états EXPLICITEMENT mauvais, pas des états ambigus.
+  const tenantPaymentStatus = (currentUser as any)?.tenant?.paymentStatus;
+  const subStatus           = (currentUser as any)?.subscription?.status;
+  const subNextBilling      = (currentUser as any)?.subscription?.nextBillingDate;
+
+  const isTenantExpired = !!(currentUser && (
+    // Cas 1 : le SuperAdmin a explicitement rejeté le paiement
+    tenantPaymentStatus === 'REJECTED' ||
+    // Cas 2 : la subscription est marquée explicitement expirée
+    subStatus === 'EXPIRED' ||
+    // Cas 3 : la subscription était ACTIVE mais la date de renouvellement est dépassée
+    (subStatus === 'ACTIVE' && subNextBilling && new Date(subNextBilling) < new Date())
+  ));
+
+  const isAdminUser = !!(currentUser && (
+    currentUser.role === UserRole.ADMIN ||
+    currentUser.role === UserRole.SUPER_ADMIN ||
+    (Array.isArray((currentUser as any).roles) &&
+      ((currentUser as any).roles.includes('ADMIN') || (currentUser as any).roles.includes('SUPER_ADMIN')))
+  ));
+  const EXPIRED_ALLOWED_TABS = ['dashboard', 'subscription'];
+
   if (isInitializing) {
     return (
       <div className="h-screen bg-slate-950 flex flex-col items-center justify-center gap-6">
@@ -275,21 +352,34 @@ const App: React.FC = () => {
     }} planName={plan?.name || 'Plan Initial'} />;
   }
 
-  if (showOnboarding) return <OnboardingWizard companyName={showOnboarding.companyName} user={showOnboarding.user} onComplete={async (data) => {
-    if (showOnboarding?.mustPay) {
-      setShowCheckout({
-        planId: showOnboarding.planId,
-        user: showOnboarding.user,
-        planObj: showOnboarding.planObj
-      });
+  if (showOnboarding) return <OnboardingWizard
+    companyName={showOnboarding.companyName}
+    user={showOnboarding.user}
+    onExit={() => {
+      // L'utilisateur quitte l'onboarding volontairement ou suite à une erreur/déconnexion.
+      // La progression est déjà sauvegardée en localStorage par le wizard lui-même.
+      // On NE connecte PAS l'utilisateur : on revient à la LandingPage.
+      // À la prochaine connexion, initAuth détectera onboardingCompleted===false
+      // et restaurera automatiquement le wizard à l'étape sauvegardée.
       setShowOnboarding(null);
-    } else {
-      setCurrentUser(showOnboarding.user);
-      setIsLoggedIn(true);
-      setActiveTab('dashboard');
-      setShowOnboarding(null);
-    }
-  }} />;
+      setShowLanding(true);
+    }}
+    onComplete={async (_data) => {
+      if (showOnboarding?.mustPay) {
+        setShowCheckout({
+          planId: showOnboarding.planId,
+          user: showOnboarding.user,
+          planObj: showOnboarding.planObj
+        });
+        setShowOnboarding(null);
+      } else {
+        setCurrentUser(showOnboarding.user);
+        setIsLoggedIn(true);
+        setActiveTab('dashboard');
+        setShowOnboarding(null);
+      }
+    }}
+  />;
 
   if (showCheckout) return <Checkout
     planId={showCheckout.planId}
@@ -300,6 +390,18 @@ const App: React.FC = () => {
       setShowCheckout(null);
     }}
     onCancel={() => resetToLogin()}
+  />;
+
+  if (upgradeContext && currentUser) return <Checkout
+    planId={upgradeContext.planObj.id}
+    user={currentUser}
+    planObj={upgradeContext.planObj}
+    isUpgrade={true}
+    onSuccess={() => {
+      setUpgradeContext(null);
+      setActiveTab('subscription');
+    }}
+    onCancel={() => setUpgradeContext(null)}
   />;
 
   if (activationPending) {
@@ -326,6 +428,23 @@ const App: React.FC = () => {
     );
   }
 
+  // Stripe redirect pages — detected from URL pathname
+  const stripePathname = typeof window !== 'undefined' ? window.location.pathname : '';
+  const leaveStripePage = (tab = 'subscription') => {
+    window.history.replaceState({}, '', '/');
+    setStripeHandled(true);
+    if (isLoggedIn) setActiveTab(tab);
+  };
+  if (!stripeHandled && stripePathname === '/stripe/success') {
+    return <StripeSuccessPage onContinue={() => leaveStripePage('subscription')} />;
+  }
+  if (!stripeHandled && stripePathname === '/stripe/cancel') {
+    return <StripeCancelPage onBack={() => leaveStripePage('subscription')} />;
+  }
+  if (!stripeHandled && stripePathname === '/stripe/error') {
+    return <StripeErrorPage onBack={() => leaveStripePage('subscription')} />;
+  }
+
   // Direct access to Super-Admin login via /superadmin
   if (!isLoggedIn) {
     if (typeof window !== 'undefined' && window.location.pathname === '/superadmin') {
@@ -335,17 +454,22 @@ const App: React.FC = () => {
       return <LandingPage onLogin={(opts) => {
         setShowLanding(false);
         if (opts && opts.openRegister) {
-          setInitialLoginOptions({ mode: 'REGISTER', planId: opts.planId, regStep: opts.regStep || 1 });
+          setInitialLoginOptions({ mode: 'REGISTER', planId: opts.planId, regStep: opts.regStep || 1, period: opts.period });
         } else {
           setInitialLoginOptions(null);
         }
       }} />;
     }
-    return <Login onLoginSuccess={handleLoginSuccess} onBackToLanding={() => { setShowLanding(true); setInitialLoginOptions(null); }} initialMode={initialLoginOptions?.mode} initialPlanId={initialLoginOptions?.planId} initialRegStep={initialLoginOptions?.regStep} />;
+    return <Login onLoginSuccess={handleLoginSuccess} onBackToLanding={() => { setShowLanding(true); setInitialLoginOptions(null); }} initialMode={initialLoginOptions?.mode} initialPlanId={initialLoginOptions?.planId} initialRegStep={initialLoginOptions?.regStep} initialPeriod={initialLoginOptions?.period} />;
   }
 
   const renderContent = () => {
     if (!currentUser) return null;
+
+    // Quand l'abonnement est expiré, bloquer tout sauf dashboard et subscription
+    if (isTenantExpired && isAdminUser && !EXPIRED_ALLOWED_TABS.includes(activeTab) && activeTab !== 'superadmin') {
+      return <Dashboard user={currentUser} currency={appSettings.currency} onNavigate={handleContextualNavigate} />;
+    }
 
     // Normalize module check for RH subpages (rh.employees -> rh)
     const moduleCheck = activeTab && String(activeTab).startsWith('rh') ? 'rh' : activeTab;
@@ -401,6 +525,8 @@ const App: React.FC = () => {
         case 'rh.payroll.bonuses': return <PayrollManagement onNavigate={handleContextualNavigate} initialTab="advances" />;
         case 'rh.payroll.advances': return <PayrollManagement onNavigate={handleContextualNavigate} initialTab="advances" />;
         case 'rh.payroll.declarations': return <PayrollManagement onNavigate={handleContextualNavigate} initialTab="declarations" />;
+        case 'rh.attendance': return <Attendance onNavigate={handleContextualNavigate} />;
+        case 'rh.time-settings': return <TimeDeductionSettings onNavigate={handleContextualNavigate} />;
         default: return <HRDashboard onNavigate={handleContextualNavigate} />;
       }
     }
@@ -421,8 +547,40 @@ const App: React.FC = () => {
       case 'recovery': return <Recovery currency={appSettings.currency} />;
       case 'payments': return <Payments currency={appSettings.currency} tenantSettings={appSettings} />;
       case 'my-leaves': return <LeaveManagement onNavigate={handleContextualNavigate} user={currentUser} />;
+      case 'employee-pointage': {
+        const roles = Array.isArray((currentUser as any).roles) ? (currentUser as any).roles : [currentUser.role];
+        const canUsePointage = roles.some((r: any) =>
+          [UserRole.EMPLOYEE, UserRole.STOCK_MANAGER, UserRole.SALES, UserRole.ACCOUNTANT, UserRole.HR_MANAGER].includes(r)
+        );
+        const planId = String((currentUser as any)?.planId || '').toUpperCase();
+        if (!canUsePointage || !planId.includes('ENTERPRISE')) {
+          return (
+            <div className="flex flex-col items-center justify-center min-h-[60vh] gap-6 px-6 text-center">
+              <div className="w-20 h-20 bg-indigo-50 rounded-[2rem] flex items-center justify-center">
+                <Lock size={36} className="text-indigo-400" />
+              </div>
+              <div className="space-y-2">
+                <h2 className="text-2xl font-black text-slate-900 uppercase tracking-tighter">Fonctionnalité Enterprise</h2>
+                <p className="text-slate-500 text-xs font-bold uppercase tracking-widest max-w-xs">
+                  Le pointage employé est disponible uniquement dans le plan Enterprise.
+                  Contactez votre administrateur pour mettre à niveau votre abonnement.
+                </p>
+              </div>
+              <button
+                onClick={() => setActiveTab('dashboard')}
+                className="px-6 py-3 bg-slate-900 text-white rounded-2xl text-xs font-black uppercase tracking-widest hover:bg-indigo-600 transition-all"
+              >
+                Retour au tableau de bord
+              </button>
+            </div>
+          );
+        }
+        return <EmployeePointage onNavigate={handleContextualNavigate} />;
+      }
       case 'governance': return <Governance tenantId={currentUser.tenantId} plan={currentPlan} />;
-      case 'subscription': return <Subscription user={currentUser} currency={appSettings.currency} />;
+      case 'subscription': return <Subscription user={currentUser} currency={appSettings.currency} onUpgrade={(plan) => setUpgradeContext({ planObj: plan })} />;
+      case 'info': return <Info user={currentUser} />;
+      case 'support': return <Support user={currentUser} />;
       case 'security': return <SecurityPanel />;
       case 'audit': return <AuditLogs tenantSettings={appSettings} />;
       case 'settings': return <Settings settings={appSettings} onSave={setAppSettings} />;
@@ -434,10 +592,37 @@ const App: React.FC = () => {
     <ErrorBoundary children={
       <ToastProvider>
         <div className={`min-h-screen ${activeTab === 'superadmin' ? 'bg-slate-950' : 'bg-slate-50'}`}>
+          {/* Bannière rappel pointage — employé non pointé */}
+          {pointageReminder && activeTab !== 'employee-pointage' && (
+            <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[300] flex items-center gap-4 px-6 py-4 bg-slate-900 text-white rounded-[2rem] shadow-2xl border border-indigo-500/30 max-w-sm w-full mx-4">
+              <div className="w-9 h-9 bg-indigo-600 rounded-xl flex items-center justify-center shrink-0">
+                <CheckCircle2 size={18} className="text-white" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-[10px] font-black uppercase tracking-widest text-white">Pensez à pointer !</p>
+                <p className="text-[9px] text-slate-400 font-bold uppercase tracking-widest">Vous n'avez pas encore pointé aujourd'hui</p>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  onClick={() => { setActiveTab('employee-pointage'); setPointageReminder(false); }}
+                  className="px-3 py-2 bg-indigo-600 text-white text-[9px] font-black uppercase tracking-widest rounded-xl hover:bg-indigo-700 transition-all"
+                >
+                  Pointer
+                </button>
+                <button
+                  onClick={() => setPointageReminder(false)}
+                  className="w-7 h-7 flex items-center justify-center text-slate-400 hover:text-white transition-colors"
+                >
+                  <ArrowRight size={14} />
+                </button>
+              </div>
+            </div>
+          )}
           <Layout
             user={currentUser!}
             activeTab={activeTab}
             setActiveTab={(tab) => {
+              if (isTenantExpired && isAdminUser && !EXPIRED_ALLOWED_TABS.includes(tab) && tab !== 'superadmin') return;
               setNavigationMetadata(null);
               setActiveTab(tab);
             }}
