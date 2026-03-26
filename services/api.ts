@@ -15,15 +15,18 @@ if (buildTimeBackend) {
     const origin = (typeof window !== 'undefined' && window.location && window.location.origin) ? window.location.origin : '';
     // En développement avec Vite (localhost:5173-5179), pointer vers le backend sur port 3000
     if (origin && /localhost:517[3-9]/.test(origin)) {
+      //rawBackend = 'http://localhost:3000';
       rawBackend = 'https://gestock.realtechprint.com';
     } else if (origin && !/localhost|127\.0\.0\.1/.test(origin)) {
       // Production: API co-localisée sous la même origine
       rawBackend = origin;
     } else {
       // Fallback pour développement
+      //rawBackend = 'http://localhost:3000';
       rawBackend = 'https://gestock.realtechprint.com';
     }
   } catch (e) {
+    //rawBackend = 'http://localhost:3000';
     rawBackend = 'https://gestock.realtechprint.com';
   }
 }
@@ -93,6 +96,28 @@ export const apiClient = {
         status: 0
       } as ApiError;
     }
+  },
+
+  /** Comme request() mais renvoie un Blob — pour les téléchargements binaires (PDF, ZIP…) */
+  async requestBlob(endpoint: string, options: RequestInit = {}): Promise<{ blob: Blob; filename: string }> {
+    const session = authBridge.getSession();
+    const sessionToken = authBridge.getSessionToken();
+    const isFormData = options.body instanceof FormData;
+    const headers = {
+      ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
+      ...(session?.token ? { 'Authorization': `Bearer ${session.token}` } : {}),
+      ...(sessionToken ? { 'x-session-token': sessionToken } : {}),
+      ...options.headers,
+    };
+    const response = await fetch(`${BACKEND_URL}${endpoint}`, { ...options, headers });
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      throw { error: data.error || 'DownloadError', message: data.message || 'Échec du téléchargement.', status: response.status };
+    }
+    const blob = await response.blob();
+    const disposition = response.headers.get('content-disposition') ?? '';
+    const match = disposition.match(/filename="?([^";]+)"?/);
+    return { blob, filename: match?.[1] ?? 'download' };
   },
 
   get: (e: string) => apiClient.request(e, { method: 'GET' }),

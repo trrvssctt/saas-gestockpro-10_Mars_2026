@@ -7,6 +7,25 @@ const SESSION_TOKEN_KEY = 'gsp_session_token';
  * Définition stricte des plans
  */
 const PLAN_RULES = {
+  FREE_TRIAL: {
+    modules: [
+      'dashboard',
+      'categories',
+      'subcategories',
+      'inventory',
+      'movements',
+      'services',
+      'customers',
+      'sales',
+      'payments',
+      'governance',
+      'subscription',
+      'settings',
+      'support',
+      'info',
+    ],
+    limits: null   // Illimité — essai gratuit 14 jours
+  },
   BASIC: {
     modules: [
       'dashboard',
@@ -21,11 +40,11 @@ const PLAN_RULES = {
       'governance',
       'subscription',
       'settings',
+      'support',
+      'info',
     ],
     limits: {
-      customers: 5,
       users: 6,
-      monthlySales: 20
     }
   },
   PRO: {
@@ -44,11 +63,11 @@ const PLAN_RULES = {
       //'security',
       'recovery',
       'movements',
+      'support',
+      'info',
     ],
     limits: {
-      customers: 12,
       users: 10,
-      monthlySales: 50
     }
   },
   ENTERPRISE: {
@@ -69,7 +88,10 @@ const PLAN_RULES = {
       'movements',
       'inventorycampaigns',
       'rh',
-      'my-leaves'
+      'my-leaves',
+      'employee-pointage',
+      'support',
+      'info',
     ], // Tous les modules autorisés sauf le panneau 'superadmin'
     limits: null    // Aucune limite
   }
@@ -266,16 +288,19 @@ export const authBridge = {
   canAccess: (user: User, moduleId: string): boolean => {
     const roles = Array.isArray(user.roles) ? user.roles : [user.role];
     const planId = (user as any).planId || 'BASIC';
-    // Tenant payment gating: if tenant is not up-to-date, restrict access.
+    // Tenant payment gating
     const tenantStatus = (user as any)?.tenant?.paymentStatus;
-    const isTenantOk = !tenantStatus || tenantStatus === 'UP_TO_DATE' || tenantStatus === 'TRIAL';
-    if (!isTenantOk) {
-      // SUPER_ADMIN allowed only to access superadmin panel
+    // PENDING = demande d'upgrade en cours → l'utilisateur garde son ancien plan actif
+    // PAID = validé par Stripe webhook
+    // UP_TO_DATE / TRIAL = états normaux
+    // Seuls les états vraiment bloquants (EXPIRED, OVERDUE, BLOCKED) restreignent l'accès
+    const BLOCKED_STATUSES = ['EXPIRED', 'OVERDUE', 'BLOCKED', 'SUSPENDED'];
+    const isTenantBlocked = tenantStatus && BLOCKED_STATUSES.includes(tenantStatus);
+    if (isTenantBlocked) {
+      // SUPER_ADMIN always allowed on superadmin panel
       if (roles.includes(UserRole.SUPER_ADMIN)) return moduleId === 'superadmin';
-      // ADMIN can only access dashboard when tenant payments are not up-to-date
-      if (roles.includes(UserRole.ADMIN)) return moduleId === 'dashboard';
-      // All other roles: no access
-      return false;
+      // Others: dashboard + subscription + settings uniquement pour régler la situation
+      return ['dashboard', 'subscription', 'settings', 'support', 'info'].includes(moduleId);
     }
 
     // SUPER ADMIN : accès réservé uniquement au panneau 'superadmin'
@@ -300,7 +325,7 @@ export const authBridge = {
     }
 
     const roleMap: Record<string, string[]> = {
-      [UserRole.SALES]: ['dashboard', 'sales', 'my-leaves'],
+      [UserRole.SALES]: ['dashboard', 'sales', 'my-leaves', 'info', 'employee-pointage'],
       [UserRole.SUPER_ADMIN]: ['superadmin'],
       [UserRole.HR_MANAGER]: [
         'dashboard',
@@ -317,7 +342,8 @@ export const authBridge = {
         'organigram',
         'time',
         'performance',
-        'my-leaves'
+        'my-leaves',
+        'employee-pointage'
       ],
       [UserRole.STOCK_MANAGER]: [
         'dashboard',
@@ -326,19 +352,19 @@ export const authBridge = {
         'inventory',
         'movements',
         'services',
-        // Allow limited visibility into HR (employees/documents) for operational managers
         'rh',
         'rh.employees', 'rh.departments', 'rh.docs',
         'employees',
         'documents',
-        'my-leaves'
+        'my-leaves',
+        'employee-pointage',
+        'info'
       ],
       [UserRole.ACCOUNTANT]: [
         'dashboard',
         'payments',
         'customers',
         'recovery',
-        // Accounting needs access to payroll-related resources in Enterprise
         'rh',
         'rh.payroll.settings', 'rh.payroll.generation', 'rh.payroll.slips', 'rh.payroll.bonuses', 'rh.payroll.advances', 'rh.payroll.declarations',
         'payroll',
@@ -346,9 +372,11 @@ export const authBridge = {
         'advances',
         'declarations',
         'employees',
-        'my-leaves'
+        'my-leaves',
+        'employee-pointage',
+        'info'
       ],
-      ['EMPLOYEE' as any]: ['dashboard', 'inventory', 'customers', 'services', 'my-leaves']
+      ['EMPLOYEE' as any]: ['dashboard', 'inventory', 'customers', 'services', 'my-leaves', 'info', 'employee-pointage']
     };
 
     return roles.some(r => (roleMap[r as any] || []).includes(moduleId));
@@ -376,18 +404,8 @@ export const authBridge = {
     if (!plan.limits) return true;
 
     if (action === 'CREATE') {
-      if (resource === 'customers' && (user as any).customersCount >= plan.limits.customers) {
-        return false;
-      }
-
-      if (resource === 'users' && (user as any).usersCount >= plan.limits.users) {
-        return false;
-      }
-
-      if (
-        resource === 'sales' &&
-        (user as any).monthlySalesCount >= plan.limits.monthlySales
-      ) {
+      // Les clients et les ventes sont illimités sur tous les plans
+      if (resource === 'users' && plan.limits?.users && (user as any).usersCount >= plan.limits.users) {
         return false;
       }
     }
@@ -438,17 +456,30 @@ export const authBridge = {
     const planId = (user as any).planId || 'BASIC';
     const plan = PLAN_RULES[planId as keyof typeof PLAN_RULES] || PLAN_RULES.BASIC;
     const limits = plan.limits;
-    if (!limits) return true; // unlimited (Enterprise)
-
-    if (resource === 'customers') {
-      return currentCount < limits.customers;
-    }
-    if (resource === 'users') {
+    // Clients et ventes : toujours illimités sur tous les plans
+    if (resource === 'customers' || resource === 'sales') return true;
+    if (!limits) return true; // unlimited (Enterprise / FREE_TRIAL)
+    if (resource === 'users' && limits.users) {
       return currentCount < limits.users;
     }
-    if (resource === 'sales') {
-      return currentCount < limits.monthlySales;
-    }
     return true;
+  },
+
+  /**
+   * Calcule les jours restants de l'essai gratuit (FREE_TRIAL = 14 jours)
+   * Retourne null si l'utilisateur n'est pas en période d'essai
+   */
+  getTrialDaysRemaining: (user: User): number | null => {
+    const planId = (user as any).planId || 'BASIC';
+    if (planId !== 'FREE_TRIAL') return null;
+    // Cherche la date de création du tenant
+    const tenantCreatedAt = (user as any)?.tenant?.createdAt || (user as any)?.createdAt;
+    if (!tenantCreatedAt) return null;
+    const startDate = new Date(tenantCreatedAt);
+    const trialEndDate = new Date(startDate.getTime() + 14 * 24 * 60 * 60 * 1000);
+    const now = new Date();
+    const diffMs = trialEndDate.getTime() - now.getTime();
+    const daysLeft = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+    return Math.max(0, daysLeft);
   }
 };
