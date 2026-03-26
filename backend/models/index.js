@@ -40,6 +40,11 @@ import { Declaration } from './Declaration.js';
 import { Advance } from './Advance.js';
 import { Prime } from './Prime.js';
 import { Session } from './Session.js';
+import { SupportTicket } from './SupportTicket.js';
+import { Announcement } from './Announcement.js';
+import { HRRule } from './HRRule.js';
+import { Notification } from './Notification.js';
+import { NotificationRead } from './NotificationRead.js';
 
 /**
  * ARCHITECTURE KERNEL V3.2.3
@@ -182,6 +187,19 @@ PerformanceReview.belongsTo(Tenant, { foreignKey: 'tenant_id' });
 PerformanceReview.belongsTo(Employee, { foreignKey: 'employee_id', as: 'employee' });
 PerformanceReview.belongsTo(Employee, { foreignKey: 'reviewer_id', as: 'reviewer' });
 
+// HRRule relations
+HRRule.belongsTo(Tenant, { foreignKey: 'tenant_id' });
+Tenant.hasMany(HRRule, { foreignKey: 'tenant_id', as: 'hrRules' });
+
+// Notification relations
+Notification.belongsTo(Tenant, { foreignKey: 'tenant_id' });
+Tenant.hasMany(Notification, { foreignKey: 'tenant_id', as: 'notifications' });
+Notification.belongsTo(User, { foreignKey: 'created_by', as: 'sender' });
+Notification.belongsTo(User, { foreignKey: 'target_user_id', as: 'targetUser' });
+NotificationRead.belongsTo(Notification, { foreignKey: 'notification_id' });
+NotificationRead.belongsTo(User, { foreignKey: 'user_id' });
+Notification.hasMany(NotificationRead, { foreignKey: 'notification_id', as: 'reads' });
+
 // Avances et Primes
 Advance.belongsTo(Tenant, { foreignKey: 'tenant_id' });
 Advance.belongsTo(Employee, { foreignKey: 'employee_id', as: 'employee' });
@@ -221,5 +239,6 @@ export {
   Employee, Department, Contract, Payroll, PayrollSettings, PayrollItem, Attendance,
   Leave, EmployeeDocument, JobOffer, Candidate, Training, 
   TrainingParticipant, PerformanceReview, CompanyDeclarationSettings, Declaration,
-  Advance, Prime, Session
+  Advance, Prime, Session, SupportTicket, Announcement, HRRule,
+  Notification, NotificationRead
 };

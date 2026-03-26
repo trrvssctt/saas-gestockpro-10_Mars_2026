@@ -41,10 +41,13 @@ Tenant.init({
   // Business Stats
   mrr: { type: DataTypes.NUMERIC(15, 2), defaultValue: 0 },
   paymentStatus: { type: DataTypes.STRING(20), defaultValue: 'PENDING', field: 'payment_status' },
-  lastPaymentDate: { type: DataTypes.DATE, field: 'last_payment_date' }
-}, { 
-  sequelize, 
+  lastPaymentDate: { type: DataTypes.DATE, field: 'last_payment_date' },
+  lastPaymentAmount: { type: DataTypes.NUMERIC(15, 2), defaultValue: 0, field: 'last_payment_amount' },
+  pendingPlanId: { type: DataTypes.STRING(50), allowNull: true, field: 'pending_plan_id' },
+  pendingPeriod: { type: DataTypes.STRING(10), allowNull: true, field: 'pending_period' }
+}, {
+  sequelize,
   modelName: 'tenant',
   tableName: 'tenants',
-  underscored: true 
+  underscored: true
 });
