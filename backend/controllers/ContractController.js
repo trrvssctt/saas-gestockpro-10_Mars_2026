@@ -585,6 +585,17 @@ export class ContractController {
             throw new Error('Seuls les contrats actifs peuvent être renouvelés');
           }
 
+          // Vérifier le plafond de renouvellements
+          if (
+            existingContract.maxRenewals !== null &&
+            existingContract.maxRenewals !== undefined &&
+            (existingContract.renewalCount || 0) >= existingContract.maxRenewals
+          ) {
+            throw new Error(
+              `Renouvellement impossible : ce contrat a atteint son nombre maximum de renouvellements (${existingContract.renewalCount || 0}/${existingContract.maxRenewals})`
+            );
+          }
+
           // Vérifier qu'il n'y a pas d'autres contrats actifs pour cet employé
           const otherActiveContracts = await Contract.findAll({
             where: {
@@ -615,14 +626,16 @@ export class ContractController {
             tenantId,
             type: newType || existingContract.type,
             startDate: effectiveDate,
-            endDate: newEndDate || null, // null pour les CDI
+            endDate: newEndDate || null,
             salary: newSalary || existingContract.salary,
             currency: existingContract.currency,
             workLocation: existingContract.workLocation,
             status: 'ACTIVE',
-            previousContractId: existingContract.id, // Lien vers le contrat précédent
+            previousContractId: existingContract.id,
             isRenewal: true,
             renewalReason: renewalReason,
+            renewalCount: (existingContract.renewalCount || 0) + 1,
+            maxRenewals: existingContract.maxRenewals ?? null,
             createdBy: req.user.id
           }, { transaction });
 

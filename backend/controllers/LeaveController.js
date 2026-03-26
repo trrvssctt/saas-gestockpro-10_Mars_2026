@@ -640,12 +640,72 @@ export class LeaveController {
   static async remove(req, res) {
     try {
       const { id } = req.params;
-      const deleted = await Leave.destroy({ 
-        where: { id, tenantId: req.user.tenantId } 
+      const deleted = await Leave.destroy({
+        where: { id, tenantId: req.user.tenantId }
       });
       if (!deleted) return res.status(404).json({ error: 'Leave not found' });
-      
+
       return res.status(204).send();
+    } catch (error) {
+      return res.status(500).json({ error: error.message });
+    }
+  }
+
+  /**
+   * Solde de congés payés pour un employé sur l'année en cours.
+   * acquiredDays = 2,5 jours/mois depuis le 1er janvier (ou date d'embauche si postérieure)
+   * usedDays     = somme des daysCount des congés PAID/ANNUAL approuvés cette année
+   */
+  static async getLeaveBalance(req, res) {
+    try {
+      const { employeeId } = req.params;
+      const year = parseInt(req.query.year) || new Date().getFullYear();
+
+      // Vérifier que l'employé appartient au tenant
+      const employee = await Employee.findOne({
+        where: { id: employeeId, tenantId: req.user.tenantId },
+        attributes: ['id', 'firstName', 'lastName', 'hireDate']
+      });
+      if (!employee) return res.status(404).json({ error: 'Employé non trouvé' });
+
+      // Période de l'année
+      const yearStart = new Date(year, 0, 1);   // 1er janvier
+      const yearEnd   = new Date(year, 11, 31, 23, 59, 59); // 31 décembre
+      const today     = new Date();
+
+      // Date de début d'accumulation : max(1er janvier, date d'embauche)
+      const hireDate  = employee.hireDate ? new Date(employee.hireDate) : yearStart;
+      const accrualStart = hireDate > yearStart ? hireDate : yearStart;
+      const accrualEnd   = today < yearEnd ? today : yearEnd;
+
+      // Calcul des mois écoulés depuis accrualStart (arrondi au mois complet)
+      const msPerMonth    = 1000 * 60 * 60 * 24 * 30.44;
+      const monthsElapsed = Math.max(0, (accrualEnd - accrualStart) / msPerMonth);
+      const acquiredDays  = Math.round(monthsElapsed * 2.5 * 10) / 10; // 2,5 j/mois
+
+      // Jours utilisés = congés PAID + ANNUAL approuvés sur l'année
+      const usedLeaves = await Leave.findAll({
+        where: {
+          employeeId,
+          tenantId: req.user.tenantId,
+          status: 'APPROVED',
+          type: { [Op.in]: ['PAID', 'ANNUAL'] },
+          startDate: { [Op.lte]: yearEnd },
+          endDate:   { [Op.gte]: yearStart }
+        }
+      });
+      const usedDays = usedLeaves.reduce((sum, l) => sum + (parseFloat(l.daysCount) || 0), 0);
+
+      return res.status(200).json({
+        employeeId,
+        employeeName: `${employee.firstName} ${employee.lastName}`,
+        year,
+        acquiredDays: Math.round(acquiredDays * 10) / 10,
+        usedDays:     Math.round(usedDays * 10) / 10,
+        remainingDays: Math.max(0, Math.round((acquiredDays - usedDays) * 10) / 10),
+        accrualStart: accrualStart.toISOString().substring(0, 10),
+        ratePerMonth: 2.5
+      });
     } catch (error) {
       return res.status(500).json({ error: error.message });
     }

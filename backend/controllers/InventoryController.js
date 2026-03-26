@@ -31,7 +31,7 @@ export class InventoryController {
       const items = await StockItem.findAll({ 
         where: { 
           tenantId: req.user.tenantId,
-          status: 'actif'
+          status: ['actif', 'desactive']
         },
         order: [['name', 'ASC']]
       });
@@ -119,7 +119,7 @@ export class InventoryController {
         });
       }
 
-      const item = await StockItem.findOne({ where: { id, tenantId, status: 'actif' } });
+      const item = await StockItem.findOne({ where: { id, tenantId } });
       if (!item) return res.status(404).json({ error: 'NotFound', message: 'Produit introuvable.' });
       
       // Prevent SKU changes from client side - always keep SKU immutable via API

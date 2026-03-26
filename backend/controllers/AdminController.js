@@ -10,144 +10,202 @@ export class AdminController {
    */
   static async getGlobalDashboard(req, res) {
     try {
-      // Determine tenant scoping: if a tenantId is present (tenant admin or SUPER_ADMIN with header),
-      // return tenant-scoped stats. Otherwise, return global aggregates.
+      // ── Period params: ?year=2024 &month=3 (month=0 means "all year") ───────
+      const now = new Date();
+      const filterYear  = req.query.year  ? parseInt(req.query.year,  10) : null;
+      const filterMonth = req.query.month ? parseInt(req.query.month, 10) : null; // 1-12 or null=full year
+
+      // Build period boundaries
+      let periodStart = null;
+      let periodEnd   = null;
+      if (filterYear) {
+        if (filterMonth) {
+          // Specific month of a year
+          periodStart = new Date(filterYear, filterMonth - 1, 1);
+          periodEnd   = new Date(filterYear, filterMonth, 1);
+        } else {
+          // Full year
+          periodStart = new Date(filterYear, 0, 1);
+          periodEnd   = new Date(filterYear + 1, 0, 1);
+        }
+      }
+
+      // Determine tenant scoping
       const isSuper = req.user && req.user.role === 'SUPER_ADMIN';
       const requestedTenantId = isSuper ? (req.headers['x-tenant-id'] || null) : (req.user ? req.user.tenantId : null);
       const tenantWhere = requestedTenantId ? { tenantId: requestedTenantId } : null;
+
       // High level tenant counts
-      const totalTenants = await Tenant.count();
+      const totalTenants  = await Tenant.count();
       const activeTenants = await Tenant.count({ where: { isActive: true } });
 
-      // Sales & finance (scoped to tenantWhen available)
-      const totalSalesCount = tenantWhere ? await Sale.count({ where: tenantWhere }) : await Sale.count();
-      const totalRevenue = parseFloat(await Sale.sum('totalTtc', tenantWhere ? { where: tenantWhere } : {}) || 0);
-      const totalCollected = parseFloat(await Payment.sum('amount', tenantWhere ? { where: tenantWhere } : {}) || 0);
-      const totalUnpaid = totalRevenue - totalCollected;
-      const overdueCount = tenantWhere ? await Sale.count({ where: { ...tenantWhere, status: 'EN_COURS' } }) : await Sale.count({ where: { status: 'EN_COURS' } });
+      // ── Period filter helper ─────────────────────────────────────────────
+      const withPeriod = (base = {}) => {
+        const w = { ...(tenantWhere || {}), ...base };
+        if (periodStart) w.createdAt = { [Op.gte]: periodStart, [Op.lt]: periodEnd };
+        return w;
+      };
 
-      // Monthly revenue (last 30 days)
-      const since = new Date(); since.setDate(since.getDate() - 30);
-      const recentSalesWhere = tenantWhere ? { ...tenantWhere, createdAt: { [Op.gte]: since } } : { createdAt: { [Op.gte]: since } };
-      const recentSales = await Sale.findAll({ where: recentSalesWhere, include: [{ model: Customer }], order: [['createdAt','DESC']], limit: 20 });
+      // ── Sales & finance ──────────────────────────────────────────────────
+      const salesWhere = withPeriod({ status: { [Op.ne]: 'ANNULE' } });
+      const totalSalesCount = await Sale.count({ where: salesWhere });
+      const totalRevenue    = parseFloat(await Sale.sum('totalTtc', { where: salesWhere }) || 0);
 
-      // Top debtors (per customer)
-      const openSalesWhere = tenantWhere ? { ...tenantWhere, status: { [Op.ne]: 'ANNULE' } } : { status: { [Op.ne]: 'ANNULE' } };
-      const openSales = await Sale.findAll({ where: openSalesWhere, include: [{ model: Customer }, { model: Payment, as: 'payments' }] });
+      // totalCollected = paiements reçus dans la période
+      const paymentsLinkedWhere = withPeriod({ saleId: { [Op.ne]: null }, status: 'COMPLETED' });
+      const totalCollected = parseFloat(await Payment.sum('amount', { where: paymentsLinkedWhere }) || 0);
+
+      // ── Créances : dettes non réglées à la fin de la période ────────────
+      // On charge TOUTES les ventes créées avant la fin de la période,
+      // et les paiements reçus avant la fin de la période pour calculer le solde réel.
+      const creancesSalesWhere = tenantWhere
+        ? { ...tenantWhere, status: { [Op.ne]: 'ANNULE' }, ...(periodEnd ? { createdAt: { [Op.lt]: periodEnd } } : {}) }
+        : { status: { [Op.ne]: 'ANNULE' }, ...(periodEnd ? { createdAt: { [Op.lt]: periodEnd } } : {}) };
+
+      const creancesPayWhere = tenantWhere
+        ? { ...tenantWhere, saleId: { [Op.ne]: null }, status: 'COMPLETED', ...(periodEnd ? { createdAt: { [Op.lt]: periodEnd } } : {}) }
+        : { saleId: { [Op.ne]: null }, status: 'COMPLETED', ...(periodEnd ? { createdAt: { [Op.lt]: periodEnd } } : {}) };
+
+      const [allSalesForCreances, allPaymentsForCreances] = await Promise.all([
+        Sale.findAll({ where: creancesSalesWhere, include: [{ model: Customer }], attributes: ['id','totalTtc','status','customerId'] }),
+        Payment.findAll({ where: creancesPayWhere, attributes: ['saleId','amount'] })
+      ]);
+      const paidBySale = {};
+      allPaymentsForCreances.forEach(p => {
+        paidBySale[p.saleId] = (paidBySale[p.saleId] || 0) + parseFloat(p.amount || 0);
+      });
       const debtByCustomer = {};
-      openSales.forEach(s => {
-        const paid = (s.payments || []).reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
-        const due = parseFloat(s.totalTtc || 0) - paid;
+      allSalesForCreances.forEach(s => {
+        const paid = paidBySale[s.id] || 0;
+        const due  = parseFloat(s.totalTtc || 0) - paid;
         if (due > 0) {
-          const cid = s.customer?.id || 'PASSAGE';
-          const cname = s.customer?.companyName || s.customer?.name || 'Client';
+          const cid   = s.Customer?.id || 'PASSAGE';
+          const cname = s.Customer?.companyName || s.Customer?.name || 'Client';
           debtByCustomer[cid] = debtByCustomer[cid] || { id: cid, name: cname, total: 0 };
           debtByCustomer[cid].total += due;
         }
       });
-      const topDebtors = Object.values(debtByCustomer).sort((a,b) => b.total - a.total).slice(0,5);
+      const topDebtors  = Object.values(debtByCustomer).sort((a, b) => b.total - a.total).slice(0, 5);
+      const totalUnpaid = Object.values(debtByCustomer).reduce((s, d) => s + d.total, 0);
 
-      // Latest payments
-      const paymentsWhere = tenantWhere ? { where: tenantWhere } : {};
-      const latestPayments = await Payment.findAll({ ...paymentsWhere, include: [{ model: Sale, include: [{ model: Customer }] }], order: [['createdAt','DESC']], limit: 10 });
+      const overdueCount = await Sale.count({ where: withPeriod({ status: 'EN_COURS' }) });
+
+      // Recent sales (in period)
+      const recentSalesWhere = withPeriod({ status: { [Op.ne]: 'ANNULE' } });
+      const recentSales = await Sale.findAll({ where: recentSalesWhere, include: [{ model: Customer }], order: [['createdAt','DESC']], limit: 20 });
+
+      // Latest payments (in period)
+      const latestPaymentsWhere = tenantWhere
+        ? { ...tenantWhere, ...(periodStart ? { createdAt: { [Op.gte]: periodStart, [Op.lt]: periodEnd } } : {}) }
+        : { ...(periodStart ? { createdAt: { [Op.gte]: periodStart, [Op.lt]: periodEnd } } : {}) };
+      const latestPayments = await Payment.findAll({
+        where: latestPaymentsWhere,
+        include: [{ model: Sale, include: [{ model: Customer }] }],
+        order: [['createdAt','DESC']],
+        limit: 10
+      });
 
       // Customers
-      const customersCount = tenantWhere ? await Customer.count({ where: tenantWhere }) : await Customer.count();
-      const latestCustomers = await Customer.findAll({ where: tenantWhere || {}, order: [['createdAt','DESC']], limit: 5 });
+      const customersCount   = await Customer.count({ where: tenantWhere || {} });
+      const latestCustomers  = await Customer.findAll({ where: tenantWhere || {}, order: [['createdAt','DESC']], limit: 5 });
 
-      // Stock
-      const stocksTotal = tenantWhere ? await StockItem.count({ where: tenantWhere }) : await StockItem.count();
-      const stocksRupture = tenantWhere ? await StockItem.count({ where: { ...tenantWhere, currentLevel: { [Op.lte]: 0 } } }) : await StockItem.count({ where: { currentLevel: { [Op.lte]: 0 } } });
-      const stocksLow = tenantWhere ? await StockItem.count({ where: { ...tenantWhere, [Op.and]: [ { currentLevel: { [Op.gt]: 0 } }, { minThreshold: { [Op.ne]: null } }, sequelize.where(col('stock_item.current_level'), '<=', col('stock_item.min_threshold')) ] } }) : await StockItem.count({ where: { [Op.and]: [ { currentLevel: { [Op.gt]: 0 } }, { minThreshold: { [Op.ne]: null } }, sequelize.where(col('stock_item.current_level'), '<=', col('stock_item.min_threshold')) ] } });
-      // Retrieve a short list of stock items for dashboard cards (recent/top)
-      const recentStocks = await StockItem.findAll({ order: [['updatedAt','DESC']], limit: 20 });
+      // Stock (not time-scoped — reflects current state)
+      const stocksTotal   = await StockItem.count({ where: tenantWhere || {} });
+      const stocksRupture = await StockItem.count({ where: { ...(tenantWhere || {}), currentLevel: { [Op.lte]: 0 } } });
+      const stocksLow     = await StockItem.count({ where: { ...(tenantWhere || {}), [Op.and]: [ { currentLevel: { [Op.gt]: 0 } }, { minThreshold: { [Op.ne]: null } }, sequelize.where(col('stock_item.current_level'), '<=', col('stock_item.min_threshold')) ] } });
+      const recentStocks  = await StockItem.findAll({ where: tenantWhere || {}, order: [['updatedAt','DESC']], limit: 20 });
 
-      // Movements
-      const recentMovements = await ProductMovement.findAll({ where: tenantWhere || {}, include: [{ model: StockItem }], order: [['createdAt','DESC']], limit: 10 });
+      // Movements (in period)
+      const movementsWhere = tenantWhere
+        ? { ...tenantWhere, ...(periodStart ? { createdAt: { [Op.gte]: periodStart, [Op.lt]: periodEnd } } : {}) }
+        : { ...(periodStart ? { createdAt: { [Op.gte]: periodStart, [Op.lt]: periodEnd } } : {}) };
+      const recentMovements = await ProductMovement.findAll({ where: movementsWhere, include: [{ model: StockItem }], order: [['createdAt','DESC']], limit: 10 });
 
       // Categories
-      const categoriesCount = tenantWhere ? await Category.count({ where: tenantWhere }) : await Category.count();
-      const subcategoriesCount = tenantWhere ? await Subcategory.count({ where: tenantWhere }) : await Subcategory.count();
+      const categoriesCount    = await Category.count({ where: tenantWhere || {} });
+      const subcategoriesCount = await Subcategory.count({ where: tenantWhere || {} });
 
       // Users
-      const usersCount = tenantWhere ? await User.count({ where: tenantWhere }) : await User.count();
-      const recentUsers = await User.findAll({ where: tenantWhere || {}, order: [['lastLogin','DESC NULLS LAST']], limit: 5 });
+      const usersCount     = await User.count({ where: tenantWhere || {} });
+      const recentUsers    = await User.findAll({ where: tenantWhere || {}, order: [['lastLogin','DESC NULLS LAST']], limit: 5 });
       const usersByRoleRaw = await User.findAll({ attributes: ['role', [fn('COUNT', col('role')), 'cnt']], group: ['role'] });
-      const usersByRole = {};
-      usersByRoleRaw.forEach(r => { usersByRole[r.role] = parseInt(r.get('cnt'),10); });
+      const usersByRole    = {};
+      usersByRoleRaw.forEach(r => { usersByRole[r.role] = parseInt(r.get('cnt'), 10); });
 
-      // Subscription alerts (next billing within 7 days or expired)
-      // Scope to the requested tenant when applicable so tenant-admins only see their own alerts.
+      // Subscriptions
       const subsThreshold = new Date();
       subsThreshold.setDate(subsThreshold.getDate() + 7);
       const subsWhere = requestedTenantId ? { tenantId: requestedTenantId, nextBillingDate: { [Op.lte]: subsThreshold } } : { nextBillingDate: { [Op.lte]: subsThreshold } };
       const subs = await Subscription.findAll({ where: subsWhere, include: [{ model: Tenant, attributes: ['name'] }], limit: 50 });
 
-      // Pending validations: subscriptions that require manual validation (e.g. PENDING)
       const pendingValidationsRaw = await Subscription.findAll({ where: { status: 'PENDING' }, include: [{ model: Tenant, attributes: ['id','name','domain'] }], limit: 50 });
       const pendingValidations = pendingValidationsRaw.map(s => {
-        const tenantIdVal = s.tenantId || s.Tenant?.id || (s.tenant ? s.tenant.id : null);
-        const tenantNameVal = s.Tenant?.name || (s.tenant ? s.tenant.name : null) || null;
-        const tenantDomainVal = s.Tenant?.domain || (s.tenant ? s.tenant.domain : null) || null;
-        return {
-          id: tenantIdVal,
-          tenant: { id: tenantIdVal, name: tenantNameVal, domain: tenantDomainVal },
-          tenantName: tenantNameVal,
-          tenantDomain: tenantDomainVal,
-          planId: s.planId,
-          status: s.status,
-          nextBillingDate: s.nextBillingDate
-        };
+        const tenantIdVal    = s.tenantId || s.Tenant?.id || (s.tenant ? s.tenant.id : null);
+        const tenantNameVal  = s.Tenant?.name || (s.tenant ? s.tenant.name : null) || null;
+        const tenantDomainVal= s.Tenant?.domain || (s.tenant ? s.tenant.domain : null) || null;
+        return { id: tenantIdVal, tenant: { id: tenantIdVal, name: tenantNameVal, domain: tenantDomainVal }, tenantName: tenantNameVal, tenantDomain: tenantDomainVal, planId: s.planId, status: s.status, nextBillingDate: s.nextBillingDate };
       });
 
-      // Monthly Recurring Revenue (MRR) : sum of active subscriptions' monthly prices
+      // MRR
       let mrr = 0;
       try {
         const activeSubs = await Subscription.findAll({ where: { status: 'ACTIVE' }, include: [{ model: Plan, as: 'planDetails' }] });
         mrr = activeSubs.reduce((sum, s) => sum + Number(s.planDetails?.priceMonthly || 0), 0);
         if (!isFinite(mrr) || Number.isNaN(mrr)) mrr = 0;
-      } catch (e) {
-        console.warn('[MRR CALC ERROR]', e.message || e);
-        mrr = 0;
-      }
+      } catch (e) { console.warn('[MRR CALC ERROR]', e.message || e); mrr = 0; }
 
-      // Revenue stats for the last 6 months (aggregated by month)
+      // ── Revenue stats : 12 months of the selected year (or last 6 months if no year) ──
       const revenueStats = [];
       try {
-        const now = new Date();
-        for (let i = 5; i >= 0; i--) {
-          const start = new Date(now.getFullYear(), now.getMonth() - i, 1);
-          const end = new Date(start.getFullYear(), start.getMonth() + 1, 1);
-          const total = parseFloat((await Payment.sum('amount', { where: { paymentDate: { [Op.gte]: start, [Op.lt]: end } } })) || 0);
-          revenueStats.push({ month: start.toISOString(), total });
-        }
-      } catch (e) {
-        console.warn('[REVENUE STATS ERROR]', e.message || e);
-      }
+        const statsYear  = filterYear || now.getFullYear();
+        const nbMonths   = filterYear ? 12 : 6;
+        const startMonth = filterYear ? 0 : now.getMonth() - 5;
 
-      // Late payments count (reusing overdueCount) and pending subscriptions count
+        for (let i = 0; i < nbMonths; i++) {
+          const start = filterYear
+            ? new Date(statsYear, i, 1)
+            : new Date(now.getFullYear(), startMonth + i, 1);
+          const end = new Date(start.getFullYear(), start.getMonth() + 1, 1);
+
+          const monthSalesWhere = { createdAt: { [Op.gte]: start, [Op.lt]: end }, status: { [Op.ne]: 'ANNULE' }, ...(tenantWhere || {}) };
+          const monthPayWhere   = { createdAt: { [Op.gte]: start, [Op.lt]: end }, saleId: { [Op.ne]: null }, status: 'COMPLETED', ...(tenantWhere || {}) };
+
+          const total     = parseFloat((await Sale.sum('totalTtc', { where: monthSalesWhere })) || 0);
+          const collected = parseFloat((await Payment.sum('amount',  { where: monthPayWhere   })) || 0);
+
+          // Créances cumulées à fin de ce mois
+          const creanceSalesUpTo = { createdAt: { [Op.lt]: end }, status: { [Op.ne]: 'ANNULE' }, ...(tenantWhere || {}) };
+          const creancePayUpTo   = { createdAt: { [Op.lt]: end }, saleId: { [Op.ne]: null }, status: 'COMPLETED', ...(tenantWhere || {}) };
+          const [salesTot, payTot] = await Promise.all([
+            Sale.sum('totalTtc', { where: creanceSalesUpTo }),
+            Payment.sum('amount', { where: creancePayUpTo })
+          ]);
+          const creances = Math.max(0, parseFloat(salesTot || 0) - parseFloat(payTot || 0));
+
+          revenueStats.push({ month: start.toISOString(), total, collected, creances });
+        }
+      } catch (e) { console.warn('[REVENUE STATS ERROR]', e.message || e); }
+
       const latePayments = overdueCount;
-      const pendingSub = pendingValidations.length || 0;
+      const pendingSub   = pendingValidations.length || 0;
 
       return res.status(200).json({
+        // ── Period metadata (consumed by the frontend) ──
+        period: {
+          year:  filterYear  || now.getFullYear(),
+          month: filterMonth || null,
+          isFiltered: !!filterYear,
+          label: filterYear
+            ? (filterMonth
+                ? new Date(filterYear, filterMonth - 1, 1).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })
+                : String(filterYear))
+            : 'Toutes les années'
+        },
         stats: {
-          totalTenants,
-          activeTenants,
-          mrr,
-          latePayments,
-          pendingSub,
-          totalSalesCount,
-          totalRevenue,
-          totalCollected,
-          totalUnpaid,
-          overdueCount,
-          customersCount,
-          stocksTotal,
-          stocksRupture,
-          stocksLow,
-          categoriesCount,
-          subcategoriesCount,
-          usersCount
+          totalTenants, activeTenants, mrr, latePayments, pendingSub,
+          totalSalesCount, totalRevenue, totalCollected, totalUnpaid,
+          overdueCount, customersCount, stocksTotal, stocksRupture,
+          stocksLow, categoriesCount, subcategoriesCount, usersCount
         },
         topDebtors,
         latestPayments: latestPayments.map(p => ({ id: p.id, amount: p.amount, createdAt: p.createdAt, saleId: p.saleId, customer: p.Sale?.Customer?.companyName || null })),
@@ -156,10 +214,8 @@ export class AdminController {
         recentMovements: recentMovements.map(m => ({ id: m.id, productName: m.productName || m.StockItem?.name, quantity: m.quantity, createdAt: m.createdAt, type: m.type, userRef: m.userRef || m.userName || (m.user ? m.user.name : null) })),
         users: { count: usersCount, byRole: usersByRole, recent: recentUsers.map(u => ({ id: u.id, name: u.name, email: u.email, lastLogin: u.lastLogin, role: u.role || 'EMPLOYEE' })) },
         subscriptionAlerts: subs.map(s => ({ tenant: s.Tenant?.name, nextBillingDate: s.nextBillingDate, status: s.status })),
-        // Provide a small subscription preview (nearest next billing) so frontend can show alerts
         subscription: subs && subs.length > 0 ? { subscription: { nextBillingDate: subs[0].nextBillingDate, tenant: subs[0].Tenant?.name, status: subs[0].status, planId: subs[0].planId } } : null,
-        // Provide an array of stock items for the dashboard to display
-        stocks: recentStocks.map(s => ({ id: s.id, name: s.name, currentLevel: s.currentLevel, minThreshold: s.minThreshold, sku: s.sku })) ,
+        stocks: recentStocks.map(s => ({ id: s.id, name: s.name, currentLevel: s.currentLevel, minThreshold: s.minThreshold, sku: s.sku })),
         pendingValidations,
         revenueStats
       });
@@ -480,19 +536,32 @@ export class AdminController {
         return res.status(404).json({ error: 'Instance non trouvée' });
       }
 
+      // Determine the plan to activate: pendingPlanId (upgrade) or current plan
+      const PERIOD_MONTHS = { '1M': 1, '3M': 3, '1Y': 12 };
+      const pendingPlan = tenant.pendingPlanId || null;
+      const pendingPeriod = tenant.pendingPeriod || '1M';
+      const months = PERIOD_MONTHS[pendingPeriod] || 1;
+      const activatePlanId = pendingPlan || tenant.plan || 'FREE_TRIAL';
+
       // Find or create subscription record
       let sub = await Subscription.findOne({ where: { tenantId: id }, transaction });
-      const nextBilling = new Date(); nextBilling.setMonth(nextBilling.getMonth() + 1);
+      const nextBilling = new Date();
+      nextBilling.setMonth(nextBilling.getMonth() + months);
 
       if (sub) {
-        await sub.update({ status: 'ACTIVE', nextBillingDate: nextBilling }, { transaction });
+        await sub.update({ status: 'ACTIVE', planId: activatePlanId, nextBillingDate: nextBilling }, { transaction });
       } else {
-        const planId = tenant.plan || 'FREE_TRIAL';
-        sub = await Subscription.create({ tenantId: id, planId, status: 'ACTIVE', nextBillingDate: nextBilling, autoRenew: true }, { transaction });
+        sub = await Subscription.create({ tenantId: id, planId: activatePlanId, status: 'ACTIVE', nextBillingDate: nextBilling, autoRenew: true }, { transaction });
       }
 
-      // Reactivate tenant and mark payment up-to-date
-      await tenant.update({ isActive: true, paymentStatus: 'UP_TO_DATE', lastPaymentDate: new Date() }, { transaction });
+      // Reactivate tenant, activate new plan, clear pending fields
+      await tenant.update({
+        isActive: true,
+        paymentStatus: 'UP_TO_DATE',
+        lastPaymentDate: new Date(),
+        plan: activatePlanId,
+        ...(pendingPlan ? { pendingPlanId: null, pendingPeriod: null } : {})
+      }, { transaction });
 
       // Create a Payment record for this subscription validation only if none exists yet.
       try {

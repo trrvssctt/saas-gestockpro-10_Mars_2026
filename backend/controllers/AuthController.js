@@ -645,4 +645,56 @@ static async login(req, res) {
       return AuthController.sendSafeError(res, 500, error);
     }
   }
+
+  /**
+   * Changement de mot de passe par l'utilisateur lui-même
+   */
+  static async changeOwnPassword(req, res) {
+    const transaction = await sequelize.transaction();
+    try {
+      const { currentPassword, newPassword } = req.body;
+
+      if (!currentPassword || !newPassword) {
+        await transaction.rollback();
+        return res.status(400).json({ error: 'MissingFields', message: 'Mot de passe actuel et nouveau requis.' });
+      }
+
+      if (newPassword.length < 8) {
+        await transaction.rollback();
+        return res.status(400).json({ error: 'WeakPassword', message: 'Le nouveau mot de passe doit contenir au moins 8 caractères.' });
+      }
+
+      const user = await User.findByPk(req.user.id, { transaction });
+      if (!user) {
+        await transaction.rollback();
+        return res.status(404).json({ error: 'UserNotFound' });
+      }
+
+      const isValid = await bcrypt.compare(currentPassword, user.password);
+      if (!isValid) {
+        await transaction.rollback();
+        return res.status(401).json({ error: 'InvalidPassword', message: 'Mot de passe actuel incorrect.' });
+      }
+
+      const salt = await bcrypt.genSalt(12);
+      const hashedPassword = await bcrypt.hash(newPassword, salt);
+      await user.update({ password: hashedPassword }, { transaction });
+
+      await AuditLog.create({
+        tenantId: req.user.tenantId,
+        userId: req.user.id,
+        userName: req.user.name,
+        action: 'USER_CHANGED_OWN_PASSWORD',
+        resource: `User: ${user.email}`,
+        severity: 'MEDIUM',
+        sha256Signature: crypto.createHash('sha256').update(`${req.user.id}:change-own-password:${Date.now()}`).digest('hex')
+      }, { transaction });
+
+      await transaction.commit();
+      return res.status(200).json({ message: 'Mot de passe mis à jour avec succès.' });
+    } catch (error) {
+      if (transaction) await transaction.rollback();
+      return AuthController.sendSafeError(res, 500, error, 'PasswordChangeError');
+    }
+  }
 }

@@ -107,11 +107,16 @@ export class AIController {
         return res.status(400).json({ error: 'MissingSession', message: 'Session ID introuvable.' });
       }
 
+      // Tri : id entier auto-incrément = ordre d'insertion garanti.
+      // Même si deux messages ont le même created_at (même seconde),
+      // le user est toujours inséré avant l'IA grâce à la correction du workflow.
+      // CASE WHEN sender IN ('user','human') THEN 0 ELSE 1 END = tiebreaker de sécurité.
       const sql = `
         SELECT id, session_id, message, sender, created_at
         FROM n8n_chat_histories
         WHERE session_id = :sessionId
-        ORDER BY created_at ASC
+        ORDER BY id ASC,
+                 CASE WHEN sender IN ('user','human') THEN 0 ELSE 1 END ASC
         LIMIT 500
       `;
 
@@ -276,7 +281,9 @@ export class AIController {
    * Transmet le payload complet (message, id, planId) au workflow.
    */
   static async bridgeWebhook(req, res) {
-    const { chatInput, sessionId, planId, message, id } = req.body || {};
+    const { chatInput, sessionId, message, id } = req.body || {};
+    // planId : JWT (req.user) est la source autoritaire — ne pas faire confiance au body seul
+    const planId = req.user?.planId || req.body?.planId || 'FREE_TRIAL';
 
     // ── Résolution de l'URL cible ──────────────────────────────────────────
     const orchestratorOverride =
@@ -369,6 +376,128 @@ export class AIController {
         details: remoteData,
         attempted: tried,
       });
+    }
+  }
+
+  /**
+   * POST /api/ai/export-zip
+   * Reçoit un tableau de documents HTML et retourne un fichier ZIP.
+   * Body: { documents: Array<{html: string, filename: string}>, zipName?: string }
+   * Si > 5 documents, crée un dossier ZIP. Sinon renvoie les HTML dans le ZIP aussi.
+   */
+  static async exportZip(req, res) {
+    let browser;
+    try {
+      const { documents, zipName = 'documents' } = req.body || {};
+
+      if (!Array.isArray(documents) || documents.length === 0) {
+        return res.status(400).json({ error: 'BadRequest', message: 'documents[] requis.' });
+      }
+
+      const [{ default: JSZip }, puppeteerMod] = await Promise.all([
+        import('jszip'),
+        import('puppeteer'),
+      ]);
+
+      // Un seul browser pour tous les documents — plus efficace
+      browser = await puppeteerMod.default.launch({
+        headless: 'new',
+        args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+      });
+
+      const zip = new JSZip();
+      const folder = documents.length > 5 ? zip.folder(zipName) : zip;
+
+      for (const doc of documents) {
+        if (!doc.html || typeof doc.html !== 'string') continue;
+
+        // Convertir HTML → PDF via Puppeteer
+        const page = await browser.newPage();
+        await page.setContent(doc.html, { waitUntil: 'networkidle0' });
+        const pdfBuffer = await page.pdf({
+          format: 'A4',
+          printBackground: true,
+          margin: { top: '0mm', right: '0mm', bottom: '0mm', left: '0mm' },
+        });
+        await page.close();
+
+        // Remplace l'extension .html par .pdf dans le nom de fichier
+        const safeName = (doc.filename || 'document.html')
+          .replace(/[^a-z0-9._\-]/gi, '_')
+          .replace(/\.html?$/i, '.pdf');
+
+        folder.file(safeName, pdfBuffer);
+      }
+
+      const content = await zip.generateAsync({
+        type: 'nodebuffer',
+        compression: 'DEFLATE',
+        compressionOptions: { level: 6 },
+      });
+
+      const safeZipName = zipName.replace(/[^a-z0-9_\-]/gi, '_').slice(0, 60);
+      res.setHeader('Content-Type', 'application/zip');
+      res.setHeader('Content-Disposition', `attachment; filename="${safeZipName}.zip"`);
+      res.setHeader('Content-Length', content.length);
+      return res.status(200).end(content);
+
+    } catch (error) {
+      console.error('[AI ZIP EXPORT ERROR]:', error);
+      return res.status(500).json({
+        error: 'ZipExportError',
+        message: 'Impossible de générer le fichier ZIP.',
+        details: error.message,
+      });
+    } finally {
+      if (browser) await browser.close().catch(() => {});
+    }
+  }
+
+  /**
+   * POST /api/ai/export-pdf
+   * Convertit le HTML d'un document en PDF via Puppeteer.
+   * Body: { html: string, filename?: string }
+   */
+  static async exportPdf(req, res) {
+    let browser;
+    try {
+      const { html, filename = 'document' } = req.body || {};
+
+      if (!html || typeof html !== 'string') {
+        return res.status(400).json({ error: 'BadRequest', message: 'html requis.' });
+      }
+
+      const puppeteer = await import('puppeteer');
+      browser = await puppeteer.default.launch({
+        headless: 'new',
+        args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+      });
+
+      const page = await browser.newPage();
+      await page.setContent(html, { waitUntil: 'networkidle0' });
+
+      const pdfBuffer = await page.pdf({
+        format: 'A4',
+        printBackground: true,
+        margin: { top: '0mm', right: '0mm', bottom: '0mm', left: '0mm' },
+      });
+
+      const safeName = filename.replace(/[^a-z0-9_\-]/gi, '_').slice(0, 80);
+
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="${safeName}.pdf"`);
+      res.setHeader('Content-Length', pdfBuffer.length);
+      return res.status(200).end(pdfBuffer);
+
+    } catch (error) {
+      console.error('[AI PDF EXPORT ERROR]:', error);
+      return res.status(500).json({
+        error: 'PdfExportError',
+        message: 'Impossible de générer le PDF.',
+        details: error.message,
+      });
+    } finally {
+      if (browser) await browser.close().catch(() => {});
     }
   }
 }

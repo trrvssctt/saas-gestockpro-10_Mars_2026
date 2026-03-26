@@ -1,7 +1,4 @@
-import { Employee } from '../models/index.js';
-import { Contract } from '../models/index.js';
-import { Tenant } from '../models/index.js';
-import { Department } from '../models/index.js';
+import { Employee, Contract, Tenant, Department, Advance, Prime, PayrollSettings, HRRule } from '../models/index.js';
 import { PayslipGeneratorService } from '../services/PayslipGeneratorService.js';
 import fs from 'fs';
 import path from 'path';
@@ -9,6 +6,7 @@ import { fileURLToPath } from 'url';
 import JSZip from 'jszip';
 import nodeHtmlToImage from 'node-html-to-image';
 import { promises as fsPromises } from 'fs';
+import puppeteer from 'puppeteer';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -32,7 +30,7 @@ export class PayslipController {
       const tenant = await Tenant.findOne({
         where: { id: tenantId }
       });
-      
+
       if (!tenant) {
         return res.status(404).json({ error: 'Informations de l\'entreprise non trouvées' });
       }
@@ -42,12 +40,24 @@ export class PayslipController {
       const folderName = `fiches_paiement_${year}-${monthNum.padStart(2, '0')}`;
       const uploadsDir = path.join(process.cwd(), 'uploads');
       const payslipFolder = path.join(uploadsDir, folderName);
-      
+
       // S'assurer que le dossier uploads existe
       if (!fs.existsSync(uploadsDir)) {
         fs.mkdirSync(uploadsDir, { recursive: true });
       }
-      
+
+      // ── RÈGLE : une seule génération par mois ──────────────────────────────
+      const manifestPath = path.join(uploadsDir, `manifest_${tenantId}_${month}.json`);
+      if (fs.existsSync(manifestPath)) {
+        const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+        return res.status(409).json({
+          error: `Les fiches de paie pour ${month} ont déjà été générées le ${new Date(manifest.generatedAt).toLocaleDateString('fr-FR')}.`,
+          generatedAt: manifest.generatedAt,
+          count: manifest.count
+        });
+      }
+      // ──────────────────────────────────────────────────────────────────────
+
       // S'assurer que le dossier des fiches de paie existe
       if (!fs.existsSync(payslipFolder)) {
         fs.mkdirSync(payslipFolder, { recursive: true });
@@ -178,6 +188,16 @@ export class PayslipController {
       console.log(`Génération terminée: ${results.summary.successCount} succès, ${results.summary.errorCount} erreurs`);
       console.log(`Fichiers sauvegardés dans: ${payslipFolder}`);
 
+      // Écrire le manifeste de génération (pour la règle une-fois-par-mois)
+      if (results.summary.successCount > 0) {
+        fs.writeFileSync(manifestPath, JSON.stringify({
+          tenantId,
+          month,
+          generatedAt: new Date().toISOString(),
+          count: results.summary.successCount
+        }), 'utf8');
+      }
+
       return res.status(200).json({
         message: 'Génération des fiches de paie terminée',
         results: results,
@@ -190,6 +210,380 @@ export class PayslipController {
       console.error('Erreur génération bulk payslips:', error);
       return res.status(500).json({ error: error.message });
     }
+  }
+
+  /**
+   * Download all payslips for a given month as a ZIP archive.
+   * Includes primes (earnings) and advance deductions per employee.
+   * GET /hr/payslips/download-all-zip?month=YYYY-MM
+   */
+  static async downloadAllAsZip(req, res) {
+    try {
+      const { month } = req.query;
+      const tenantId = req.user.tenantId;
+
+      if (!month || !/^\d{4}-\d{2}$/.test(month)) {
+        return res.status(400).json({ error: 'Paramètre month requis (format YYYY-MM)' });
+      }
+
+      const tenant = await Tenant.findOne({ where: { id: tenantId } });
+      if (!tenant) {
+        return res.status(404).json({ error: 'Entreprise non trouvée' });
+      }
+
+      // Paramètres de paie et règles RH configurés dans PayrollManagement / rh.time-settings
+      const [settings, hrRules] = await Promise.all([
+        PayrollSettings.findOne({ where: { tenantId } }),
+        HRRule.findAll({ where: { tenantId, isActive: true }, order: [['sort_order', 'ASC']] })
+      ]);
+
+      // Taux réels (ou valeurs par défaut si non configurés)
+      const empSocialRate     = parseFloat(settings?.employeeSocialChargeRate ?? 8.2) / 100;
+      const taxRate           = parseFloat(settings?.taxRate                  ?? 10.0) / 100;
+      const workingDaysMonth  = parseInt(settings?.workingDaysPerMonth        ?? 26);
+      const deductionEnabled  = settings?.deductionEnabled ?? false;
+      const currency          = settings?.currency || tenant.currency || 'F CFA';
+
+      // Heures de travail journalières (pour DEDUCT_SALARY_HOURS)
+      const startH  = parseInt((settings?.workStartTime || '08:00').split(':')[0]);
+      const endH    = parseInt((settings?.workEndTime   || '17:00').split(':')[0]);
+      const dailyWorkHours = Math.max(1, endH - startH);
+
+      // Employés actifs avec contrat actif
+      const employeesWithContracts = await Employee.findAll({
+        where: { tenantId, status: 'ACTIVE' },
+        include: [
+          {
+            model: Contract,
+            as: 'contracts',
+            where: { tenantId, status: 'ACTIVE' },
+            required: true,
+            order: [['startDate', 'DESC']]
+          },
+          {
+            model: Department,
+            as: 'departmentInfo',
+            required: false
+          }
+        ]
+      });
+
+      if (employeesWithContracts.length === 0) {
+        return res.status(404).json({ error: 'Aucun employé avec contrat actif trouvé' });
+      }
+
+      // Primes et avances approuvées pour ce tenant
+      const [allAdvances, allPrimes] = await Promise.all([
+        Advance.findAll({ where: { tenantId, status: 'APPROVED' } }),
+        Prime.findAll({ where: { tenantId, status: 'APPROVED' } })
+      ]);
+
+      const zip = new JSZip();
+      let generated = 0;
+      const htmlPages = []; // accumule { html, employee } avant la conversion PDF
+
+      for (const employee of employeesWithContracts) {
+        const contract = employee.contracts[0];
+        const baseSalary = parseFloat(contract.salary) || 0;
+        if (baseSalary === 0) continue;
+
+        const empPrimes = allPrimes.filter(p => p.employeeId === employee.id);
+        const empAdvances = allAdvances.filter(a => a.employeeId === employee.id);
+
+        const totalPrimes = empPrimes.reduce((s, p) => s + parseFloat(p.amount || 0), 0);
+        const totalAdvanceDeductions = empAdvances.reduce((s, a) => {
+          const monthly = parseFloat(a.monthlyDeduction || 0) > 0
+            ? parseFloat(a.monthlyDeduction)
+            : parseFloat(a.amount || 0) / Math.max(1, parseInt(a.months) || 1);
+          return s + monthly;
+        }, 0);
+
+        const grossSalary = baseSalary + totalPrimes;
+
+        // Cotisations sociales salarié (taux PayrollSettings.employeeSocialChargeRate)
+        const socialContributions = Math.round(grossSalary * empSocialRate);
+
+        // Impôt (taux PayrollSettings.taxRate, appliqué sur net social)
+        const taxableBase = Math.max(0, grossSalary - socialContributions);
+        const incomeTax   = Math.round(taxableBase * taxRate);
+
+        // Déductions règles RH (retards / absences) si activé dans rh.time-settings
+        let hrRulesDeduction = 0;
+        if (deductionEnabled && hrRules.length > 0) {
+          const dailyRate  = workingDaysMonth > 0 ? baseSalary / workingDaysMonth : 0;
+          const hourlyRate = dailyWorkHours   > 0 ? dailyRate  / dailyWorkHours   : 0;
+          for (const rule of hrRules) {
+            const av = parseFloat(rule.actionValue || 0);
+            if (rule.actionType === 'DEDUCT_FIXED')        hrRulesDeduction += av;
+            else if (rule.actionType === 'DEDUCT_SALARY_HOURS') hrRulesDeduction += av * hourlyRate;
+            else if (rule.actionType === 'DEDUCT_SALARY_DAYS')  hrRulesDeduction += av * dailyRate;
+            else if (rule.actionType === 'DEDUCT_PERCENT')      hrRulesDeduction += baseSalary * (av / 100);
+          }
+          hrRulesDeduction = Math.round(hrRulesDeduction);
+        }
+
+        const totalDeductions = socialContributions + incomeTax + Math.round(totalAdvanceDeductions) + hrRulesDeduction;
+        const netSalary = Math.max(0, grossSalary - totalDeductions);
+
+        const html = PayslipController.generateZipPayslipHTML({
+          employee,
+          contract,
+          tenant,
+          month,
+          empPrimes,
+          empAdvances,
+          calculations: {
+            baseSalary,
+            totalPrimes,
+            grossSalary,
+            socialContributions,
+            incomeTax,
+            totalAdvanceDeductions: Math.round(totalAdvanceDeductions),
+            hrRulesDeduction,
+            totalDeductions,
+            netSalary,
+            currency,
+            empSocialRate,
+            taxRate,
+            workingDaysMonth
+          }
+        });
+
+        htmlPages.push({ html, employee });
+      }
+
+      if (htmlPages.length === 0) {
+        return res.status(404).json({ error: 'Aucune fiche générée (vérifiez les salaires dans les contrats)' });
+      }
+
+      // Convertir chaque fiche HTML en PDF via Puppeteer
+      const browser = await puppeteer.launch({
+        headless: 'new',
+        args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-gpu']
+      });
+
+      try {
+        for (const { html, employee } of htmlPages) {
+          const page = await browser.newPage();
+          await page.setContent(html, { waitUntil: 'networkidle0' });
+          const pdfBuffer = await page.pdf({
+            format: 'A4',
+            printBackground: true,
+            margin: { top: '0', right: '0', bottom: '0', left: '0' }
+          });
+          await page.close();
+
+          const safeName = `${employee.firstName}_${employee.lastName}`.replace(/[^a-zA-Z0-9_-]/g, '_');
+          zip.file(`${safeName}_${month}.pdf`, pdfBuffer);
+          generated++;
+        }
+      } finally {
+        await browser.close();
+      }
+
+      if (generated === 0) {
+        return res.status(404).json({ error: 'Aucun PDF généré (vérifiez les salaires dans les contrats)' });
+      }
+
+      const zipBuffer = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
+
+      res.setHeader('Content-Type', 'application/zip');
+      res.setHeader('Content-Disposition', `attachment; filename="fiches_paie_${month}.zip"`);
+      res.setHeader('Content-Length', zipBuffer.length);
+      return res.send(zipBuffer);
+
+    } catch (error) {
+      console.error('Erreur downloadAllAsZip:', error);
+      return res.status(500).json({ error: error.message });
+    }
+  }
+
+  /**
+   * Generate payslip HTML for ZIP export — includes primes rows and advance deduction rows.
+   */
+  static generateZipPayslipHTML({ employee, contract, tenant, month, empPrimes, empAdvances, calculations }) {
+    const { baseSalary, totalPrimes, grossSalary, socialContributions, incomeTax,
+            totalAdvanceDeductions, hrRulesDeduction = 0, totalDeductions, netSalary, currency,
+            empSocialRate = 0.082, taxRate = 0.10, workingDaysMonth = 26 } = calculations;
+
+    const fmt = (n) => Math.round(n).toLocaleString('fr-FR');
+    const monthYear = new Date(month + '-01').toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
+    const contractStartDate = contract.startDate ? new Date(contract.startDate).toLocaleDateString('fr-FR') : 'N/A';
+
+    const primesRows = empPrimes.map(p => `
+      <tr>
+        <td>Prime – ${p.reason || p.type || 'Exceptionnelle'}</td>
+        <td class="cat earning">Gain</td>
+        <td class="amount">+${fmt(parseFloat(p.amount || 0))} ${currency}</td>
+      </tr>`).join('');
+
+    const advancesRows = empAdvances.map(a => {
+      const monthly = parseFloat(a.monthlyDeduction || 0) > 0
+        ? parseFloat(a.monthlyDeduction)
+        : parseFloat(a.amount || 0) / Math.max(1, parseInt(a.months) || 1);
+      return `
+      <tr>
+        <td>Remboursement avance – ${a.reason || 'Avance sur salaire'}</td>
+        <td class="cat deduction">Retenue</td>
+        <td class="amount deduction">-${fmt(monthly)} ${currency}</td>
+      </tr>`;
+    }).join('');
+
+    const companyName = tenant.name || tenant.company || 'ENTREPRISE';
+    const logoHtml = tenant.logoUrl
+      ? `<img src="${tenant.logoUrl}" style="height:48px;width:auto;object-fit:contain;max-width:200px;" alt="Logo"/>`
+      : `<div class="logo-box">${companyName.charAt(0).toUpperCase()}</div><span class="company-name">${companyName}</span>`;
+
+    return `<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>Fiche de Paie – ${employee.firstName} ${employee.lastName} – ${monthYear}</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:Arial,Helvetica,sans-serif;padding:40px;background:#fff;color:#1e293b;width:210mm;min-height:297mm;line-height:1.5;font-size:13px;}
+.header{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #0f172a;padding-bottom:32px;margin-bottom:36px;}
+.logo-row{display:flex;align-items:center;gap:10px;margin-bottom:10px;}
+.logo-box{width:44px;height:44px;background:#4f46e5;border-radius:12px;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:900;font-size:18px;}
+.company-name{font-size:20px;font-weight:900;color:#0f172a;text-transform:uppercase;letter-spacing:1px;}
+.company-meta{font-size:10px;color:#64748b;font-weight:700;text-transform:uppercase;line-height:1.8;}
+.title-col{text-align:right;}
+.title-col h1{font-size:28px;font-weight:900;color:#0f172a;text-transform:uppercase;letter-spacing:2px;margin-bottom:8px;}
+.period-badge{display:inline-block;background:#4f46e5;color:#fff;padding:6px 14px;border-radius:8px;font-size:12px;font-weight:700;}
+.ref{font-size:9px;color:#64748b;font-weight:700;text-transform:uppercase;letter-spacing:1px;margin-top:10px;}
+.info-grid{display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-bottom:36px;}
+.info-card{padding:20px 24px;background:#f8fafc;border-radius:16px;border:1px solid #e2e8f0;}
+.info-card .label{font-size:9px;font-weight:900;color:#64748b;text-transform:uppercase;letter-spacing:2px;margin-bottom:8px;}
+.info-card .emp-name{font-size:16px;font-weight:900;color:#0f172a;text-transform:uppercase;margin-bottom:6px;}
+.info-card .meta{font-size:11px;color:#64748b;font-weight:600;line-height:1.8;}
+.status-ok{display:inline-flex;align-items:center;gap:6px;color:#059669;background:#ecfdf5;padding:10px 14px;border-radius:12px;font-size:13px;font-weight:900;text-transform:uppercase;border:1px solid #a7f3d0;margin-top:12px;}
+table{width:100%;border-collapse:separate;border-spacing:0;}
+thead tr{background:#0f172a;color:#fff;}
+th{padding:14px 16px;text-align:left;font-size:9px;font-weight:900;text-transform:uppercase;letter-spacing:2px;}
+th:last-child{text-align:right;border-radius:0 12px 0 0;}
+th:first-child{border-radius:12px 0 0 0;}
+td{padding:14px 16px;border-bottom:1px solid #e2e8f0;font-size:13px;font-weight:600;}
+td.amount{text-align:right;font-weight:900;}
+td.cat{font-size:9px;font-weight:900;text-transform:uppercase;letter-spacing:1px;color:#64748b;}
+td.earning{color:#059669;}
+td.deduction{color:#dc2626;}
+.row-total{background:#f8fafc;}
+.row-total td{font-weight:900;}
+.row-net{background:#0f172a;}
+.row-net td{color:#fff;padding:18px 16px;font-size:16px;font-weight:900;text-transform:uppercase;letter-spacing:1px;}
+.footer{margin-top:60px;display:flex;justify-content:space-between;align-items:flex-end;border-top:1px solid #e2e8f0;padding-top:36px;}
+.sys-info{font-size:8px;color:#cbd5e1;font-weight:700;text-transform:uppercase;line-height:1.4;font-style:italic;}
+.sig-box{text-align:center;width:220px;}
+.sig-title{font-size:9px;font-weight:900;color:#0f172a;text-transform:uppercase;letter-spacing:2px;text-decoration:underline;text-decoration-color:#4f46e5;text-underline-offset:6px;margin-bottom:12px;}
+.sig-area{height:100px;border:2px dashed #e2e8f0;border-radius:10px;display:flex;align-items:center;justify-content:center;}
+.stamp{border:3px solid rgba(34,197,94,0.3);color:#22c55e;border-radius:50%;padding:18px 20px;transform:rotate(12deg);font-weight:900;text-transform:uppercase;font-size:16px;}
+</style>
+</head>
+<body>
+<div class="header">
+  <div>
+    <div class="logo-row">${logoHtml}</div>
+    <div class="company-meta">
+      <div>📍 ${tenant.address || 'Adresse non renseignée'}</div>
+      <div>📞 ${tenant.phone || ''}</div>
+      <div>✉️ ${tenant.email || ''}</div>
+    </div>
+  </div>
+  <div class="title-col">
+    <h1>Fiche de Paie</h1>
+    <div class="period-badge">${monthYear}</div>
+    <div class="ref">Réf : ${employee.id.toString().toUpperCase().substring(0, 8)}-${month}</div>
+  </div>
+</div>
+
+<div class="info-grid">
+  <div class="info-card">
+    <div class="label">Informations Employé</div>
+    <div class="emp-name">${employee.firstName} ${employee.lastName}</div>
+    <div class="meta">
+      <div><b>Matricule :</b> ${employee.matricule || 'EMP-' + employee.id.toString().substring(0, 6).toUpperCase()}</div>
+      <div><b>Poste :</b> ${employee.position || 'Non spécifié'}</div>
+      <div><b>Département :</b> ${employee.departmentInfo?.name || 'N/A'}</div>
+      <div><b>Type contrat :</b> ${contract.type || 'CDI'}</div>
+      <div><b>Date d'entrée :</b> ${contractStartDate}</div>
+    </div>
+  </div>
+  <div class="info-card" style="display:flex;flex-direction:column;justify-content:center;align-items:flex-end;">
+    <div class="status-ok">✓ Salaire Calculé</div>
+    <div style="font-size:9px;color:#64748b;font-weight:700;text-transform:uppercase;letter-spacing:1px;margin-top:10px;text-align:right;line-height:1.6;">
+      Fiche générée conformément<br/>au Code du travail en vigueur.
+    </div>
+  </div>
+</div>
+
+<table>
+  <thead>
+    <tr>
+      <th style="border-radius:12px 0 0 0;">Élément</th>
+      <th>Catégorie</th>
+      <th style="text-align:right;border-radius:0 12px 0 0;">Montant</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Salaire de base</td>
+      <td class="cat earning">Gain</td>
+      <td class="amount">+${fmt(baseSalary)} ${currency}</td>
+    </tr>
+    ${primesRows}
+    <tr class="row-total">
+      <td><b>Salaire Brut</b></td>
+      <td class="cat"></td>
+      <td class="amount"><b>${fmt(grossSalary)} ${currency}</b></td>
+    </tr>
+    <tr>
+      <td>Cotisations sociales salarié (${(empSocialRate * 100).toFixed(1)}%)</td>
+      <td class="cat deduction">Retenue</td>
+      <td class="amount deduction">-${fmt(socialContributions)} ${currency}</td>
+    </tr>
+    <tr>
+      <td>Impôt sur le revenu (${(taxRate * 100).toFixed(1)}% · base imposable)</td>
+      <td class="cat deduction">Retenue</td>
+      <td class="amount deduction">-${fmt(incomeTax)} ${currency}</td>
+    </tr>
+    ${advancesRows}
+    ${hrRulesDeduction > 0 ? `
+    <tr>
+      <td>Déductions règles RH (retards / absences)</td>
+      <td class="cat deduction">Retenue</td>
+      <td class="amount deduction">-${fmt(hrRulesDeduction)} ${currency}</td>
+    </tr>` : ''}
+    <tr class="row-total">
+      <td><b>Total Retenues</b></td>
+      <td class="cat"></td>
+      <td class="amount"><b>-${fmt(totalDeductions)} ${currency}</b></td>
+    </tr>
+    <tr class="row-net">
+      <td><b>Net à Payer</b></td>
+      <td></td>
+      <td class="amount"><b>${fmt(netSalary)} ${currency}</b></td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="footer">
+  <div class="sys-info">
+    <div>${companyName} • Système RH GeStockPro v3.2</div>
+    <div>Généré automatiquement le ${new Date().toLocaleDateString('fr-FR')}</div>
+    <div>ID : ${employee.id.toString().toUpperCase().substring(0, 8)}-${month}</div>
+    <div>Taux appliqués : Charges sal. ${(empSocialRate * 100).toFixed(1)}% · Impôt ${(taxRate * 100).toFixed(1)}% · ${workingDaysMonth}j/mois</div>
+  </div>
+  <div class="sig-box">
+    <div class="sig-title">Visa &amp; Cachet Employeur</div>
+    <div class="sig-area">
+      ${tenant.cachetUrl
+        ? `<img src="${tenant.cachetUrl}" style="height:80px;width:auto;object-fit:contain;" alt="Cachet"/>`
+        : `<div class="stamp">PAYÉ</div>`}
+    </div>
+  </div>
+</div>
+</body>
+</html>`;
   }
 
   /**

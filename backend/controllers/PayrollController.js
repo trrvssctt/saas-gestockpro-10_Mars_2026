@@ -1,7 +1,8 @@
-import { Payroll, Advance, Prime, Employee, Department, Contract } from '../models/index.js';
+import { Payroll, Advance, Prime, Employee, Department, Contract, Attendance, Leave } from '../models/index.js';
 import { Op } from 'sequelize';
 import { validateAmount, calculateAdvanceDeductions } from '../config/payroll.js';
 import PayslipGeneratorService from '../services/PayslipGeneratorService.js';
+import { HRRuleController } from './HRRuleController.js';
 
 export class PayrollController {
   static async list(req, res) {
@@ -672,21 +673,20 @@ export class PayrollController {
 
     const activeContract = employee.contracts
       .sort((a, b) => new Date(b.startDate) - new Date(a.startDate))[0];
-    
+
     const baseSalary = validateAmount(activeContract.salary || employee.baseSalary || 0);
-    
+
+    const monthStart = new Date(`${month}-01`);
+    const monthEnd   = new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 0, 23, 59, 59);
+
     // Récupérer les primes du mois
     const primes = await Prime.findAll({
       where: {
-        employeeId: employeeId,
-        tenantId: tenantId,
-        [Op.and]: [
-          { createdAt: { [Op.gte]: new Date(`${month}-01`) } },
-          { createdAt: { [Op.lt]: new Date(new Date(`${month}-01`).getFullYear(), new Date(`${month}-01`).getMonth() + 1, 1) } }
-        ]
+        employeeId,
+        tenantId,
+        createdAt: { [Op.between]: [monthStart, monthEnd] }
       }
     });
-
     const totalPrimes = primes.reduce((sum, prime) => sum + validateAmount(prime.amount), 0);
 
     // Récupérer les avances si incluses
@@ -696,23 +696,88 @@ export class PayrollController {
       totalAdvanceDeductions = advances.monthlyDeduction || 0;
     }
 
-    // Calculs des charges sociales (utiliser les taux par défaut ou récupérer de la config)
-    const employeeSocialChargeRate = 8.2; // %
-    const employerSocialChargeRate = 18.5; // %
+    // --- Moteur de règles RH ---
+    // 1. Pointages du mois (pour calcul retard)
+    const attendances = await Attendance.findAll({
+      where: {
+        employeeId,
+        tenantId,
+        date: { [Op.between]: [monthStart, monthEnd] }
+      }
+    });
+
+    // 2. Jours d'absence injustifiée = jours sans pointage ni congé approuvé
+    const approvedLeaves = await Leave.findAll({
+      where: {
+        employeeId,
+        tenantId,
+        status: 'APPROVED',
+        startDate: { [Op.lte]: monthEnd },
+        endDate:   { [Op.gte]: monthStart }
+      }
+    });
+    // Congés non payés approuvés ce mois
+    const unpaidLeaveDays = approvedLeaves
+      .filter(l => l.type === 'UNPAID')
+      .reduce((sum, l) => sum + (l.daysCount || 0), 0);
+
+    // Absences injustifiées = jours ouvrables sans pointage et sans congé approuvé
+    const attendanceDates = new Set(attendances.map(a => String(a.date).substring(0, 10)));
+    const approvedLeaveDates = new Set();
+    for (const leave of approvedLeaves) {
+      let d = new Date(leave.startDate);
+      const end = new Date(leave.endDate);
+      while (d <= end) {
+        approvedLeaveDates.add(d.toISOString().substring(0, 10));
+        d.setDate(d.getDate() + 1);
+      }
+    }
+    let unapprovedAbsences = 0;
+    let current = new Date(monthStart);
+    while (current <= monthEnd) {
+      const dayOfWeek = current.getDay();
+      if (dayOfWeek !== 0 && dayOfWeek !== 6) { // jours ouvrables (lun-ven)
+        const dateStr = current.toISOString().substring(0, 10);
+        if (!attendanceDates.has(dateStr) && !approvedLeaveDates.has(dateStr)) {
+          unapprovedAbsences++;
+        }
+      }
+      current.setDate(current.getDate() + 1);
+    }
+
+    // 3. Appliquer les règles configurées
+    const { totalDeduction: ruleDeductions, appliedRules } = await HRRuleController.computeRuleDeductions(
+      tenantId, baseSalary, attendances, unapprovedAbsences
+    );
+
+    // Déduction congés non payés : salaire / 26 jours * jours
+    const unpaidLeaveDeduction = unpaidLeaveDays > 0
+      ? Math.round((baseSalary / 26) * unpaidLeaveDays * 100) / 100
+      : 0;
+
+    // Calculs des charges sociales
+    const employeeSocialChargeRate = 8.2;
+    const employerSocialChargeRate = 18.5;
 
     const grossSalary = baseSalary + totalPrimes;
     const socialChargesEmployee = Math.round(grossSalary * (employeeSocialChargeRate / 100) * 100) / 100;
     const socialChargesEmployer = Math.round(grossSalary * (employerSocialChargeRate / 100) * 100) / 100;
-    const netSalary = Math.max(0, grossSalary - socialChargesEmployee - totalAdvanceDeductions);
+    const totalDeductions = totalAdvanceDeductions + ruleDeductions + unpaidLeaveDeduction;
+    const netSalary = Math.max(0, grossSalary - socialChargesEmployee - totalDeductions);
 
     return {
-      baseSalary: Math.round(baseSalary * 100) / 100,
-      totalPrimes: Math.round(totalPrimes * 100) / 100,
+      baseSalary:             Math.round(baseSalary * 100) / 100,
+      totalPrimes:            Math.round(totalPrimes * 100) / 100,
       totalAdvanceDeductions: Math.round(totalAdvanceDeductions * 100) / 100,
-      socialChargesEmployee: Math.round(socialChargesEmployee * 100) / 100,
-      socialChargesEmployer: Math.round(socialChargesEmployer * 100) / 100,
-      grossSalary: Math.round(grossSalary * 100) / 100,
-      netSalary: Math.round(netSalary * 100) / 100,
+      ruleDeductions:         Math.round(ruleDeductions * 100) / 100,
+      unpaidLeaveDeduction:   Math.round(unpaidLeaveDeduction * 100) / 100,
+      unapprovedAbsences,
+      unpaidLeaveDays,
+      appliedRules,
+      socialChargesEmployee:  Math.round(socialChargesEmployee * 100) / 100,
+      socialChargesEmployer:  Math.round(socialChargesEmployer * 100) / 100,
+      grossSalary:            Math.round(grossSalary * 100) / 100,
+      netSalary:              Math.round(netSalary * 100) / 100,
       currency: activeContract.currency || 'F CFA'
     };
   }
