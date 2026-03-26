@@ -224,6 +224,14 @@ export interface Contract {
   status: 'ACTIVE' | 'EXPIRED' | 'TERMINATED' | 'SUSPENDED';
   signedDate: string;
   renewalDate?: string;
+  previousContractId?: string;
+  renewalCount?: number;
+  maxRenewals?: number;
+  currency?: string;
+  trialPeriodEnd?: string;
+  workLocation?: string;
+  meta?: string;
+  documentUrl?: string;
   employee?: {
     id: string;
     firstName: string;
@@ -231,6 +239,7 @@ export interface Contract {
     email: string;
     position: string;
     departmentId?: string;
+    photoUrl?: string;
   };
 }
 
