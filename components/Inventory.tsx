@@ -1,18 +1,58 @@
-
 import React, { useState, useMemo, useEffect } from 'react';
 import { 
   Package, AlertTriangle, Trash2, Edit3, Plus, 
   Search, RefreshCw, Eye, Boxes, Lock, X, Save,
   ArrowRight, Loader2, AlertCircle, MapPin, Tag, Layers,
   TrendingUp, History, ArrowUpCircle, ArrowDownCircle, Info, ShieldAlert,
-  ShieldCheck, CheckCircle2, Upload, ImageIcon, BarChart3
+  ShieldCheck, CheckCircle2, Upload, ImageIcon, BarChart3, Ban
 } from 'lucide-react';
 import { StockItem, UserRole, SubscriptionPlan, User, StockMovement } from '../types';
 import { apiClient } from '../services/api';
+import YearMonthPicker from './YearMonthPicker';
 import { useToast } from './ToastProvider';
 import { authBridge } from '../services/authBridge';
+import { buildExportHandlers, ExportColumn } from '../services/exportUtils';
+import { FileDown } from 'lucide-react';
+
 
 const Inventory = ({ currency, plan }: { currency: string, userRole?: UserRole, plan?: SubscriptionPlan }) => {
+    // State pour le modal de désactivation
+    const [showDeactivateConfirm, setShowDeactivateConfirm] = useState<StockItem | null>(null);
+
+    // Handler de désactivation
+    const handleConfirmDeactivate = async () => {
+      if (!showDeactivateConfirm || !canModify || activeInventory) return;
+      setActionLoading(true);
+      setError(null);
+      try {
+        const updated = await apiClient.put(`/stock/${showDeactivateConfirm.id}`, { ...showDeactivateConfirm, status: 'desactive' });
+        setStocks(stocks.map(s => s.id === updated.id ? updated : s));
+        setShowDeactivateConfirm(null);
+        setShowSuccessMessage(`Le produit "${updated.name}" a été désactivé avec succès.`);
+        setTimeout(() => setShowSuccessMessage(null), 4000);
+      } catch (err: any) {
+        setError(err.message || "Erreur Kernel lors de la désactivation.");
+        setShowDeactivateConfirm(null);
+      } finally {
+        setActionLoading(false);
+      }
+    };
+
+    const handleConfirmReactivate = async (item: StockItem) => {
+    if (!item || !canModify || activeInventory) return;
+    setActionLoading(true);
+    setError(null);
+    try {
+      const updated = await apiClient.put(`/stock/${item.id}`, { ...item, status: 'actif' });
+      setStocks(stocks.map(s => s.id === updated.id ? updated : s));
+      setShowSuccessMessage(`Le produit "${updated.name}" a été réactivé avec succès.`);
+      setTimeout(() => setShowSuccessMessage(null), 4000);
+    } catch (err: any) {
+      setError(err.message || "Erreur Kernel lors de la réactivation.");
+    } finally {
+      setActionLoading(false);
+    }
+  };
   const [stocks, setStocks] = useState<StockItem[]>([]);
   const [subcategories, setSubcategories] = useState<any[]>([]);
   const [sales, setSales] = useState<any[]>([]);
@@ -24,6 +64,31 @@ const Inventory = ({ currency, plan }: { currency: string, userRole?: UserRole, 
   const [pageSize, setPageSize] = useState<number>(6);
   const [showFilters, setShowFilters] = useState(false);
   const [filters, setFilters] = useState({ search: '', dateFrom: '', dateTo: '', subcategoryId: '', status: 'ALL' });
+
+  // Year/Month filter
+  const [selectedYear, setSelectedYear] = useState<number | null>(null);
+  const [selectedMonth, setSelectedMonth] = useState<number | null>(null);
+
+  const availableYears = useMemo(() => {
+    const years = new Set<number>();
+    years.add(new Date().getFullYear());
+    stocks.forEach((s: any) => { if (s.createdAt) years.add(new Date(s.createdAt).getFullYear()); });
+    return Array.from(years).sort((a, b) => b - a);
+  }, [stocks]);
+
+  useEffect(() => {
+    if (selectedYear === null) {
+      setFilters(f => ({ ...f, dateFrom: '', dateTo: '' }));
+      return;
+    }
+    const ms = selectedMonth !== null ? selectedMonth : 0;
+    const me = selectedMonth !== null ? selectedMonth : 11;
+    setFilters(f => ({
+      ...f,
+      dateFrom: new Date(selectedYear, ms, 1).toISOString().split('T')[0],
+      dateTo:   new Date(selectedYear, me + 1, 0).toISOString().split('T')[0]
+    }));
+  }, [selectedYear, selectedMonth]);
   const [modalMode, setModalMode] = useState<'CREATE' | 'EDIT' | 'VIEW' | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<StockItem | null>(null);
   const [showSuccessMessage, setShowSuccessMessage] = useState<string | null>(null);
@@ -31,20 +96,27 @@ const Inventory = ({ currency, plan }: { currency: string, userRole?: UserRole, 
   const [error, setError] = useState<string | null>(null);
   const [activeInventory, setActiveInventory] = useState<any>(null);
 
-  const [formData, setFormData] = useState({
-    name: '',
-    unitPrice: 0,
-    minThreshold: 5,
-    quantity: 0,
-    subcategoryId: '',
-    location: '',
-    imageUrl: ''
-  });
+  // Pour création multiple : tableau de 1 à 5 produits
+  const [formDataList, setFormDataList] = useState([
+    { name: '', unitPrice: 0, minThreshold: 5, quantity: 0, subcategoryId: '', location: '', imageUrl: '' }
+  ]);
   
   const currentUser = authBridge.getSession()?.user;
   const canModify = currentUser ? authBridge.canPerform(currentUser, 'EDIT', 'inventory') : false;
-  const isLimitReached = plan?.id === 'FREE_TRIAL' && stocks.length >= 5;
+  const isLimitReached = false; // Plus de limite sur l'inventaire
   const showToast = useToast();
+  const [showExportMenu, setShowExportMenu] = useState(false);
+
+  const exportColumns: ExportColumn[] = [
+    { key: 'name', label: 'Produit' },
+    { key: 'sku', label: 'SKU' },
+    { key: 'currentLevel', label: 'Stock Actuel', format: (v) => Number(v || 0).toLocaleString('fr-FR') },
+    { key: 'minThreshold', label: 'Seuil Min', format: (v) => Number(v || 0).toLocaleString('fr-FR') },
+    { key: 'unitPrice', label: 'Prix Unitaire', format: (v) => Number(v || 0).toLocaleString('fr-FR') },
+    { key: 'subcategory', label: 'Sous-catégorie', format: (_v, row) => row.subcategory?.name || row.subcategoryId || '' },
+    { key: 'location', label: 'Emplacement' },
+    { key: 'status', label: 'Statut', format: (v) => v === 'actif' ? 'Actif' : 'Inactif' },
+  ];
 
   const fetchData = async () => {
     setLoading(true);
@@ -69,26 +141,23 @@ const Inventory = ({ currency, plan }: { currency: string, userRole?: UserRole, 
 
   useEffect(() => { fetchData(); }, []);
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Upload pour un index donné (création multiple)
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, idx: number) => {
     const file = e.target.files?.[0];
     if (!file) return;
-
     setIsUploading(true);
-    
     const cloudinaryData = new FormData();
     cloudinaryData.append('file', file);
     cloudinaryData.append('upload_preset', 'ml_default'); 
     cloudinaryData.append('cloud_name', 'dq7avew9h');
-
     try {
       const response = await fetch(`https://api.cloudinary.com/v1_1/dq7avew9h/image/upload`, {
         method: 'POST',
         body: cloudinaryData
       });
-      
       const data = await response.json();
       if (data.secure_url) {
-        setFormData(prev => ({ ...prev, imageUrl: data.secure_url }));
+        setFormDataList(prev => prev.map((f, i) => i === idx ? { ...f, imageUrl: data.secure_url } : f));
       }
     } catch (err) {
       console.error("Upload Error:", err);
@@ -110,7 +179,9 @@ const Inventory = ({ currency, plan }: { currency: string, userRole?: UserRole, 
       showToast("Impossible de créer un produit : aucune sous-catégorie disponible. Veuillez d'abord créer des catégories.", 'error');
       return;
     }
-    setFormData({ name: '', unitPrice: 0, minThreshold: 5, quantity: 0, subcategoryId: subcategories[0]?.id || '', location: '', imageUrl: '' });
+    setFormDataList([
+      { name: '', unitPrice: 0, minThreshold: 5, quantity: 0, subcategoryId: subcategories[0]?.id || '', location: '', imageUrl: '' }
+    ]);
     setModalMode('CREATE');
   };
 
@@ -121,15 +192,17 @@ const Inventory = ({ currency, plan }: { currency: string, userRole?: UserRole, 
       return;
     }
     setSelectedItem(item);
-    setFormData({
-      name: item.name,
-      unitPrice: Number(item.unitPrice),
-      minThreshold: item.minThreshold,
-      quantity: item.currentLevel,
-      subcategoryId: item.subcategoryId || '',
-      location: item.location || '',
-      imageUrl: item.imageUrl || ''
-    });
+    setFormDataList([
+      {
+        name: item.name,
+        unitPrice: Number(item.unitPrice),
+        minThreshold: item.minThreshold,
+        quantity: item.currentLevel,
+        subcategoryId: item.subcategoryId || '',
+        location: item.location || '',
+        imageUrl: item.imageUrl || ''
+      }
+    ]);
     setModalMode('EDIT');
   };
 
@@ -152,13 +225,19 @@ const Inventory = ({ currency, plan }: { currency: string, userRole?: UserRole, 
     if (!canModify || activeInventory) return;
     setActionLoading(true);
     setError(null);
-
     try {
       if (modalMode === 'CREATE') {
-        const newItem = await apiClient.post('/stock', formData);
-        setStocks([newItem, ...stocks]);
+        // Création multiple
+        const validForms = formDataList.filter(f => f.name && f.unitPrice && f.subcategoryId);
+        if (validForms.length === 0) {
+          showToast("Veuillez remplir au moins un produit.", 'error');
+          setActionLoading(false);
+          return;
+        }
+        const created = await Promise.all(validForms.map(f => apiClient.post('/stock', f)));
+        setStocks(prev => [...created, ...prev]);
       } else if (modalMode === 'EDIT' && selectedItem) {
-        const updated = await apiClient.put(`/stock/${selectedItem.id}`, formData);
+        const updated = await apiClient.put(`/stock/${selectedItem.id}`, formDataList[0]);
         setStocks(stocks.map(s => s.id === updated.id ? updated : s));
       }
       setModalMode(null);
@@ -345,6 +424,63 @@ const Inventory = ({ currency, plan }: { currency: string, userRole?: UserRole, 
         <button onClick={fetchData} className="p-4 bg-slate-50 text-slate-400 hover:text-indigo-600 rounded-2xl transition-all shadow-sm">
           <RefreshCw size={20} className={loading ? 'animate-spin' : ''} />
         </button>
+
+        {/* EXPORT TOOLBAR */}
+        <div className="relative">
+          <button
+            onClick={() => setShowExportMenu(!showExportMenu)}
+            className="p-4 bg-slate-50 text-slate-400 hover:text-indigo-600 rounded-2xl transition-all shadow-sm flex items-center gap-2 font-black text-[10px] uppercase tracking-widest"
+            title="Exporter"
+          >
+            <FileDown size={18} />
+          </button>
+          {showExportMenu && (
+            <div className="absolute right-0 top-full mt-2 bg-white border border-slate-100 rounded-2xl shadow-2xl z-50 w-52 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200">
+              {(() => {
+                // Récupère les infos tenant depuis appSettings si disponible (fallback sur currentUser.tenant)
+                const appSettings = (window as any).appSettings || {};
+                const tenantSettings = {
+                  ...((currentUser as any)?.tenant || {}),
+                  ...appSettings,
+                };
+                const exportInfo = buildExportHandlers({
+                  data: filteredStocks,
+                  columns: exportColumns,
+                  options: {
+                    filename: `inventaire-${new Date().toISOString().split('T')[0]}`,
+                    sheetName: 'Inventaire',
+                    title: 'Registre du Stock',
+                    companyInfo: {
+                      name: tenantSettings?.name,
+                      address: tenantSettings?.address,
+                      phone: tenantSettings?.phone,
+                      email: tenantSettings?.email,
+                      logoUrl: tenantSettings?.logoUrl || tenantSettings?.platformLogo || tenantSettings?.invoiceLogo || '',
+                    }
+                  },
+                  tableElementId: 'inventory-table-export',
+                  showToast,
+                });
+                const items = [
+                  { label: 'CSV (.csv)', action: exportInfo.csv, icon: '📄' },
+                  { label: 'Excel (.xlsx)', action: exportInfo.excel, icon: '📊' },
+                  { label: 'PDF (impression)', action: exportInfo.pdf, icon: '🖨️' },
+                  { label: 'Image PNG', action: exportInfo.imagePng, icon: '🖼️' },
+                  { label: 'Image JPG', action: exportInfo.imageJpg, icon: '📷' },
+                ];
+                return items.map(({ label, action, icon }) => (
+                  <button
+                    key={label}
+                    onClick={() => { action(); setShowExportMenu(false); }}
+                    className="w-full flex items-center gap-3 px-5 py-3 text-[10px] font-black uppercase tracking-widest text-slate-600 hover:bg-indigo-50 hover:text-indigo-700 transition-all"
+                  >
+                    <span>{icon}</span> {label}
+                  </button>
+                ));
+              })()}
+            </div>
+          )}
+        </div>
       </div>
 
       {error && (
@@ -355,7 +491,15 @@ const Inventory = ({ currency, plan }: { currency: string, userRole?: UserRole, 
 
           {/* Filtres avancés */}
           {showFilters && (
-            <div className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-xl animate-in slide-in-from-top-4 duration-300 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-xl animate-in slide-in-from-top-4 duration-300 space-y-4">
+              <YearMonthPicker
+                dataYears={availableYears}
+                selectedYear={selectedYear}
+                selectedMonth={selectedMonth}
+                onYearChange={setSelectedYear}
+                onMonthChange={setSelectedMonth}
+              />
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
               <div className="space-y-2">
                 <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest px-2">Recherche</label>
                 <input type="text" value={filters.search} onChange={e => setFilters({...filters, search: e.target.value})} className="w-full bg-slate-50 border border-slate-100 rounded-xl px-4 py-3 text-xs font-bold outline-none focus:ring-2 focus:ring-indigo-500 transition-all" placeholder="Nom, SKU..." />
@@ -375,6 +519,7 @@ const Inventory = ({ currency, plan }: { currency: string, userRole?: UserRole, 
                   <option value="ALL">Tous les statuts</option>
                   <option value="ALERT">⚠️ En Rupture</option>
                   <option value="OK">✅ En Stock</option>
+                  
                 </select>
               </div>
 
@@ -391,6 +536,7 @@ const Inventory = ({ currency, plan }: { currency: string, userRole?: UserRole, 
               <div className="sm:col-span-2 md:col-span-4 flex gap-2 pt-2">
                 <button onClick={() => setFilters({ search: '', dateFrom: '', dateTo: '', subcategoryId: '', status: 'ALL' })} className="px-6 py-3 bg-slate-100 text-slate-500 rounded-2xl text-[9px] font-black uppercase tracking-widest hover:bg-rose-50 hover:text-rose-600 transition-all w-full">RÉINITIALISER LES FILTRES</button>
               </div>
+              </div>
             </div>
           )}
 
@@ -404,8 +550,9 @@ const Inventory = ({ currency, plan }: { currency: string, userRole?: UserRole, 
                </div>
              ) : visibleStocks.map((item) => {
               const isLinked = isProductLinked(item.id);
+              const isDisabled = item.status === 'desactive' || item.status === 'DESACTIVE';
               return (
-                <div key={item.id} className={`bg-white rounded-[3rem] border border-slate-100 shadow-sm hover:shadow-2xl transition-all p-8 flex flex-col group border-b-4 border-transparent hover:border-indigo-500 ${isLinked ? 'grayscale-[0.3]' : ''}`}>
+                <div key={item.id} className={`bg-white rounded-[3rem] border border-slate-100 shadow-sm hover:shadow-2xl transition-all p-8 flex flex-col group border-b-4 border-transparent hover:border-indigo-500 ${isLinked ? 'grayscale-[0.3]' : ''} ${isDisabled ? 'opacity-50 grayscale' : ''}`}>
                   <div className="flex justify-between items-start mb-6">
                     <div className="w-14 h-14 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center transition-transform group-hover:scale-110 shadow-inner overflow-hidden">
                       {item.imageUrl ? (
@@ -414,14 +561,48 @@ const Inventory = ({ currency, plan }: { currency: string, userRole?: UserRole, 
                         <Package size={28} />
                       )}
                     </div>
-                    <div className="flex flex-col items-end gap-2">
+                    <div className="flex flex-col items-end gap-2 relative">
                       <span className={`px-3 py-1 rounded-full text-[8px] font-black uppercase border ${item.currentLevel <= item.minThreshold ? 'bg-rose-50 text-rose-600 border-rose-100' : 'bg-emerald-50 text-emerald-600 border-emerald-100'}`}>
                         {item.currentLevel <= item.minThreshold ? 'ALERTE STOCK' : 'EN STOCK'}
                       </span>
                       {isLinked && (
                         <span className="text-[7px] font-black bg-slate-100 text-slate-500 px-2 py-0.5 rounded uppercase">Ventes liées</span>
                       )}
+                      {isDisabled && (
+                        <span className="text-[7px] font-black bg-rose-100 text-rose-600 px-2 py-0.5 rounded uppercase">Désactivé</span>
+                      )}
+                      {/* Le bouton de désactivation est déplacé à côté des boutons modifier/supprimer */}
                     </div>
+                        {/* MODAL CONFIRM DEACTIVATE */}
+                        {showDeactivateConfirm && (
+                          <div className="fixed inset-0 z-[1100] flex items-center justify-center p-6 bg-slate-950/90 backdrop-blur-md animate-in fade-in duration-300">
+                             <div className="bg-white w-full max-w-md mx-4 md:mx-auto rounded-[3rem] shadow-2xl overflow-hidden p-5 md:p-10 text-center animate-in zoom-in-95">
+                                <div className="w-20 h-20 bg-rose-50 text-rose-500 rounded-[2rem] flex items-center justify-center mx-auto mb-6 shadow-inner">
+                                  <Ban size={40} />
+                                </div>
+                                <h3 className="text-xl font-black text-slate-900 uppercase tracking-tight mb-2">Confirmer la désactivation ?</h3>
+                                <p className="text-xs text-slate-400 font-medium uppercase tracking-widest leading-relaxed mb-8">
+                                  Souhaitez-vous désactiver le produit <span className="text-rose-600 font-black">"{showDeactivateConfirm.name}"</span> ?<br/>
+                                  Il ne sera plus disponible à la vente.
+                                </p>
+                                <div className="flex flex-col gap-3">
+                                  <button
+                                    onClick={handleConfirmDeactivate}
+                                    disabled={actionLoading}
+                                    className="px-6 py-3 bg-rose-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-rose-700 transition-all shadow-sm"
+                                  >
+                                    Oui, désactiver
+                                  </button>
+                                  <button
+                                    onClick={() => setShowDeactivateConfirm(null)}
+                                    className="px-6 py-3 bg-slate-100 text-slate-500 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-200 transition-all shadow-sm"
+                                  >
+                                    Annuler
+                                  </button>
+                                </div>
+                             </div>
+                          </div>
+                        )}
                   </div>
                   <h3 className="font-black text-slate-900 text-lg uppercase truncate leading-none">{item.name}</h3>
                   <p className="text-[10px] text-slate-400 font-mono mt-3 truncate font-bold">SKU: {item.sku}</p>
@@ -457,6 +638,25 @@ const Inventory = ({ currency, plan }: { currency: string, userRole?: UserRole, 
                           >
                             <Trash2 size={18}/>
                           </button>
+                          {item.status === 'desactive' || item.status === 'DESACTIVE' ? (
+                            <button
+                              onClick={() => handleConfirmReactivate(item)}
+                              disabled={!!activeInventory}
+                              title="Réactiver"
+                              className="p-2.5 rounded-xl transition-all text-emerald-600 hover:text-white hover:bg-emerald-600 border border-emerald-100"
+                            >
+                              Réactiver
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => !isLinked && setShowDeactivateConfirm(item)}
+                              disabled={!!activeInventory || isLinked}
+                              title={isLinked ? "Désactivation verrouillée" : "Désactiver"}
+                              className={`p-2.5 rounded-xl transition-all ${isLinked ? 'text-slate-200 cursor-not-allowed' : 'text-slate-400 hover:text-rose-600 hover:bg-rose-50'}`}
+                            >
+                              <Ban size={16}/>
+                            </button>
+                          )}
                        </div>
                      )}
                   </div>
@@ -472,7 +672,7 @@ const Inventory = ({ currency, plan }: { currency: string, userRole?: UserRole, 
           )}
         </div>
       ) : (
-        <div className="bg-white rounded-[1.5rem] border border-slate-100 shadow-sm overflow-x-auto">
+        <div id="inventory-table-export" className="bg-white rounded-[1.5rem] border border-slate-100 shadow-sm overflow-x-auto">
           <table className="w-full text-left">
             <thead>
               <tr className="bg-slate-50 text-slate-400 text-[9px] font-black uppercase tracking-widest border-b">
@@ -493,10 +693,10 @@ const Inventory = ({ currency, plan }: { currency: string, userRole?: UserRole, 
                 const isLinked = isProductLinked(item.id);
                 const scName = subcategories.find((s:any) => s.id === (item.subcategoryId || item.subcategory_id))?.name || '';
                 return (
-                  <tr key={item.id} className="group hover:bg-slate-50/50 transition-all">
+                  <tr key={item.id} className={`group hover:bg-slate-50/50 transition-all ${item.status === 'desactive' || item.status === 'DESACTIVE' ? 'opacity-50 grayscale' : ''}`}> 
                     <td className="px-3 md:px-6 py-3 md:py-4 font-black text-slate-900 flex items-center gap-3">
                       <div className="w-10 h-10 rounded-lg bg-slate-50 flex items-center justify-center overflow-hidden">{item.imageUrl ? <img src={item.imageUrl} className="w-full h-full object-cover" alt="" /> : <Package size={18} />}</div>
-                      <div className="truncate">{item.name}</div>
+                      <div className="truncate flex items-center gap-2">{item.name} {item.status === 'desactive' || item.status === 'DESACTIVE' ? <span className="text-[7px] font-black bg-rose-100 text-rose-600 px-2 py-0.5 rounded uppercase ml-2">Désactivé</span> : null}</div>
                     </td>
                     <td className="px-3 md:px-6 py-3 md:py-4 text-slate-500 font-mono">{item.sku}</td>
                     <td className="px-3 md:px-6 py-3 md:py-4 text-slate-600">{scName}</td>
@@ -523,63 +723,129 @@ const Inventory = ({ currency, plan }: { currency: string, userRole?: UserRole, 
       {(modalMode === 'CREATE' || modalMode === 'EDIT') && (
         <div className="fixed inset-0 z-[1000] flex items-center justify-center p-6 bg-slate-950/90 backdrop-blur-md animate-in fade-in duration-300">
           <div className="bg-white w-full max-w-2xl mx-4 md:mx-auto rounded-[2rem] md:rounded-[3.5rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-500 max-h-[90dvh] flex flex-col">
-             <div className={`px-4 md:px-10 py-5 md:py-8 text-white flex justify-between items-center ${modalMode === 'CREATE' ? 'bg-slate-900' : 'bg-amber-500'}`}>
+             <div className={`px-4 md:px-10 py-5 md:py-8 text-white flex justify-between items-center ${modalMode === 'CREATE' ? 'bg-slate-900' : 'bg-amber-500'}`}> 
                 <h3 className="text-xl font-black uppercase tracking-tight flex items-center gap-3">
-                   {modalMode === 'CREATE' ? <Plus size={24}/> : <Edit3 size={24}/>}
-                   {modalMode === 'CREATE' ? 'Nouvel Article' : 'Révision Article'}
+                   {modalMode === 'CREATE' ? <Plus size={24}/> : <Edit3 size={24}/>} 
+                   {modalMode === 'CREATE' ? 'Nouveaux Articles' : 'Révision Article'}
                 </h3>
                 <button onClick={() => setModalMode(null)} className="p-3 hover:bg-white/10 rounded-2xl transition-all"><X size={24}/></button>
              </div>
              <form onSubmit={handleSubmit} className="p-4 md:p-10 space-y-6 md:space-y-8 flex-1 overflow-y-auto custom-scrollbar">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                   <div className="space-y-4">
-                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-2">Désignation Produit <span className="text-rose-500">*</span></label>
-                     <input type="text" required placeholder="Désignation" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 text-sm font-black outline-none focus:ring-4 focus:ring-indigo-500/10 shadow-inner" />
-                   </div>
-                   <div className="space-y-4">
-                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-2">Visual Produit</label>
-                      <div className="relative group">
-                        <input type="file" id="product_img_up" hidden onChange={handleFileUpload} accept="image/*" />
-                        <label htmlFor="product_img_up" className={`block p-4 border-2 border-dashed rounded-2xl text-center cursor-pointer transition-all ${formData.imageUrl ? 'border-emerald-500 bg-emerald-50/30' : 'border-slate-200 hover:border-indigo-600'}`}>
-                          {isUploading ? (
-                            <Loader2 className="animate-spin mx-auto text-indigo-600" />
-                          ) : formData.imageUrl ? (
-                            <img src={formData.imageUrl} className="h-16 mx-auto rounded-lg object-contain" alt="Preview" />
-                          ) : (
-                            <div className="py-2">
-                               <ImageIcon className="mx-auto text-slate-300" size={24} />
-                               <p className="text-[8px] font-black uppercase mt-1 text-slate-500">Ajouter Photo</p>
-                            </div>
+                {modalMode === 'CREATE' ? (
+                  <>
+                    {formDataList.map((formData, idx) => (
+                      <div key={idx} className="mb-8 border-b border-slate-100 pb-6">
+                        <div className="flex justify-between items-center mb-2">
+                          <span className="font-black text-indigo-600 text-xs uppercase">Produit {idx + 1}</span>
+                          {formDataList.length > 1 && (
+                            <button type="button" onClick={() => setFormDataList(list => list.filter((_, i) => i !== idx))} className="text-rose-500 text-xs font-black">Supprimer</button>
                           )}
-                        </label>
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                          <div className="space-y-4">
+                            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-2">Désignation Produit <span className="text-rose-500">*</span></label>
+                            <input type="text" required placeholder="Désignation" value={formData.name} onChange={e => setFormDataList(list => list.map((f, i) => i === idx ? { ...f, name: e.target.value } : f))} className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 text-sm font-black outline-none focus:ring-4 focus:ring-indigo-500/10 shadow-inner" />
+                          </div>
+                          <div className="space-y-4">
+                            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-2">Visual Produit</label>
+                            <div className="relative group">
+                              <input type="file" id={`product_img_up_${idx}`} hidden onChange={e => handleFileUpload(e, idx)} accept="image/*" />
+                              <label htmlFor={`product_img_up_${idx}`} className={`block p-4 border-2 border-dashed rounded-2xl text-center cursor-pointer transition-all ${formData.imageUrl ? 'border-emerald-500 bg-emerald-50/30' : 'border-slate-200 hover:border-indigo-600'}`}> 
+                                {isUploading ? (
+                                  <Loader2 className="animate-spin mx-auto text-indigo-600" />
+                                ) : formData.imageUrl ? (
+                                  <img src={formData.imageUrl} className="h-16 mx-auto rounded-lg object-contain" alt="Preview" />
+                                ) : (
+                                  <div className="py-2">
+                                    <ImageIcon className="mx-auto text-slate-300" size={24} />
+                                    <p className="text-[8px] font-black uppercase mt-1 text-slate-500">Ajouter Photo</p>
+                                  </div>
+                                )}
+                              </label>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 mt-4">
+                          <div className="space-y-4">
+                            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-2">Tarification & Catégorie <span className="text-rose-600">*</span></label>
+                            <input type="number" required placeholder="Prix Unit. TTC" value={formData.unitPrice} onChange={e => setFormDataList(list => list.map((f, i) => i === idx ? { ...f, unitPrice: Number(e.target.value) } : f))} className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 text-sm font-black outline-none focus:ring-4 focus:ring-indigo-500/10 shadow-inner" />
+                            <select value={formData.subcategoryId} onChange={e => setFormDataList(list => list.map((f, i) => i === idx ? { ...f, subcategoryId: e.target.value } : f))} className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 text-sm font-black outline-none appearance-none cursor-pointer shadow-inner">
+                              <option value="">Sélectionner Sous-Catégorie</option>
+                              {subcategories.map((sc: any) => <option key={sc.id} value={sc.id}>{sc.name}</option>)}
+                            </select>
+                          </div>
+                          <div className="space-y-4">
+                            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-2">Gestion Stock</label>
+                            <div className="space-y-2">
+                              <label className="text-[8px] font-black text-slate-400 uppercase px-2">Seuil d'alerte <span className="text-rose-600">*</span></label>
+                              <input type="number" value={formData.minThreshold} onChange={e => setFormDataList(list => list.map((f, i) => i === idx ? { ...f, minThreshold: Number(e.target.value) } : f))} className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 text-sm font-black outline-none shadow-inner" />
+                            </div>
+                            <div className="space-y-2">
+                              <label className="text-[8px] font-black text-slate-400 uppercase px-2">Emplacement</label>
+                              <input type="text" placeholder="Ex: Zone A-04" value={formData.location} onChange={e => setFormDataList(list => list.map((f, i) => i === idx ? { ...f, location: e.target.value } : f))} className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 text-sm font-black outline-none shadow-inner" />
+                            </div>
+                          </div>
+                        </div>
                       </div>
-                   </div>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                   <div className="space-y-4">
-                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-2">Tarification & Catégorie <span className="text-rose-600">*</span></label>
-                      <input type="number" required placeholder="Prix Unit. TTC" value={formData.unitPrice} onChange={e => setFormData({...formData, unitPrice: Number(e.target.value)})} className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 text-sm font-black outline-none focus:ring-4 focus:ring-indigo-500/10 shadow-inner" />
-                      <select value={formData.subcategoryId} onChange={e => setFormData({...formData, subcategoryId: e.target.value})} className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 text-sm font-black outline-none appearance-none cursor-pointer shadow-inner">
-                        <option value="">Sélectionner Sous-Catégorie</option>
-                        {subcategories.map((sc: any) => <option key={sc.id} value={sc.id}>{sc.name}</option>)}
-                      </select>
-                   </div>
-                   <div className="space-y-4">
-                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-2">Gestion Stock</label>
-                      <div className="space-y-2">
-                        <label className="text-[8px] font-black text-slate-400 uppercase px-2">Seuil d'alerte <span className="text-rose-600">*</span></label>
-                        <input type="number" value={formData.minThreshold} onChange={e => setFormData({...formData, minThreshold: Number(e.target.value)})} className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 text-sm font-black outline-none shadow-inner" />
+                    ))}
+                    {formDataList.length < 5 && (
+                      <button type="button" onClick={() => setFormDataList(list => [...list, { name: '', unitPrice: 0, minThreshold: 5, quantity: 0, subcategoryId: subcategories[0]?.id || '', location: '', imageUrl: '' }])} className="w-full py-3 bg-indigo-50 text-indigo-700 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-indigo-100 transition-all mb-4">+ Ajouter un produit</button>
+                    )}
+                  </>
+                ) : (
+                  // Mode édition (un seul produit)
+                  <>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                      <div className="space-y-4">
+                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-2">Désignation Produit <span className="text-rose-500">*</span></label>
+                        <input type="text" required placeholder="Désignation" value={formDataList[0].name} onChange={e => setFormDataList(list => [{ ...list[0], name: e.target.value }])} className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 text-sm font-black outline-none focus:ring-4 focus:ring-indigo-500/10 shadow-inner" />
                       </div>
-                      <div className="space-y-2">
-                        <label className="text-[8px] font-black text-slate-400 uppercase px-2">Emplacement</label>
-                        <input type="text" placeholder="Ex: Zone A-04" value={formData.location} onChange={e => setFormData({...formData, location: e.target.value})} className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 text-sm font-black outline-none shadow-inner" />
+                      <div className="space-y-4">
+                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-2">Visual Produit</label>
+                        <div className="relative group">
+                          <input type="file" id="product_img_up_edit" hidden onChange={e => handleFileUpload(e, 0)} accept="image/*" />
+                          <label htmlFor="product_img_up_edit" className={`block p-4 border-2 border-dashed rounded-2xl text-center cursor-pointer transition-all ${formDataList[0].imageUrl ? 'border-emerald-500 bg-emerald-50/30' : 'border-slate-200 hover:border-indigo-600'}`}> 
+                            {isUploading ? (
+                              <Loader2 className="animate-spin mx-auto text-indigo-600" />
+                            ) : formDataList[0].imageUrl ? (
+                              <img src={formDataList[0].imageUrl} className="h-16 mx-auto rounded-lg object-contain" alt="Preview" />
+                            ) : (
+                              <div className="py-2">
+                                <ImageIcon className="mx-auto text-slate-300" size={24} />
+                                <p className="text-[8px] font-black uppercase mt-1 text-slate-500">Ajouter Photo</p>
+                              </div>
+                            )}
+                          </label>
+                        </div>
                       </div>
-                   </div>
-                </div>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 mt-4">
+                      <div className="space-y-4">
+                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-2">Tarification & Catégorie <span className="text-rose-600">*</span></label>
+                        <input type="number" required placeholder="Prix Unit. TTC" value={formDataList[0].unitPrice} onChange={e => setFormDataList(list => [{ ...list[0], unitPrice: Number(e.target.value) }])} className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 text-sm font-black outline-none focus:ring-4 focus:ring-indigo-500/10 shadow-inner" />
+                        <select value={formDataList[0].subcategoryId} onChange={e => setFormDataList(list => [{ ...list[0], subcategoryId: e.target.value }])} className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 text-sm font-black outline-none appearance-none cursor-pointer shadow-inner">
+                          <option value="">Sélectionner Sous-Catégorie</option>
+                          {subcategories.map((sc: any) => <option key={sc.id} value={sc.id}>{sc.name}</option>)}
+                        </select>
+                      </div>
+                      <div className="space-y-4">
+                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-2">Gestion Stock</label>
+                        <div className="space-y-2">
+                          <label className="text-[8px] font-black text-slate-400 uppercase px-2">Seuil d'alerte <span className="text-rose-600">*</span></label>
+                          <input type="number" value={formDataList[0].minThreshold} onChange={e => setFormDataList(list => [{ ...list[0], minThreshold: Number(e.target.value) }])} className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 text-sm font-black outline-none shadow-inner" />
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-[8px] font-black text-slate-400 uppercase px-2">Emplacement</label>
+                          <input type="text" placeholder="Ex: Zone A-04" value={formDataList[0].location} onChange={e => setFormDataList(list => [{ ...list[0], location: e.target.value }])} className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 text-sm font-black outline-none shadow-inner" />
+                        </div>
+                      </div>
+                    </div>
+                  </>
+                )}
                 <div className="flex gap-4 pt-4 border-t border-slate-100">
                   <button type="button" onClick={() => setModalMode(null)} className="flex-1 py-5 border-2 border-slate-100 text-slate-400 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-slate-50 transition-all">ANNULER</button>
-                  <button type="submit" disabled={actionLoading || isUploading} className={`flex-1 py-5 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-xl transition-all flex items-center justify-center gap-3 ${modalMode === 'CREATE' ? 'bg-indigo-600' : 'bg-amber-600'}`}>
-                    {actionLoading ? <Loader2 className="animate-spin" size={18} /> : <>{modalMode === 'CREATE' ? 'SCELLER LE PRODUIT' : 'ENREGISTRER'} <ArrowRight size={18}/></>}
+                  <button type="submit" disabled={actionLoading || isUploading} className={`flex-1 py-5 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-xl transition-all flex items-center justify-center gap-3 ${modalMode === 'CREATE' ? 'bg-indigo-600' : 'bg-amber-600'}`}> 
+                    {actionLoading ? <Loader2 className="animate-spin" size={18} /> : <>{modalMode === 'CREATE' ? 'SCELLER LES PRODUITS' : 'ENREGISTRER'} <ArrowRight size={18}/></>}
                   </button>
                 </div>
              </form>

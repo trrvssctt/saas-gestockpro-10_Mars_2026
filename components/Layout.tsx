@@ -5,7 +5,7 @@ import {
   Users as UsersIcon, Settings as SettingsIcon, Activity,
   CreditCard, ShieldCheck, Terminal, ShieldHalf, Loader2,
   Layers, GitMerge, Wallet, History, TrendingDown, Sparkles,
-  AlertTriangle, Clock, Calendar, Menu
+  AlertTriangle, Clock, Calendar, Menu, LifeBuoy, Bell
 } from 'lucide-react';
 import { User, UserRole } from '../types';
 import { authBridge } from '../services/authBridge';
@@ -42,7 +42,14 @@ const Layout: React.FC<LayoutProps> = ({
   const [hoveredMenuId, setHoveredMenuId] = useState<string | null>(null);
   const [rhOpen, setRhOpen] = useState<boolean>(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(true);
-  
+  const [unreadNotifications, setUnreadNotifications] = useState(0);
+  const [pointageStatus, setPointageStatus] = useState<{
+    clockIn: boolean;
+    clockOut: boolean;
+    overtimeMinutes: number;
+    lateMinutes: number;
+  } | null>(null);
+
   // Hook pour vérifier le statut d'absence de l'employé connecté
   const { absenceStatus, loading: absenceLoading } = useCurrentEmployeeAbsenceStatus();
 
@@ -56,13 +63,16 @@ const Layout: React.FC<LayoutProps> = ({
     { id: 'movements', label: 'Mouvements Flux', icon: History },
     { id: 'inventorycampaigns', label: 'Inventaire', icon: Package },
     { id: 'rh', label: 'Ressources Humaines', icon: UsersIcon },
+    { id: 'employee-pointage', label: 'Mon Pointage', icon: Clock },
     { id: 'my-leaves', label: 'Mes Congés', icon: Activity },
     { id: 'customers', label: 'Clients', icon: UsersIcon },
     { id: 'sales', label: 'Ventes & Factures', icon: FileText },
     { id: 'recovery', label: 'Recouvrement', icon: TrendingDown },
     { id: 'payments', label: 'Trésorerie', icon: Wallet },
     { id: 'governance', label: 'Gouvernance IAM', icon: ShieldHalf },
+    { id: 'info', label: 'Notifications', icon: Bell },
     { id: 'subscription', label: 'Abonnement', icon: CreditCard },
+    { id: 'support', label: 'Support', icon: LifeBuoy },
     { id: 'security', label: 'Cyber-Sécurité', icon: ShieldAlert },
     { id: 'audit', label: 'Journal d\'Audit', icon: Activity },
     { id: 'settings', label: 'Paramétrage', icon: SettingsIcon }
@@ -170,11 +180,75 @@ const Layout: React.FC<LayoutProps> = ({
     };
   }, []);
 
+  // Fetch unread notifications count (system announcements + tenant notifications)
+  useEffect(() => {
+    const fetchCount = async () => {
+      try {
+        const { apiClient } = await import('../services/api');
+        // System announcements (read tracked in localStorage)
+        const announcements = await apiClient.get('/announcements');
+        const readIds: string[] = JSON.parse(localStorage.getItem('gsp_read_announcements') || '[]');
+        const systemUnread = Array.isArray(announcements)
+          ? announcements.filter((a: any) => !readIds.includes(a.id)).length
+          : 0;
+        // Tenant notifications (read tracked server-side)
+        let tenantUnread = 0;
+        try {
+          const countData = await apiClient.get('/hr/notifications/unread-count');
+          tenantUnread = (countData as any)?.count ?? 0;
+        } catch { /* not available for all roles */ }
+
+        setUnreadNotifications(systemUnread + tenantUnread);
+      } catch { /* silent */ }
+    };
+    fetchCount();
+    // Re-run when Info.tsx marks system announcements as read
+    const onStorage = () => { fetchCount(); };
+    window.addEventListener('storage', onStorage);
+    // Re-run periodically to pick up new tenant notifications (every 60s)
+    const interval = setInterval(fetchCount, 60000);
+    return () => {
+      window.removeEventListener('storage', onStorage);
+      clearInterval(interval);
+    };
+  }, []);
+
   const roles = Array.isArray(user.roles) ? user.roles : [user.role];
-  const tenantStatus = (user as any)?.tenant?.paymentStatus;
-  const isTenantOk = !tenantStatus || tenantStatus === 'UP_TO_DATE' || tenantStatus === 'TRIAL';
-  const isTenantLate = !isTenantOk;
   const isAdminOrSuper = roles.includes(UserRole.ADMIN) || roles.includes(UserRole.SUPER_ADMIN);
+  const isEmployee = roles.some((r: UserRole) => r === UserRole.EMPLOYEE);
+
+  // Fetch du statut de pointage pour les employés (toutes les 2 minutes)
+  useEffect(() => {
+    if (!isEmployee) return;
+    const fetchPointage = async () => {
+      try {
+        const { apiClient } = await import('../services/api');
+        const res = await apiClient.get('/hr/attendance/my/today');
+        const att = res?.attendance;
+        setPointageStatus({
+          clockIn:         !!att?.clockIn,
+          clockOut:        !!att?.clockOut,
+          overtimeMinutes: att?.overtimeMinutes || 0,
+          lateMinutes:     att?.meta?.lateMinutes || 0,
+        });
+      } catch { /* silencieux si pas encore d'employé lié */ }
+    };
+    fetchPointage();
+    const id = setInterval(fetchPointage, 120_000);
+    return () => clearInterval(id);
+  }, [isEmployee]);
+
+  // Même logique que App.tsx : 'PENDING' = nouveau compte → pas bloqué.
+  // Seuls les états explicitement "expiré" déclenchent la restriction.
+  const tenantStatus   = (user as any)?.tenant?.paymentStatus;
+  const subStatus      = (user as any)?.subscription?.status;
+  const subNextBilling = (user as any)?.subscription?.nextBillingDate;
+
+  const isTenantLate = !!(
+    tenantStatus === 'REJECTED' ||
+    subStatus === 'EXPIRED' ||
+    (subStatus === 'ACTIVE' && subNextBilling && new Date(subNextBilling) < new Date())
+  );
 
   // Enrichit le user avec planId résolu depuis toutes les sources disponibles
   const enrichedUser = (() => {
@@ -235,24 +309,39 @@ const Layout: React.FC<LayoutProps> = ({
           {allMenuItems.filter(item => {
             // Accès de base via authBridge
             const hasBaseAccess = authBridge.canAccess(enrichedUser, item.id);
-            
+
+            // Quand l'abonnement est expiré, seul l'admin peut voir dashboard + subscription
+            if (isTenantLate && isAdminOrSuper && !['dashboard', 'subscription'].includes(item.id)) {
+              return false;
+            }
+
             // Restriction spéciale pour RH : seuls les admins y ont accès
             if (item.id === 'rh') {
               return hasBaseAccess && isAdminOrSuper;
             }
-            
+
+            // Menu "Mon Pointage" : pour tous les rôles non-admin, plan ENTERPRISE uniquement
+            if (item.id === 'employee-pointage') {
+              const canAccess = roles.some((r: UserRole) =>
+                [UserRole.EMPLOYEE, UserRole.STOCK_MANAGER, UserRole.SALES, UserRole.ACCOUNTANT, UserRole.HR_MANAGER].includes(r)
+              );
+              const planId = String((enrichedUser as any)?.planId || '').toUpperCase();
+              const isEnterprisePlan = planId.includes('ENTERPRISE');
+              return canAccess && !isAdminOrSuper && isEnterprisePlan;
+            }
+
             // Menu "Mes Congés" : pour tous les employés (gestionnaires, comptables, commerciaux, etc.) sauf admins, uniquement pour les plans ENTERPRISE
             if (item.id === 'my-leaves') {
-              const canAccessLeaves = roles.some(role => 
+              const canAccessLeaves = roles.some(role =>
                 [UserRole.EMPLOYEE, UserRole.STOCK_MANAGER, UserRole.SALES, UserRole.ACCOUNTANT, UserRole.HR_MANAGER].includes(role)
               );
               // Vérifier que le plan est ENTERPRISE/ENTERPRISE CLOUD
               const planId = String((enrichedUser as any)?.planId || '').toUpperCase();
               const isEnterprisePlan = planId.includes('ENTERPRISE');
-              
+
               return canAccessLeaves && !isAdminOrSuper && isEnterprisePlan;
             }
-            
+
             return hasBaseAccess;
           }).map((item) => {
 
@@ -273,17 +362,43 @@ const Layout: React.FC<LayoutProps> = ({
                 onClick={() => { setActiveTab(item.id); setIsMobileMenuOpen(false); }}
                 onMouseEnter={() => setHoveredMenuId(item.id)}
                 onMouseLeave={() => setHoveredMenuId(null)}
-                className={`w-full flex items-center ${sidebarCollapsed ? 'justify-center px-2 py-3' : 'gap-3 px-4 py-3'} rounded-xl transition-all duration-200 group`}
+                className={`w-full flex items-center ${sidebarCollapsed ? 'justify-center px-2 py-3' : 'gap-3 px-4 py-3'} rounded-xl transition-all duration-200 group relative`}
                 style={!isSuperAdminMode ? { ...bgStyle, color: itemTextColor } : undefined}
                 title={sidebarCollapsed ? item.label : undefined}
               >
-                <item.icon 
-                  size={sidebarCollapsed ? 18 : 20} 
-                  style={{ color: isActive ? '#ffffff' : hexToRgba(itemTextColor, 0.9) }} 
-                  className="flex-shrink-0 transition-all duration-200" 
-                />
+                <div className="relative flex-shrink-0">
+                  <item.icon
+                    size={sidebarCollapsed ? 18 : 20}
+                    style={{ color: isActive ? '#ffffff' : hexToRgba(itemTextColor, 0.9) }}
+                    className="transition-all duration-200"
+                  />
+                  {item.id === 'info' && unreadNotifications > 0 && (
+                    <span className="absolute -top-1 -right-1 w-2 h-2 bg-rose-500 rounded-full" />
+                  )}
+                  {/* Point de statut pointage sur l'icône Mon Pointage */}
+                  {item.id === 'employee-pointage' && pointageStatus && (
+                    <span className={`absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full border border-white ${
+                      pointageStatus.clockOut ? 'bg-emerald-500'
+                      : pointageStatus.clockIn ? 'bg-indigo-400 animate-pulse'
+                      : 'bg-rose-500 animate-pulse'
+                    }`} />
+                  )}
+                </div>
                 {!sidebarCollapsed && (
-                  <span className="font-bold text-[10px] uppercase tracking-widest whitespace-nowrap transition-all duration-300" style={{ color: isActive ? '#ffffff' : itemTextColor }}>{item.label}</span>
+                  <span className="font-bold text-[10px] uppercase tracking-widest whitespace-nowrap transition-all duration-300 flex-1" style={{ color: isActive ? '#ffffff' : itemTextColor }}>{item.label}</span>
+                )}
+                {!sidebarCollapsed && item.id === 'info' && unreadNotifications > 0 && (
+                  <span className="ml-auto px-1.5 py-0.5 bg-rose-500 text-white text-[9px] font-black rounded-full">{unreadNotifications}</span>
+                )}
+                {/* Badge statut pointage (sidebar étendue) */}
+                {!sidebarCollapsed && item.id === 'employee-pointage' && pointageStatus && (
+                  <span className={`ml-auto px-1.5 py-0.5 text-white text-[8px] font-black rounded-full ${
+                    pointageStatus.clockOut ? 'bg-emerald-500'
+                    : pointageStatus.clockIn ? 'bg-indigo-500'
+                    : 'bg-rose-500'
+                  }`}>
+                    {pointageStatus.clockOut ? '✓' : pointageStatus.clockIn ? 'En cours' : 'Non pointé'}
+                  </span>
                 )}
               </button>
             );
@@ -382,13 +497,37 @@ const Layout: React.FC<LayoutProps> = ({
         </header>
         <div className="p-4 md:p-8">
           {isTenantLate && isAdminOrSuper && (
-            <div className="mb-6 p-6 rounded-2xl border-2 bg-amber-50 border-amber-200 flex flex-col md:flex-row gap-4 items-start md:items-center">
-              <div>
-                <h4 className="text-sm font-black uppercase tracking-tight text-amber-700">Instance en retard de paiement</h4>
-                <p className="text-xs text-amber-700 font-bold">Seul le tableau de bord est accessible. Régularisez votre abonnement pour rétablir l'accès à tous les modules.</p>
-              </div>
-              <div className="flex items-center gap-3">
-                <button onClick={() => setActiveTab('subscription')} className="px-4 py-2 bg-amber-600 text-white rounded-2xl font-black text-xs uppercase tracking-widest">Régulariser</button>
+            <div className="mb-6 p-6 rounded-2xl border-2 bg-amber-50 border-amber-200">
+              <div className="flex flex-col gap-4">
+                <div className="flex items-start gap-3">
+                  <AlertTriangle size={20} className="text-amber-600 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <h4 className="text-sm font-black uppercase tracking-tight text-amber-700">Abonnement expiré — Accès restreint</h4>
+                    <p className="text-xs text-amber-700 font-bold mt-1">
+                      Seuls le tableau de bord et la page Abonnement sont accessibles. Régularisez votre abonnement pour rétablir l'accès à tous les modules.
+                    </p>
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-3">
+                  <button
+                    onClick={() => setActiveTab('subscription')}
+                    className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-indigo-700 transition-all shadow"
+                  >
+                    <CreditCard size={14} /> Payer par Stripe
+                  </button>
+                  <button
+                    onClick={() => setActiveTab('subscription')}
+                    className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-emerald-700 transition-all shadow"
+                  >
+                    <Wallet size={14} /> Payer Mobile Money
+                  </button>
+                  <button
+                    onClick={() => setActiveTab('subscription')}
+                    className="flex items-center gap-2 px-4 py-2 bg-amber-600 text-white rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-amber-700 transition-all"
+                  >
+                    Voir l'abonnement
+                  </button>
+                </div>
               </div>
             </div>
           )}

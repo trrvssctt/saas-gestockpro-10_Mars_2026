@@ -20,6 +20,7 @@ import {
   AlertCircle, ChevronDown,
 } from 'lucide-react';
 import { getAIResponse, AIChatResponse, cleanProfessionalText, fetchChatHistory } from '../services/geminiService';
+import { apiClient } from '../services/api';
 import { UserRole } from '../types';
 import DocumentPreview from './DocumentPreview';
 import {
@@ -30,6 +31,123 @@ import {
   PieChart, Pie, Cell, Legend,
   ComposedChart, Line,
 } from 'recharts';
+
+// ─────────────────────────────────────────────
+// ThinkingBubble — animation pendant le chargement IA
+// ─────────────────────────────────────────────
+
+const THINKING_PHRASES = [
+  { text: "Un instant…",                    sub: "Je consulte vos données" },
+  { text: "Je réfléchis…",                  sub: "Analyse en cours" },
+  { text: "J'analyse vos chiffres…",        sub: "Croisement des indicateurs" },
+  { text: "Ça arrive…",                     sub: "Encore quelques secondes" },
+  { text: "Je prépare votre réponse…",      sub: "Mise en forme finale" },
+  { text: "Je croise les données…",         sub: "Calculs statistiques" },
+  { text: "Presque prêt…",                  sub: "Dernière vérification" },
+  { text: "Je consulte votre base…",        sub: "Requête en cours" },
+  { text: "Analyse approfondie…",           sub: "Traitement des résultats" },
+  { text: "Je génère votre rapport…",       sub: "Mise en page du document" },
+];
+
+const ThinkingBubble = memo(() => {
+  const [phraseIdx, setPhraseIdx]   = useState(0);
+  const [visible,   setVisible]     = useState(true);
+  const [barWidth,  setBarWidth]    = useState(15);
+
+  // Cycle des phrases avec fondu
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setVisible(false);
+      setTimeout(() => {
+        setPhraseIdx(i => (i + 1) % THINKING_PHRASES.length);
+        setVisible(true);
+      }, 350);
+    }, 2800);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Barre de progression simulée (monte lentement, jamais 100 %)
+  useEffect(() => {
+    setBarWidth(15);
+    const timer = setInterval(() => {
+      setBarWidth(w => {
+        if (w >= 88) return 88;
+        return w + Math.random() * 4;
+      });
+    }, 600);
+    return () => clearInterval(timer);
+  }, []);
+
+  const { text, sub } = THINKING_PHRASES[phraseIdx];
+
+  return (
+    <div className="flex items-end gap-2 justify-start" role="status" aria-live="polite" aria-label="L'assistant réfléchit">
+      {/* Avatar pulsant */}
+      <div className="relative flex-shrink-0 mb-1">
+        <div className="absolute inset-0 rounded-xl bg-indigo-500 opacity-30 animate-ping" />
+        <div className="relative w-8 h-8 bg-gradient-to-br from-indigo-500 to-violet-600 rounded-xl flex items-center justify-center shadow-md">
+          <Bot size={15} className="text-white" />
+        </div>
+      </div>
+
+      {/* Bulle */}
+      <div className="max-w-[240px] px-4 py-3 bg-white rounded-3xl rounded-bl-lg border border-slate-200 shadow-sm overflow-hidden">
+
+        {/* Phrase cyclique */}
+        <p
+          className="text-[12px] font-700 text-slate-800 leading-snug transition-all duration-300"
+          style={{ opacity: visible ? 1 : 0, transform: visible ? 'translateY(0)' : 'translateY(4px)' }}
+        >
+          {text}
+        </p>
+        <p
+          className="text-[10px] text-slate-400 font-medium mt-0.5 transition-all duration-300"
+          style={{ opacity: visible ? 1 : 0 }}
+        >
+          {sub}
+        </p>
+
+        {/* Barre de progression */}
+        <div className="mt-2.5 h-1 bg-slate-100 rounded-full overflow-hidden">
+          <div
+            className="h-full bg-gradient-to-r from-indigo-400 via-violet-500 to-indigo-400 rounded-full transition-all duration-700 ease-out"
+            style={{
+              width: `${barWidth}%`,
+              backgroundSize: '200% 100%',
+              animation: 'shimmer 1.8s linear infinite',
+            }}
+          />
+        </div>
+
+        {/* Dots */}
+        <div className="flex gap-1 mt-2.5 justify-center">
+          {[0, 200, 400].map(delay => (
+            <span
+              key={delay}
+              className="w-1.5 h-1.5 rounded-full bg-indigo-400"
+              style={{
+                animation: `thinking-dot 1.2s ease-in-out ${delay}ms infinite`,
+              }}
+            />
+          ))}
+        </div>
+      </div>
+
+      {/* CSS injecté une seule fois */}
+      <style>{`
+        @keyframes thinking-dot {
+          0%, 80%, 100% { transform: scale(0.7); opacity: 0.4; }
+          40%            { transform: scale(1.2); opacity: 1;   }
+        }
+        @keyframes shimmer {
+          0%   { background-position: 200% center; }
+          100% { background-position: -200% center; }
+        }
+      `}</style>
+    </div>
+  );
+});
+ThinkingBubble.displayName = 'ThinkingBubble';
 
 // ─────────────────────────────────────────────
 // Types
@@ -45,6 +163,7 @@ type MessageFormat =
   // Documents
   | 'document_invoice' | 'document_delivery' | 'document_payslip' | 'document_report'
   | 'document_html'   // Format généré par le nœud "Generate Document HTML" n8n
+  | 'prediction' | 'trend'  // Régression linéaire + prévision (Phase 3)
   | 'error' | 'empty';
 
 interface Message {
@@ -54,6 +173,11 @@ interface Message {
   rawResults?: any[];
   downloadUrl?: string;
   documentHtml?: string;
+  // Génération en masse
+  isMultiDoc?: boolean;
+  documentArray?: Array<{ html: string; title: string; filename: string }>;
+  documentCount?: number;
+  createZip?: boolean;
   // Données structurées pour DocumentPreview React (persistance rechargement)
   documentData?: {
     type: 'FACTURE' | 'RECU' | 'BON_SORTIE' | 'SUBSCRIPTION_INVOICE';
@@ -100,7 +224,7 @@ interface ChartMeta {
 // ─────────────────────────────────────────────
 
 /** Palette harmonieuse, accessible (WCAG AA), personnalisable via meta.colors */
-const CHART_COLORS = ['#6366f1', '#22d3ee', '#f59e0b', '#10b981', '#f43f5e', '#a78bfa', '#34d399'];
+const CHART_COLORS = ['#818cf8', '#06b6d4', '#fbbf24', '#34d399', '#f87171', '#a78bfa', '#4ade80', '#fb923c', '#60a5fa', '#f472b6'];
 
 const SAMPLE_QUESTIONS = [
   'Top 5 produits vendus ce mois-ci',
@@ -435,18 +559,23 @@ interface VisualBlockProps {
   msg: Message;
   chartRef: (el: HTMLDivElement | null) => void;
   exportKey: string;
+  isFullscreen?: boolean;
 }
 
-const VisualBlock = memo(({ msg, chartRef, exportKey }: VisualBlockProps) => {
+const VisualBlock = memo(({ msg, chartRef, exportKey, isFullscreen = false }: VisualBlockProps) => {
   const { format, rawResults, downloadUrl } = msg;
+  // Ref pour l'impression du document au rechargement (docHtml absent en DB)
+  const docPreviewRef = React.useRef<HTMLDivElement>(null);
 
   // ── Guard : sort SAUF pour les formats document ────────────────────────
   // Les documents (document_html, document_invoice, etc.) peuvent ne pas avoir
   // de rawResults mais avoir documentData → il ne faut pas les bloquer ici.
+  // isMultiDocFlag aussi : documentArray présent ou placeholder rechargement.
   const isDocFormat = format === 'document_html'
     || ['document_invoice','document_delivery','document_payslip','document_report'].includes(format);
+  const isMultiDocFlag = !!(msg.isMultiDoc ?? msg.metadata?.isMultiDoc);
 
-  if (!rawResults?.length && !isDocFormat) return null;
+  if (!rawResults?.length && !isDocFormat && !isMultiDocFlag) return null;
 
   // ── TABLE ──────────────────────────────────
   if (format === 'table') {
@@ -494,6 +623,7 @@ const VisualBlock = memo(({ msg, chartRef, exportKey }: VisualBlockProps) => {
   const ALL_CHART_FORMATS: MessageFormat[] = [
     'chart', 'bar_chart', 'histogram', 'donut_chart', 'multi_chart', 'heatmap',
     'advanced_chart', 'advancedchart', 'chart_advanced',
+    'prediction', 'trend',
   ];
   if ((ALL_CHART_FORMATS as string[]).includes(format)) {
     // chart_config provient de metadata.chart_config (workflow v2) ou directement de metadata
@@ -546,12 +676,13 @@ const VisualBlock = memo(({ msg, chartRef, exportKey }: VisualBlockProps) => {
       return out;
     });
 
-    // Hauteur adaptive : plus de données = plus de place
+    // Hauteur adaptive : fullscreen = plus grand, mobile = adaptatif
+    const baseH = isFullscreen ? 460 : 340;
     const containerH = isHorizontal
-      ? Math.max(220, cleanedData.length * 36 + 60)
+      ? Math.max(isFullscreen ? 340 : 260, cleanedData.length * (isFullscreen ? 54 : 40) + 80)
       : isHistogram
-        ? Math.max(260, cleanedData.length * 30 + 60)
-        : 240;
+        ? Math.max(isFullscreen ? 420 : 320, cleanedData.length * 32 + 80)
+        : baseH;
 
     // Formatter axe des valeurs
     const fmtValue = (v: number) =>
@@ -579,28 +710,44 @@ const VisualBlock = memo(({ msg, chartRef, exportKey }: VisualBlockProps) => {
     return (
       <div
         ref={chartRef}
-        className="mt-3 p-3 bg-slate-900 rounded-2xl border border-slate-800 relative overflow-hidden"
-        style={{ height: containerH }}
+        className="mt-3 rounded-2xl relative overflow-hidden"
+        style={{
+          height: containerH,
+          background: 'linear-gradient(145deg,#0f172a 0%,#1e1b4b 55%,#0c1a3a 100%)',
+          border: '1px solid rgba(99,102,241,0.22)',
+          boxShadow: '0 8px 40px rgba(99,102,241,0.14),0 2px 8px rgba(0,0,0,0.35)',
+        }}
         aria-label="Graphique d'analyse"
       >
+        {/* Fond décoratif radial */}
+        <div style={{ position:'absolute',inset:0,opacity:0.05,backgroundImage:'radial-gradient(circle at 15% 25%,#6366f1,transparent 50%),radial-gradient(circle at 85% 75%,#06b6d4,transparent 50%)',pointerEvents:'none' }} />
+
         {/* ── Header ── */}
-        <div className="flex items-center justify-between mb-2 flex-shrink-0">
-          <p className="text-[8px] font-black text-indigo-400 uppercase tracking-widest flex items-center gap-1">
-            <BarChart3 size={9} />
-            {format === 'histogram'   ? 'Distribution / Histogramme'
-              : format === 'bar_chart'  ? 'Graphique Barres'
-              : format === 'donut_chart' ? 'Répartition'
-              : format === 'multi_chart' ? 'Multi-Séries'
-              : 'Analyse Graphique'}
+        <div className="flex items-center justify-between px-4 pt-3 pb-1 flex-shrink-0 relative z-10">
+          <p className="text-[9px] font-black uppercase tracking-widest flex items-center gap-1.5" style={{ color:'#818cf8' }}>
+            <BarChart3 size={10} />
+            <span>
+              {format === 'histogram' ? 'Distribution'
+                : format === 'bar_chart'   ? 'Barres'
+                : format === 'donut_chart' ? 'Répartition'
+                : format === 'multi_chart' ? 'Multi-Séries'
+                : (format === 'prediction' || format === 'trend') ? 'Tendance & Prévision'
+                : 'Analytique'}
+            </span>
+            {msg.metadata?.title && (
+              <span style={{ color:'#64748b',fontWeight:600,textTransform:'none',letterSpacing:0,marginLeft:4 }}>
+                — {msg.metadata.title}
+              </span>
+            )}
           </p>
-          <div className="flex gap-1">
+          <div className="flex gap-1.5">
             <ExportButton dark label="CSV"  icon={<Download size={10} />} onClick={() => exportCSV(rawResults,  `chart-${exportKey}.csv`)} />
             <ExportButton dark label="XLSX" icon={<TableIcon size={10} />} onClick={() => exportXLSX(rawResults, `chart-${exportKey}.xlsx`)} />
           </div>
         </div>
 
         {/* ── Recharts ── */}
-        <div style={{ width: '100%', height: containerH - 44 }}>
+        <div style={{ width:'100%', height: containerH - 52, paddingLeft:4, paddingRight:4 }}>
           <ResponsiveContainer width="100%" height="100%">
 
             {/* ── HISTOGRAMME — BarChart sans gap avec ligne de tendance optionnelle ── */}
@@ -863,20 +1010,29 @@ const VisualBlock = memo(({ msg, chartRef, exportKey }: VisualBlockProps) => {
       }
     }
 
+    const STAT_GRADIENTS = [
+      { bg:'linear-gradient(135deg,#1e1b4b,#312e81)', border:'rgba(99,102,241,0.45)',  barA:'#6366f1', barB:'#818cf8', lbl:'#818cf8', val:'#e0e7ff' },
+      { bg:'linear-gradient(135deg,#0c4a6e,#075985)', border:'rgba(6,182,212,0.45)',   barA:'#0891b2', barB:'#22d3ee', lbl:'#22d3ee', val:'#e0f2fe' },
+      { bg:'linear-gradient(135deg,#064e3b,#065f46)', border:'rgba(16,185,129,0.45)',  barA:'#059669', barB:'#34d399', lbl:'#34d399', val:'#d1fae5' },
+      { bg:'linear-gradient(135deg,#451a03,#78350f)', border:'rgba(251,191,36,0.45)',  barA:'#d97706', barB:'#fbbf24', lbl:'#fbbf24', val:'#fef3c7' },
+      { bg:'linear-gradient(135deg,#4a044e,#6b21a8)', border:'rgba(168,85,247,0.45)', barA:'#9333ea', barB:'#a78bfa', lbl:'#a78bfa', val:'#f3e8ff' },
+      { bg:'linear-gradient(135deg,#450a0a,#7f1d1d)', border:'rgba(248,113,113,0.45)',barA:'#e11d48', barB:'#f87171', lbl:'#f87171', val:'#ffe4e6' },
+    ];
     return (
-      <div className="mt-3 grid grid-cols-2 gap-2.5">
+      <div className={`mt-3 grid gap-3 ${items.length <= 2 ? 'grid-cols-2' : 'grid-cols-2'}`}>
         {items.map((it, idx) => {
           const numVal = typeof it.value === 'number' ? it.value : Number(String(it.value).replace(/[^0-9.-]+/g, ''));
           const isNum = !Number.isNaN(numVal);
+          const g = STAT_GRADIENTS[idx % STAT_GRADIENTS.length];
           return (
-            <div key={idx} className="p-3 bg-gradient-to-br from-indigo-50 to-violet-50 border border-indigo-100 rounded-xl">
-              <div className="text-[8px] font-black text-indigo-400 uppercase tracking-widest mb-1">{it.label}</div>
-              <div className="text-base font-extrabold text-indigo-900">{formatStatValue(it.value)}</div>
+            <div key={idx} className="p-4 rounded-xl relative overflow-hidden" style={{ background:g.bg, border:`1px solid ${g.border}`, boxShadow:`0 4px 20px ${g.border.replace('0.45','0.2')}` }}>
+              <div style={{ fontSize:8, fontWeight:900, color:g.lbl, textTransform:'uppercase', letterSpacing:'0.12em', marginBottom:8 }}>{it.label}</div>
+              <div style={{ fontSize:20, fontWeight:900, color:g.val, letterSpacing:'-0.5px', lineHeight:1.1 }}>{formatStatValue(it.value)}</div>
               {isNum && (
-                <div className="mt-1.5 h-1.5 w-full rounded-full bg-indigo-100 overflow-hidden">
+                <div className="mt-2.5 h-1 w-full rounded-full overflow-hidden" style={{ background:'rgba(255,255,255,0.1)' }}>
                   <div
-                    className="h-full bg-gradient-to-r from-indigo-400 to-violet-500 rounded-full transition-all duration-700"
-                    style={{ width: `${Math.min(100, Math.abs(numVal))}%` }}
+                    className="h-full rounded-full transition-all duration-700"
+                    style={{ width:`${Math.min(100, isFinite(numVal) ? Math.abs(numVal) > 100 ? 75 : Math.abs(numVal) : 50)}%`, background:`linear-gradient(90deg,${g.barA},${g.barB})` }}
                   />
                 </div>
               )}
@@ -915,6 +1071,109 @@ const VisualBlock = memo(({ msg, chartRef, exportKey }: VisualBlockProps) => {
     );
   }
 
+  // ── MULTI-DOCUMENTS (fiches de paie en masse, etc.) ──────────────────
+  const docArray = msg.documentArray as Array<{ html: string; title: string; filename: string }> | undefined;
+
+  // Rechargement : documentArray n'est pas persisté en DB → placeholder
+  if (isMultiDocFlag && !docArray?.length) {
+    const storedCount = msg.documentCount ?? msg.metadata?.documentCount ?? '';
+    return (
+      <div className="mt-2 flex items-center gap-2 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-[10px] text-slate-500">
+        <span className="text-base">📁</span>
+        <span>
+          <strong className="text-slate-700">{storedCount ? `${storedCount} documents` : 'Documents groupés'}</strong>
+          {' '}— aperçu non disponible après rechargement.{' '}
+          <span className="text-slate-400">Relancez la même requête pour les régénérer.</span>
+        </span>
+      </div>
+    );
+  }
+
+  if (isMultiDocFlag && docArray?.length) {
+    const total = docArray.length;
+    const needsZip = (msg as any).createZip || total > 5;
+
+    const downloadOne = (doc: { html: string; filename: string }) => {
+      const blob = new Blob([doc.html], { type: 'text/html;charset=utf-8' });
+      downloadBlob(blob, doc.filename);
+    };
+
+    const printOne = (doc: { html: string; title: string }) => {
+      const win = window.open('', '_blank');
+      if (!win) return;
+      win.document.write(doc.html);
+      win.document.close();
+      win.focus();
+      setTimeout(() => win.print(), 500);
+    };
+
+    const downloadAllZip = async () => {
+      try {
+        const zipName = `documents_${new Date().toLocaleDateString('fr-FR').replace(/\//g, '-')}`;
+        const { blob, filename } = await apiClient.requestBlob('/ai/export-zip', {
+          method: 'POST',
+          body: JSON.stringify({
+            documents: docArray.map(d => ({ html: d.html, filename: d.filename })),
+            zipName,
+          }),
+        });
+        downloadBlob(blob, filename || `${zipName}.zip`);
+      } catch (err: any) {
+        alert(`Impossible de créer le ZIP : ${err?.message ?? 'erreur inconnue'}. Téléchargez les fichiers individuellement.`);
+      }
+    };
+
+    return (
+      <div className="mt-3 rounded-2xl overflow-hidden border border-slate-200 shadow-sm">
+        {/* Header */}
+        <div className="flex items-center justify-between px-3 py-2 bg-slate-800">
+          <div className="flex items-center gap-2">
+            <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">
+              📁 {total} document{total > 1 ? 's' : ''}
+            </span>
+          </div>
+          {needsZip && (
+            <button
+              onClick={downloadAllZip}
+              className="inline-flex items-center gap-1 px-3 py-1 bg-indigo-600 text-white text-[9px] font-bold rounded-lg hover:bg-indigo-500 transition"
+            >
+              <Download size={10} /> Tout télécharger (.zip)
+            </button>
+          )}
+        </div>
+        {/* Liste des documents */}
+        <div className="divide-y divide-slate-100 bg-white max-h-72 overflow-y-auto">
+          {docArray.map((doc, i) => (
+            <div key={i} className="flex items-center justify-between px-3 py-2 hover:bg-slate-50">
+              <span className="text-[11px] font-semibold text-slate-700 truncate max-w-[55%]">
+                📄 {doc.title}
+              </span>
+              <div className="flex gap-1.5 shrink-0">
+                <button
+                  onClick={() => printOne(doc)}
+                  className="inline-flex items-center gap-1 px-2 py-1 bg-indigo-50 text-indigo-700 text-[9px] font-bold rounded-lg hover:bg-indigo-100 transition"
+                >
+                  🖨️ PDF
+                </button>
+                <button
+                  onClick={() => downloadOne(doc)}
+                  className="inline-flex items-center gap-1 px-2 py-1 bg-slate-100 text-slate-600 text-[9px] font-bold rounded-lg hover:bg-slate-200 transition"
+                >
+                  <Download size={9} /> HTML
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+        {needsZip && (
+          <div className="px-3 py-1.5 bg-slate-50 border-t border-slate-100 text-[8px] text-slate-400">
+            💡 Plus de 5 documents — utilisez <strong>Tout télécharger</strong> pour obtenir un dossier ZIP.
+          </div>
+        )}
+      </div>
+    );
+  }
+
   // ── DOCUMENT HTML (facture, bon de livraison, rapport…) ──────────────
   if (format === 'document_html' || ['document_invoice','document_delivery','document_payslip','document_report'].includes(format)) {
     const docTitle: string = msg.metadata?.title ?? msg.metadata?.document_type ?? 'Document';
@@ -925,22 +1184,40 @@ const VisualBlock = memo(({ msg, chartRef, exportKey }: VisualBlockProps) => {
     // Priorité : champ direct > metadata.documentData (rechargement historique)
     const docData = (msg as any).documentData ?? msg.metadata?.documentData;
 
-    // ── Impression PDF via le HTML brut ──────────────────────────────────
+    // ── Impression PDF (HTML brut si dispo, sinon innerHTML du DocumentPreview rendu) ──
     const printDoc = () => {
-      if (!docHtml) return;
-      const win = window.open('', '_blank');
-      if (!win) return;
-      win.document.write(docHtml);
-      win.document.close();
-      win.focus();
-      setTimeout(() => win.print(), 500);
+      if (docHtml) {
+        const win = window.open('', '_blank');
+        if (!win) return;
+        win.document.write(docHtml);
+        win.document.close();
+        win.focus();
+        setTimeout(() => win.print(), 500);
+        return;
+      }
+      // Rechargement : docHtml absent en DB mais DocumentPreview est rendu → on l'imprime
+      if (docPreviewRef.current) {
+        const styles = Array.from(document.styleSheets)
+          .map(s => { try { return Array.from(s.cssRules).map((r: any) => r.cssText).join('\n'); } catch { return ''; } })
+          .join('\n');
+        const inner = docPreviewRef.current.innerHTML;
+        const win = window.open('', '_blank');
+        if (!win) return;
+        win.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><style>${styles}\n*{-webkit-print-color-adjust:exact;print-color-adjust:exact}body{background:#fff;margin:0;padding:0}[style*="scale"]{transform:none!important;width:100%!important}</style></head><body>${inner}</body></html>`);
+        win.document.close();
+        win.focus();
+        setTimeout(() => win.print(), 800);
+      }
     };
 
     // ── Téléchargement HTML ───────────────────────────────────────────────
     const downloadDoc = () => {
-      if (!docHtml) return;
-      const blob = new Blob([docHtml], { type: 'text/html;charset=utf-8' });
-      downloadBlob(blob, `${docTitle.replace(/\s+/g, '_')}_${refNum || exportKey}.html`);
+      if (docHtml) {
+        const blob = new Blob([docHtml], { type: 'text/html;charset=utf-8' });
+        downloadBlob(blob, `${docTitle.replace(/\s+/g, '_')}_${refNum || exportKey}.html`);
+        return;
+      }
+      printDoc(); // Fallback au rechargement : impression = meilleure option
     };
 
     // ── Cas 1 : DocumentPreview React disponible (données structurées) ────
@@ -961,15 +1238,14 @@ const VisualBlock = memo(({ msg, chartRef, exportKey }: VisualBlockProps) => {
               )}
             </div>
             <div className="flex gap-1.5">
-              {docHtml && (
-                <button
-                  onClick={printDoc}
-                  aria-label="Imprimer / Exporter PDF"
-                  className="inline-flex items-center gap-1 px-2.5 py-1 bg-indigo-600 text-white text-[9px] font-bold rounded-lg hover:bg-indigo-500 transition"
-                >
-                  🖨️ PDF
-                </button>
-              )}
+              {/* PDF toujours disponible : depuis docHtml (session active) ou depuis ref (rechargement) */}
+              <button
+                onClick={printDoc}
+                aria-label="Imprimer / Exporter PDF"
+                className="inline-flex items-center gap-1 px-2.5 py-1 bg-indigo-600 text-white text-[9px] font-bold rounded-lg hover:bg-indigo-500 transition"
+              >
+                🖨️ PDF
+              </button>
               {docHtml && (
                 <button
                   onClick={downloadDoc}
@@ -984,8 +1260,9 @@ const VisualBlock = memo(({ msg, chartRef, exportKey }: VisualBlockProps) => {
 
           {/* DocumentPreview natif — même design que l'appli, scroll interne */}
           <div
+            ref={docPreviewRef}
             className="overflow-y-auto bg-slate-100"
-            style={{ maxHeight: 520 }}
+            style={{ maxHeight: isFullscreen ? 700 : 520 }}
           >
             <div style={{ transform: 'scale(0.72)', transformOrigin: 'top center', width: '139%' }}>
               <DocumentPreview
@@ -1034,23 +1311,19 @@ const VisualBlock = memo(({ msg, chartRef, exportKey }: VisualBlockProps) => {
       );
     }
 
-    // ── Cas 3 : Aucune donnée — tableau brut ─────────────────────────────
-    if (rawResults?.length) {
-      const cols = Object.keys(rawResults[0]);
-      return (
-        <div className="mt-3 border border-indigo-100 rounded-xl overflow-hidden">
-          <div className="px-3 py-2 bg-indigo-50 border-b border-indigo-100 text-[10px] font-black text-indigo-600 uppercase">
-            📄 {docTitle}
-          </div>
-          <table className="w-full text-left text-[11px]">
-            <thead className="bg-slate-50"><tr>{cols.map(c => <th key={c} className="px-3 py-1.5 font-black text-[9px] text-slate-400 uppercase">{c}</th>)}</tr></thead>
-            <tbody>{rawResults.map((row, i) => <tr key={i} className="border-t border-slate-50">{cols.map(c => <td key={c} className="px-3 py-1.5">{safeStr(row[c])}</td>)}</tr>)}</tbody>
-          </table>
-        </div>
-      );
-    }
-
-    return null;
+    // ── Cas 3 : Rechargement — HTML non disponible en DB ─────────────────
+    // On n'affiche pas les données brutes pour les documents (confus et illisible).
+    // On affiche une card invitant à régénérer.
+    return (
+      <div className="mt-2 flex items-center gap-2 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-[10px] text-slate-500">
+        <span className="text-base">📄</span>
+        <span>
+          <strong className="text-slate-700">{docTitle}</strong>
+          {' '}— aperçu non disponible après rechargement.{' '}
+          <span className="text-slate-400">Relancez la même requête pour régénérer le document.</span>
+        </span>
+      </div>
+    );
   }
 
   return null;
@@ -1153,9 +1426,10 @@ interface MessageBubbleProps {
   exportKey: string;
   onExportCSV: (data: Record<string, unknown>[], name: string) => void;
   onExportXLSX: (data: Record<string, unknown>[], name: string) => void;
+  isFullscreen?: boolean;
 }
 
-const MessageBubble = memo(({ msg, chartRef, exportKey, onExportCSV, onExportXLSX }: MessageBubbleProps) => {
+const MessageBubble = memo(({ msg, chartRef, exportKey, onExportCSV, onExportXLSX, isFullscreen = false }: MessageBubbleProps) => {
   const isUser = msg.role === 'user';
   const isError = msg.status === 'ERROR';
 
@@ -1242,7 +1516,7 @@ const MessageBubble = memo(({ msg, chartRef, exportKey, onExportCSV, onExportXLS
 
         {/* Bloc visuel — source de vérité pour tableaux, graphiques, stats, documents */}
         {!isUser && (
-          <VisualBlock msg={msg} chartRef={chartRef} exportKey={exportKey} />
+          <VisualBlock msg={msg} chartRef={chartRef} exportKey={exportKey} isFullscreen={isFullscreen} />
         )}
 
         {/* Timestamp */}
@@ -1381,7 +1655,25 @@ const ChatInterface = ({ user }: { user: any }) => {
          * Les anciens enregistrements (avant migration) ont rawResults=null et format='general'.
          * Le mapper gère les deux cas.
          */
-        const mapped: Message[] = data
+        // ── Tri canonique : id entier DB (auto-incrément) ────────────────────
+        // Le workflow n8n insère maintenant le message user EN PREMIER (avant
+        // tout traitement IA), donc le id user < id réponse IA, toujours.
+        // Tiebreakers pour les anciens enregistrements sans id fiable :
+        //   1. created_at ASC   2. user avant IA (même instant)
+        const isUser = (s: string) => s === 'user' || s === 'human';
+        const sortedData = [...data].sort((a: any, b: any) => {
+          const aId = Number(a.id) || 0;
+          const bId = Number(b.id) || 0;
+          if (aId > 0 && bId > 0 && aId !== bId) return aId - bId;
+          const tA = new Date(a.created_at ?? a.createdAt ?? 0).getTime();
+          const tB = new Date(b.created_at ?? b.createdAt ?? 0).getTime();
+          if (tA !== tB) return tA - tB;
+          if (isUser(a.sender) && !isUser(b.sender)) return -1;
+          if (!isUser(a.sender) && isUser(b.sender)) return 1;
+          return 0;
+        });
+
+        const mapped: Message[] = sortedData
           .map((m: any) => {
             const role: 'user' | 'ai' = m.sender === 'user' ? 'user' : 'ai';
             const ts = m.created_at ?? m.createdAt ?? null;
@@ -1446,8 +1738,7 @@ const ChatInterface = ({ user }: { user: any }) => {
               status: 'SUCCESS' as const,
               timestamp: ts ? new Date(ts) : new Date(),
             } satisfies Message;
-          })
-          .sort((a: Message, b: Message) => a.timestamp.getTime() - b.timestamp.getTime());
+          });
 
         setMessages(mapped);
       } catch (err) {
@@ -1473,6 +1764,17 @@ const ChatInterface = ({ user }: { user: any }) => {
     if (!raw || isLoading) return;
 
     const tenantId = user.tenantId ?? 'system-default';
+    // Résolution du planId depuis toutes les sources disponibles sur l'objet user
+    // Résolution planId — priorité : user.planId > subscription.planId > plan.id > tenant > fallback
+    // On utilise || (pas ??) pour ignorer null et '' en plus de undefined
+    const planId: string =
+      (user as any).planId ||
+      (user as any).subscription?.planId ||
+      (user as any).plan?.id ||
+      (user as any).tenant?.plan ||
+      (user as any).tenant?.subscription_plan ||
+      (user as any).tenant?.planId ||
+      'FREE_TRIAL';
     setInput('');
     inputRef.current?.focus();
 
@@ -1487,7 +1789,7 @@ const ChatInterface = ({ user }: { user: any }) => {
 
     setIsLoading(true);
     try {
-      const aiResponse = await getAIResponse(raw, tenantId) as AIChatResponse & Record<string, any>;
+      const aiResponse = await getAIResponse(raw, tenantId, planId) as AIChatResponse & Record<string, any>;
 
       // ── Format : priorité absolue à la valeur du workflow n8n ──
       // parseStructuredFormatted ne sert que si aiResponse.formattedResponse est du JSON brut
@@ -1513,17 +1815,42 @@ const ChatInterface = ({ user }: { user: any }) => {
         downloadUrl: aiResponse.downloadUrl,
         documentHtml: aiResponse.documentHtml,
         documentData: aiResponse.documentData,
+        isMultiDoc: aiResponse.isMultiDoc,
+        documentArray: aiResponse.documentArray,
+        documentCount: aiResponse.documentCount,
+        createZip: aiResponse.createZip,
         resultCount: finalRaw?.length ?? aiResponse.resultCount ?? 0,
         status: aiResponse.status ?? 'SUCCESS',
         mode: aiResponse.mode ?? 'BRIDGE',
         metadata: aiResponse.metadata,
         timestamp: new Date(),
       }]);
-    } catch {
+    } catch (err: any) {
+      // Détecte les erreurs réseau / timeout / HTTP pour afficher un message précis
+      const status   = err?.response?.status ?? err?.status ?? 0;
+      const errData  = err?.response?.data ?? err?.data ?? {};
+      const errCode  = errData?.error ?? '';
+      const errMsg   = errData?.message ?? err?.message ?? '';
+
+      const friendlyMessages: Record<string, string> = {
+        'WebhookNotRegistered': '⚙️ Le workflow IA n\'est pas activé. Contactez votre administrateur.',
+        'WebhookUnavailable':   '🔌 Le service IA est indisponible. Réessayez dans quelques instants.',
+        'BridgeError':          '🌐 Impossible de joindre le service IA. Vérifiez votre connexion.',
+      };
+
+      let displayMsg = '💬 Une erreur est survenue. Veuillez réessayer.';
+      if (friendlyMessages[errCode])         displayMsg = friendlyMessages[errCode];
+      else if (status === 404)               displayMsg = '⚙️ Le workflow IA n\'est pas activé sur n8n.';
+      else if (status === 503)               displayMsg = '🔌 Le service IA est temporairement indisponible.';
+      else if (status === 401 || status === 403) displayMsg = '🔒 Session expirée. Veuillez vous reconnecter.';
+      else if (status >= 500)                displayMsg = '🔧 Erreur serveur. L\'équipe technique a été notifiée.';
+      else if (errMsg.toLowerCase().includes('timeout') || errMsg.toLowerCase().includes('network'))
+                                             displayMsg = '⏱️ Le service IA met trop de temps à répondre. Réessayez.';
+
       setMessages(prev => [...prev, {
         role: 'ai',
-        formattedResponse: 'Une erreur est survenue. Veuillez réessayer.',
-        format: 'general',
+        formattedResponse: displayMsg,
+        format: 'error',
         resultCount: 0,
         status: 'ERROR',
         timestamp: new Date(),
@@ -1633,27 +1960,13 @@ const ChatInterface = ({ user }: { user: any }) => {
               chartRef={el => { chartRefs.current[exportKey] = el; }}
               onExportCSV={exportCSV}
               onExportXLSX={exportXLSX}
+              isFullscreen={isFullscreen}
             />
           );
         })}
 
         {/* Indicateur de chargement IA */}
-        {isLoading && (
-          <div className="flex items-center gap-2 justify-start" aria-live="assertive" role="status">
-            <div className="w-7 h-7 bg-indigo-600 rounded-xl flex items-center justify-center flex-shrink-0">
-              <Bot size={14} className="text-white" />
-            </div>
-            <div className="flex gap-1.5 px-4 py-3 bg-white rounded-3xl rounded-bl-lg border border-slate-200 shadow-sm">
-              {[0, 150, 300].map(delay => (
-                <span
-                  key={delay}
-                  className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-bounce"
-                  style={{ animationDelay: `${delay}ms` }}
-                />
-              ))}
-            </div>
-          </div>
-        )}
+        {isLoading && <ThinkingBubble />}
 
         {/* Bouton "Défiler vers le bas" */}
         <ScrollToBottomButton onClick={scrollToBottom} visible={showScrollBtn} />

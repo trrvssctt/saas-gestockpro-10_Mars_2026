@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { apiClient } from '../services/api';
 import { useToast } from './ToastProvider';
+import YearMonthPicker from './YearMonthPicker';
 
 // ─── Utilitaires ────────────────────────────────────────────────────────────
 const fmtAmount = (n: number) => Number(n || 0).toLocaleString('fr-FR');
@@ -21,7 +22,7 @@ const riskLevel = (amount: number, max: number) => {
 
 // ─── Composant principal ─────────────────────────────────────────────────────
 const Recovery = ({ currency }: { currency: string }) => {
-  const [debtors, setDebtors] = useState<any[]>([]);
+  const [rawSales, setRawSales] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [sortKey, setSortKey] = useState<'amount' | 'name'>('amount');
@@ -31,6 +32,8 @@ const Recovery = ({ currency }: { currency: string }) => {
   const [showRemindersModal, setShowRemindersModal] = useState(false);
   const [selectedDebtors, setSelectedDebtors] = useState<string[]>([]);
   const [perPage, setPerPage] = useState<number | 'ALL'>(25);
+  const [selectedYear, setSelectedYear] = useState<number | null>(null);
+  const [selectedMonth, setSelectedMonth] = useState<number | null>(null);
   const showToast = useToast();
 
   // ── Fetch ────────────────────────────────────────────────────────────────
@@ -38,37 +41,61 @@ const Recovery = ({ currency }: { currency: string }) => {
     setLoading(true);
     try {
       const data = await apiClient.get('/sales');
-      const debtMap: Record<string, any> = {};
-      data.forEach((sale: any) => {
-        if (sale.status === 'EN_COURS' || sale.status === 'TERMINE') {
-          const ttc = parseFloat(sale.totalTtc || sale.total_ttc || 0);
-          const paid = parseFloat(sale.amountPaid || sale.amount_paid || 0);
-          const due = Math.max(0, ttc - paid);
-          const customer = sale.customer;
-          const customerId = sale.customerId || sale.customer_id;
-          if (due > 0 && customer && customerId) {
-            if (!debtMap[customerId]) {
-              debtMap[customerId] = {
-                id: customerId,
-                companyName: customer.companyName || customer.name || '—',
-                email: customer.email || '',
-                phone: customer.phone || '',
-                outstandingBalance: 0,
-                salesCount: 0
-              };
-            }
-            debtMap[customerId].outstandingBalance += due;
-            debtMap[customerId].salesCount += 1;
-          }
-        }
-      });
-      setDebtors(Object.values(debtMap));
+      setRawSales(data);
     } catch {
       showToast('Erreur lors du chargement des créances.', 'error');
     } finally {
       setLoading(false);
     }
   };
+
+  // ── Années disponibles ───────────────────────────────────────────────────
+  const availableYears = useMemo(() => {
+    const years: number[] = rawSales
+      .map((s: any) => new Date(s.createdAt || s.created_at).getFullYear())
+      .filter((y: number) => !isNaN(y));
+    return Array.from(new Set(years)).sort((a: number, b: number) => b - a);
+  }, [rawSales]);
+
+  // ── Débiteurs filtrés par année/mois ─────────────────────────────────────
+  const debtors = useMemo(() => {
+    let sales = rawSales;
+    if (selectedYear !== null) {
+      const ms = selectedMonth !== null ? selectedMonth : 0;
+      const me = selectedMonth !== null ? selectedMonth : 11;
+      const from = new Date(selectedYear, ms, 1);
+      const to = new Date(selectedYear, me + 1, 0, 23, 59, 59);
+      sales = rawSales.filter(s => {
+        const d = new Date(s.createdAt || s.created_at);
+        return d >= from && d <= to;
+      });
+    }
+    const debtMap: Record<string, any> = {};
+    sales.forEach((sale: any) => {
+      if (sale.status === 'EN_COURS' || sale.status === 'TERMINE') {
+        const ttc = parseFloat(sale.totalTtc || sale.total_ttc || 0);
+        const paid = parseFloat(sale.amountPaid || sale.amount_paid || 0);
+        const due = Math.max(0, ttc - paid);
+        const customer = sale.customer;
+        const customerId = sale.customerId || sale.customer_id;
+        if (due > 0 && customer && customerId) {
+          if (!debtMap[customerId]) {
+            debtMap[customerId] = {
+              id: customerId,
+              companyName: customer.companyName || customer.name || '—',
+              email: customer.email || '',
+              phone: customer.phone || '',
+              outstandingBalance: 0,
+              salesCount: 0
+            };
+          }
+          debtMap[customerId].outstandingBalance += due;
+          debtMap[customerId].salesCount += 1;
+        }
+      }
+    });
+    return Object.values(debtMap);
+  }, [rawSales, selectedYear, selectedMonth]);
 
   useEffect(() => { fetchDebtors(); }, []);
 
@@ -212,6 +239,17 @@ const Recovery = ({ currency }: { currency: string }) => {
             </button>
           </div>
         </div>
+      </div>
+
+      {/* ── FILTRE ANNÉE/MOIS ── */}
+      <div className="bg-white p-4 rounded-3xl border border-slate-100 shadow-sm">
+        <YearMonthPicker
+          dataYears={availableYears}
+          selectedYear={selectedYear}
+          selectedMonth={selectedMonth}
+          onYearChange={setSelectedYear}
+          onMonthChange={setSelectedMonth}
+        />
       </div>
 
       {/* ── TABLEAU PRINCIPAL ── */}

@@ -18,9 +18,10 @@ interface LoginProps {
   initialMode?: 'LOGIN' | 'REGISTER' | 'SUPERADMIN' | 'MFA';
   initialPlanId?: string;
   initialRegStep?: number;
+  initialPeriod?: string;
 }
 
-const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBackToLanding, initialMode, initialPlanId, initialRegStep }) => {
+const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBackToLanding, initialMode, initialPlanId, initialRegStep, initialPeriod }) => {
   const [mode, setMode] = useState<'LOGIN' | 'REGISTER' | 'SUPERADMIN' | 'MFA'>('LOGIN');
   const [regStep, setRegStep] = useState(1);
   const [loading, setLoading] = useState(false);
@@ -38,22 +39,81 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBackToLanding, initialM
   const [mfaCode, setMfaCode] = useState('');
   const [tempUserId, setTempUserId] = useState<string | null>(null);
 
-  const [regData, setRegData] = useState({
-    planId: '', companyName: '', siret: '', address: '', phone: '',
-    paymentMethod: 'Orange Money', adminName: '', adminEmail: '', adminPassword: '',
-    primaryColor: '#0f172a', buttonColor: '#63452c'
+  const REG_DRAFT_KEY = 'reg_draft';
+
+  const [regData, setRegData] = useState(() => {
+    // Restaure le brouillon depuis localStorage si disponible
+    try {
+      const saved = localStorage.getItem(REG_DRAFT_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        return {
+          planId: parsed.planId || initialPlanId || '',
+          companyName: parsed.companyName || '',
+          siret: parsed.siret || '',
+          address: parsed.address || '',
+          phone: parsed.phone || '',
+          paymentMethod: parsed.paymentMethod || 'Orange Money',
+          adminName: parsed.adminName || '',
+          adminEmail: parsed.adminEmail || '',
+          adminPassword: '', // Jamais sauvegardé pour sécurité
+          primaryColor: parsed.primaryColor || '#0f172a',
+          buttonColor: parsed.buttonColor || '#63452c',
+          period: parsed.period || initialPeriod || '1M',
+        };
+      }
+    } catch {}
+    return {
+      planId: initialPlanId || '', companyName: '', siret: '', address: '', phone: '',
+      paymentMethod: 'Orange Money', adminName: '', adminEmail: '', adminPassword: '',
+      primaryColor: '#0f172a', buttonColor: '#63452c',
+      period: initialPeriod || '1M'
+    };
   });
+
+  const [hasDraft, setHasDraft] = useState(() => {
+    try {
+      const saved = localStorage.getItem(REG_DRAFT_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        return !!(parsed.companyName || parsed.adminEmail);
+      }
+    } catch {}
+    return false;
+  });
+
+  // Sauvegarde le brouillon à chaque changement (sans le mot de passe)
+  useEffect(() => {
+    if (mode !== 'REGISTER') return;
+    try {
+      const { adminPassword: _pw, ...safeData } = regData;
+      localStorage.setItem(REG_DRAFT_KEY, JSON.stringify({ ...safeData, step: regStep }));
+    } catch {}
+  }, [regData, regStep, mode]);
 
   useEffect(() => {
     // Apply initial navigation options (e.g., open register with preselected plan)
     if (initialMode) {
       setMode(initialMode);
+      if (initialMode === 'REGISTER' && hasDraft) {
+        // Restaurer l'étape sauvegardée
+        try {
+          const saved = localStorage.getItem(REG_DRAFT_KEY);
+          if (saved) {
+            const parsed = JSON.parse(saved);
+            if (parsed.step && parsed.step > 1) setRegStep(parsed.step);
+          }
+        } catch {}
+      }
     }
     if (typeof initialRegStep === 'number') {
       setRegStep(initialRegStep);
     }
     if (initialPlanId) {
       setRegData(prev => ({ ...prev, planId: initialPlanId }));
+    }
+    if (initialPeriod) {
+      setRegData(prev => ({ ...prev, period: initialPeriod }));
     }
 
     const fetchPlans = async () => {
@@ -277,15 +337,20 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBackToLanding, initialM
 
         // fallback: si backend fournit subscription et elle est non-active
         if (sub && sub.status && sub.status !== 'ACTIVE' && sub.status !== 'TRIAL') {
-          setApiError({ message: 'Votre abonnement est en attente de validation. Connexion refusée.' } as any);
-          setLoading(false);
-          return;
+          const roles = Array.isArray(apiUser?.roles) ? apiUser.roles : [apiUser?.role];
+          const isAdmin = roles && (roles.includes(UserRole.ADMIN) || roles.includes(UserRole.SUPER_ADMIN));
+          if (!isAdmin) {
+            setApiError({ message: 'Votre abonnement est en attente de validation. Connexion refusée.' } as any);
+            setLoading(false);
+            return;
+          }
+          // L'admin peut se connecter pour régulariser
         }
       }
 
       const user = {
         ...apiUser,
-        planId: apiUser?.planId || null,
+        planId: apiUser?.planId || apiUser?.subscription?.planId || apiUser?.plan?.id || undefined,
         plan: apiUser?.plan || null,
         subscription: apiUser?.subscription || null,
         isPaid: Boolean(apiUser?.isPaid),
@@ -338,14 +403,19 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBackToLanding, initialM
         }
 
         if (sub && sub.status && sub.status !== 'ACTIVE' && sub.status !== 'TRIAL') {
-          setApiError({ message: 'Votre abonnement est en attente de validation. Connexion refusée.' } as any);
-          setLoading(false);
-          return;
+          const roles = Array.isArray(apiUser?.roles) ? apiUser.roles : [apiUser?.role];
+          const isAdmin = roles && (roles.includes(UserRole.ADMIN) || roles.includes(UserRole.SUPER_ADMIN));
+          if (!isAdmin) {
+            setApiError({ message: 'Votre abonnement est en attente de validation. Connexion refusée.' } as any);
+            setLoading(false);
+            return;
+          }
+          // L'admin peut se connecter pour régulariser
         }
       }
       const user = {
         ...apiUser,
-        planId: apiUser?.planId || null,
+        planId: apiUser?.planId || apiUser?.subscription?.planId || apiUser?.plan?.id || undefined,
         plan: apiUser?.plan || null,
         subscription: apiUser?.subscription || null,
         isPaid: Boolean(apiUser?.isPaid),
@@ -371,6 +441,7 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBackToLanding, initialM
       companyName: regData.companyName, siret: regData.siret, phone: regData.phone, address: regData.address,
       planId: regData.planId, paymentMethod: regData.paymentMethod,
       primaryColor: regData.primaryColor, buttonColor: regData.buttonColor,
+      period: regData.period,
       admin: { name: regData.adminName, email: regData.adminEmail, password: regData.adminPassword }
     };
 
@@ -379,9 +450,13 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBackToLanding, initialM
       const mustPay = response.subscription?.status === 'PENDING';
       const planObj = dynamicPlans.find(p => p.id === regData.planId);
       
-      onLoginSuccess({ 
+      // Inscription réussie : effacer le brouillon
+      localStorage.removeItem(REG_DRAFT_KEY);
+      setHasDraft(false);
+
+      onLoginSuccess({
         ...response.user,
-        token: response.token, 
+        token: response.token,
         planId: response.subscription?.planId,
         selectedPlanDetails: planObj,
         mustPay: mustPay
@@ -396,9 +471,16 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBackToLanding, initialM
 
   const renderRegistrationStep = () => {
     switch(regStep) {
-      case 1: 
+      case 1:
         return (
           <div className="space-y-6 animate-in slide-in-from-right-4 duration-500">
+            {hasDraft && (
+              <div className="flex items-center gap-3 p-3 bg-indigo-50 border border-indigo-100 rounded-2xl">
+                <Info size={14} className="text-indigo-500 shrink-0" />
+                <p className="text-[9px] font-black text-indigo-700 uppercase tracking-widest flex-1">Brouillon restauré — continuez là où vous en étiez</p>
+                <button onClick={() => { localStorage.removeItem(REG_DRAFT_KEY); setHasDraft(false); setRegData({ planId: '', companyName: '', siret: '', address: '', phone: '', paymentMethod: 'Orange Money', adminName: '', adminEmail: '', adminPassword: '', primaryColor: '#0f172a', buttonColor: '#63452c', period: '1M' }); setRegStep(1); }} className="text-[8px] font-black text-indigo-400 hover:text-rose-500 uppercase">Effacer</button>
+              </div>
+            )}
             <div className="mb-6">
               <h3 className="text-xl font-black text-slate-900 uppercase tracking-tight">Sélectionnez votre moteur</h3>
               <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">Choisissez la puissance de votre instance</p>

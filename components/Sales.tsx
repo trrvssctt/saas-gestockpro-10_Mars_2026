@@ -14,8 +14,10 @@ import {
 import { apiClient } from '../services/api';
 import { authBridge } from '../services/authBridge';
 import { User, StockItem, Customer, SubscriptionPlan } from '../types';
+import YearMonthPicker from './YearMonthPicker';
 import DocumentPreview from './DocumentPreview';
 import { useToast } from './ToastProvider';
+import { buildExportHandlers, ExportColumn } from '../services/exportUtils';
 
 const Sales = ({ currency, user, tenantSettings, plan }: { currency: string, user: User, tenantSettings?: any, plan?: SubscriptionPlan }) => {
   const [sales, setSales] = useState<any[]>([]);
@@ -35,6 +37,10 @@ const Sales = ({ currency, user, tenantSettings, plan }: { currency: string, use
   const [pageSize, setPageSize] = useState<number>(25);
   const [activeInventory, setActiveInventory] = useState<any>(null);
   const [showFilters, setShowFilters] = useState(false);
+
+  // Year/Month filter
+  const [selectedYear, setSelectedYear] = useState<number | null>(null);
+  const [selectedMonth, setSelectedMonth] = useState<number | null>(null);
 
   // Filtres
   const [filters, setFilters] = useState({
@@ -58,11 +64,46 @@ const Sales = ({ currency, user, tenantSettings, plan }: { currency: string, use
     items: [] as { productId: string, quantity: number, price: number, name: string, type: 'PRODUCT' | 'SERVICE' }[]
   });
   const showToast = useToast();
+  const [showExportMenu, setShowExportMenu] = useState(false);
+
+  // Derive available years from loaded sales
+  const availableYears = useMemo(() => {
+    const years = new Set<number>();
+    years.add(new Date().getFullYear());
+    sales.forEach(s => { if (s.createdAt) years.add(new Date(s.createdAt).getFullYear()); });
+    return Array.from(years).sort((a, b) => b - a);
+  }, [sales]);
+
+  // Sync year/month selection → dateFrom/dateTo filter
+  useEffect(() => {
+    if (selectedYear === null) {
+      setFilters(f => ({ ...f, dateFrom: '', dateTo: '' }));
+      return;
+    }
+    const ms = selectedMonth !== null ? selectedMonth : 0;
+    const me = selectedMonth !== null ? selectedMonth : 11;
+    setFilters(f => ({
+      ...f,
+      dateFrom: new Date(selectedYear, ms, 1).toISOString().split('T')[0],
+      dateTo:   new Date(selectedYear, me + 1, 0).toISOString().split('T')[0]
+    }));
+  }, [selectedYear, selectedMonth]);
+
+  // Colonnes pour l'export (partagées CSV/Excel/PDF)
+  const exportColumns: ExportColumn[] = [
+    { key: 'reference', label: 'Référence' },
+    { key: 'createdAt', label: 'Date', format: (v) => v ? new Date(v).toLocaleDateString('fr-FR') : '' },
+    { key: 'customer', label: 'Client', format: (_v, row) => row.customer?.companyName || row.customer || 'N/A' },
+    { key: 'totalHt', label: 'Montant HT', format: (v) => Number(v || 0).toLocaleString('fr-FR') },
+    { key: 'totalTtc', label: 'Montant TTC', format: (v) => Number(v || 0).toLocaleString('fr-FR') },
+    { key: 'amountPaid', label: 'Encaissé', format: (v) => Number(v || 0).toLocaleString('fr-FR') },
+    { key: 'totalTtc', label: 'Solde Restant', format: (_v, row) => Number(Math.max(0, (row.totalTtc || 0) - (row.amountPaid || 0))).toLocaleString('fr-FR') },
+    { key: 'status', label: 'Statut', format: (v) => v === 'TERMINE' ? 'Soldé' : v === 'EN_COURS' ? 'En cours' : v === 'ANNULE' ? 'Annulé' : v || '' },
+    { key: 'paymentMethod', label: 'Méthode paiement' },
+    { key: 'deliveryStatus', label: 'Livraison' },
+  ];
 
   let limit = 99999;
-  if (plan?.id === 'FREE_TRIAL') limit = 5;
-  else if (plan?.id === 'BASIC') limit = 20;
-  else if (plan?.id === 'PRO') limit = 50;
 
   const now = new Date();
   const monthlySalesCount = sales.filter(s => {
@@ -338,6 +379,56 @@ const Sales = ({ currency, user, tenantSettings, plan }: { currency: string, use
           <button onClick={fetchData} className="p-4 bg-slate-50 text-slate-400 hover:text-indigo-600 rounded-2xl transition-all shadow-sm">
              <RefreshCw size={20} className={loading ? 'animate-spin' : ''} />
           </button>
+
+          {/* EXPORT TOOLBAR */}
+          <div className="relative">
+            <button
+              onClick={() => setShowExportMenu(!showExportMenu)}
+              className="p-4 bg-slate-50 text-slate-400 hover:text-indigo-600 rounded-2xl transition-all shadow-sm flex items-center gap-2 font-black text-[10px] uppercase tracking-widest"
+            >
+              <FileDown size={18} /> Export
+            </button>
+            {showExportMenu && (
+              <div className="absolute right-0 top-full mt-2 bg-white border border-slate-100 rounded-2xl shadow-2xl z-50 w-52 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200">
+                {(() => {
+                  const exportInfo = buildExportHandlers({
+                    data: filteredSales,
+                    columns: exportColumns,
+                    options: {
+                      filename: `ventes-${new Date().toISOString().split('T')[0]}`,
+                      sheetName: 'Ventes',
+                      title: 'Registre des Ventes',
+                      companyInfo: {
+                        name: (tenantSettings as any)?.companyName || (tenantSettings as any)?.name,
+                        address: (tenantSettings as any)?.address,
+                        phone: (tenantSettings as any)?.phone,
+                        email: (tenantSettings as any)?.email,
+                      }
+                    },
+                    tableElementId: 'sales-table-export',
+                    showToast,
+                  });
+                  const items = [
+                    { label: 'CSV (.csv)', action: exportInfo.csv, icon: '📄' },
+                    { label: 'Excel (.xlsx)', action: exportInfo.excel, icon: '📊' },
+                    { label: 'PDF (impression)', action: exportInfo.pdf, icon: '🖨️' },
+                    { label: 'Image PNG', action: exportInfo.imagePng, icon: '🖼️' },
+                    { label: 'Image JPG', action: exportInfo.imageJpg, icon: '📷' },
+                  ];
+                  return items.map(({ label, action, icon }) => (
+                    <button
+                      key={label}
+                      onClick={() => { action(); setShowExportMenu(false); }}
+                      className="w-full flex items-center gap-3 px-5 py-3 text-[10px] font-black uppercase tracking-widest text-slate-600 hover:bg-indigo-50 hover:text-indigo-700 transition-all"
+                    >
+                      <span>{icon}</span> {label}
+                    </button>
+                  ));
+                })()}
+              </div>
+            )}
+          </div>
+
           {isLimitReached ? (
              <div className="flex items-center gap-3 px-4 md:px-6 py-3 md:py-4 bg-rose-50 text-rose-600 rounded-2xl border border-rose-100 text-[10px] font-black uppercase tracking-widest shadow-sm">
                 <Lock size={16} /> Limite {limit} ventes atteinte
@@ -357,6 +448,13 @@ const Sales = ({ currency, user, tenantSettings, plan }: { currency: string, use
       {/* ZONE FILTRES AVANCÉS */}
       {showFilters && (
         <div className="bg-white p-4 md:p-8 rounded-[3rem] border border-slate-100 shadow-xl animate-in slide-in-from-top-4 duration-300 space-y-6">
+          <YearMonthPicker
+            dataYears={availableYears}
+            selectedYear={selectedYear}
+            selectedMonth={selectedMonth}
+            onYearChange={setSelectedYear}
+            onMonthChange={setSelectedMonth}
+          />
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-6">
             <div className="space-y-2">
               <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest px-2">Recherche libre</label>
@@ -413,7 +511,7 @@ const Sales = ({ currency, user, tenantSettings, plan }: { currency: string, use
         </div>
       )}
 
-      <div className="bg-white rounded-[3.5rem] border border-slate-100 shadow-sm overflow-hidden">
+      <div id="sales-table-export" className="bg-white rounded-[3.5rem] border border-slate-100 shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full min-w-[600px] text-left">
             <thead>
@@ -497,14 +595,14 @@ const Sales = ({ currency, user, tenantSettings, plan }: { currency: string, use
                 </div>
                 <div className="flex-1 overflow-y-auto p-4 md:p-8 pt-0 grid grid-cols-1 md:grid-cols-2 gap-6 custom-scrollbar">
                    {cartTab === 'PRODUCT' ? (
-                     stocks.map(item => (
-                       <button key={item.id} onClick={() => addToCart(item, 'PRODUCT')} disabled={item.currentLevel <= 0} className={`p-6 bg-white rounded-[2rem] border border-slate-100 shadow-sm hover:shadow-xl hover:border-indigo-500 transition-all text-left flex flex-col justify-between group active:scale-95 ${item.currentLevel <= 0 ? 'opacity-50 grayscale cursor-not-allowed' : ''}`}>
+                     stocks.filter(item => item.status !== 'desactive' && item.status !== 'DESACTIVE').map(item => (
+                       <button key={item.id} onClick={() => addToCart(item, 'PRODUCT')} disabled={item.currentLevel <= 0 || item.status === 'desactive' || item.status === 'DESACTIVE'} className={`p-6 bg-white rounded-[2rem] border border-slate-100 shadow-sm hover:shadow-xl hover:border-indigo-500 transition-all text-left flex flex-col justify-between group active:scale-95 ${(item.currentLevel <= 0 || item.status === 'desactive' || item.status === 'DESACTIVE') ? 'opacity-50 grayscale cursor-not-allowed' : ''}`}>
                           <div>
                             <div className="flex justify-between items-start mb-4">
                               <div className="w-10 h-10 bg-indigo-50 text-indigo-600 rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform"><Package size={20}/></div>
                               <span className="text-[8px] font-black bg-slate-50 text-slate-400 px-2 py-0.5 rounded-full uppercase">Stock: {item.currentLevel}</span>
                             </div>
-                            <h4 className="text-sm font-black text-slate-900 uppercase truncate">{item.name}</h4>
+                            <h4 className="text-sm font-black text-slate-900 uppercase truncate flex items-center gap-2">{item.name} {(item.status === 'desactive' || item.status === 'DESACTIVE') && <span className="text-[7px] font-black bg-rose-100 text-rose-600 px-2 py-0.5 rounded uppercase ml-2">Désactivé</span>}</h4>
                           </div>
                           <p className="text-lg font-black text-indigo-600 mt-4">{Number(item.unitPrice).toLocaleString()} {currency}</p>
                        </button>

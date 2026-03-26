@@ -10,6 +10,7 @@ import {
   TrendingUp, Banknote, Zap
 } from 'lucide-react';
 import { apiClient } from '../services/api';
+import YearMonthPicker from './YearMonthPicker';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 const fmtAmt = (n: number | string) => Number(n || 0).toLocaleString('fr-FR');
@@ -191,6 +192,31 @@ const Payments = ({ currency, tenantSettings }: { currency: string; tenantSettin
     method: 'ALL', status: 'ALL',
     minAmount: '', maxAmount: ''
   });
+
+  // Year/Month filter
+  const [selectedYear, setSelectedYear] = useState<number | null>(null);
+  const [selectedMonth, setSelectedMonth] = useState<number | null>(null);
+
+  const availableYears = useMemo(() => {
+    const years = new Set<number>();
+    years.add(new Date().getFullYear());
+    payments.forEach(p => { if (p.createdAt) years.add(new Date(p.createdAt).getFullYear()); });
+    return Array.from(years).sort((a, b) => b - a);
+  }, [payments]);
+
+  useEffect(() => {
+    if (selectedYear === null) {
+      setFilters(f => ({ ...f, dateFrom: '', dateTo: '' }));
+      return;
+    }
+    const ms = selectedMonth !== null ? selectedMonth : 0;
+    const me = selectedMonth !== null ? selectedMonth : 11;
+    setFilters(f => ({
+      ...f,
+      dateFrom: new Date(selectedYear, ms, 1).toISOString().split('T')[0],
+      dateTo:   new Date(selectedYear, me + 1, 0).toISOString().split('T')[0]
+    }));
+  }, [selectedYear, selectedMonth]);
 
   const [exportDates, setExportDates] = useState({
     from: new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0],
@@ -403,7 +429,14 @@ const Payments = ({ currency, tenantSettings }: { currency: string; tenantSettin
 
       {/* ── PANEL FILTRES ── */}
       {showFilters && (
-        <div className="bg-white p-4 md:p-6 rounded-3xl border border-slate-100 shadow-sm animate-in slide-in-from-top-3 duration-200">
+        <div className="bg-white p-4 md:p-6 rounded-3xl border border-slate-100 shadow-sm animate-in slide-in-from-top-3 duration-200 space-y-4">
+          <YearMonthPicker
+            dataYears={availableYears}
+            selectedYear={selectedYear}
+            selectedMonth={selectedMonth}
+            onYearChange={setSelectedYear}
+            onMonthChange={setSelectedMonth}
+          />
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
 
             <div className="sm:col-span-2 lg:col-span-1">

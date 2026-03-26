@@ -26,13 +26,8 @@ const Services = ({ currency }: { currency: string }) => {
   const [selectedService, setSelectedService] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
   
-  const [formData, setFormData] = useState({ 
-    name: '', 
-    description: '', 
-    price: 0,
-    isActive: true,
-    imageUrl: ''
-  });
+  const emptyService = () => ({ name: '', description: '', price: 0, isActive: true, imageUrl: '' });
+  const [formDataList, setFormDataList] = useState([emptyService()]);
 
   const currentUser = authBridge.getSession()?.user;
   const canModify = currentUser ? authBridge.canPerform(currentUser, 'EDIT', 'services') : false;
@@ -77,15 +72,15 @@ const Services = ({ currency }: { currency: string }) => {
 
   const visibleServices = viewMode === 'CARD' ? filteredServices.slice(0, pageSize) : filteredServices;
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, idx: number) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     setIsUploading(true);
-    
+
     const cloudinaryData = new FormData();
     cloudinaryData.append('file', file);
-    cloudinaryData.append('upload_preset', 'ml_default'); 
+    cloudinaryData.append('upload_preset', 'ml_default');
     cloudinaryData.append('cloud_name', 'dq7avew9h');
 
     try {
@@ -93,10 +88,10 @@ const Services = ({ currency }: { currency: string }) => {
         method: 'POST',
         body: cloudinaryData
       });
-      
+
       const data = await response.json();
       if (data.secure_url) {
-        setFormData(prev => ({ ...prev, imageUrl: data.secure_url }));
+        setFormDataList(prev => prev.map((f, i) => i === idx ? { ...f, imageUrl: data.secure_url } : f));
       }
     } catch (err) {
       console.error("Upload Error:", err);
@@ -121,10 +116,16 @@ const Services = ({ currency }: { currency: string }) => {
     setError(null);
     try {
       if (modalMode === 'CREATE') {
-        const res = await apiClient.post('/services', formData);
-        setServices([res, ...services]);
+        const validForms = formDataList.filter(f => f.name && f.price);
+        if (validForms.length === 0) {
+          showToast("Veuillez remplir au moins un service.", 'error');
+          setActionLoading(false);
+          return;
+        }
+        const created = await Promise.all(validForms.map(f => apiClient.post('/services', f)));
+        setServices(prev => [...created, ...prev]);
       } else if (modalMode === 'EDIT' && selectedService) {
-        const res = await apiClient.put(`/services/${selectedService.id}`, formData);
+        const res = await apiClient.put(`/services/${selectedService.id}`, formDataList[0]);
         setServices(services.map(s => s.id === res.id ? res : s));
       }
       setModalMode(null);
@@ -160,13 +161,13 @@ const Services = ({ currency }: { currency: string }) => {
       return;
     }
     setSelectedService(service);
-    setFormData({ 
-      name: service.name, 
-      description: service.description || '', 
-      price: Number(service.price), 
+    setFormDataList([{
+      name: service.name,
+      description: service.description || '',
+      price: Number(service.price),
       isActive: service.isActive,
       imageUrl: service.imageUrl || ''
-    });
+    }]);
     setModalMode('EDIT');
   };
 
@@ -186,7 +187,7 @@ const Services = ({ currency }: { currency: string }) => {
         </div>
         {canModify && (
           <button 
-            onClick={() => { setFormData({ name: '', description: '', price: 0, isActive: true, imageUrl: '' }); setModalMode('CREATE'); setError(null); }}
+            onClick={() => { setFormDataList([emptyService()]); setModalMode('CREATE'); setError(null); }}
             className="bg-slate-900 text-white px-8 py-4 rounded-2xl font-black hover:bg-indigo-600 transition-all shadow-xl flex items-center gap-3 text-xs uppercase tracking-widest"
           >
             <Plus size={18} /> CRÉER UN SERVICE
@@ -385,50 +386,66 @@ const Services = ({ currency }: { currency: string }) => {
       {/* CREATE / EDIT MODAL */}
       {(modalMode === 'CREATE' || modalMode === 'EDIT') && (
         <div className="fixed inset-0 z-[1000] flex items-center justify-center p-6 bg-slate-950/90 backdrop-blur-md animate-in fade-in duration-300">
-          <div className="bg-white w-full max-w-2xl rounded-[3.5rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-500">
-             <div className={`px-10 py-8 text-white flex justify-between items-center ${modalMode === 'CREATE' ? 'bg-slate-900' : 'bg-amber-500'}`}>
+          <div className="bg-white w-full max-w-2xl rounded-[3.5rem] shadow-2xl overflow-hidden flex flex-col max-h-[90vh] animate-in zoom-in-95 duration-500">
+             <div className={`px-10 py-8 text-white flex justify-between items-center shrink-0 ${modalMode === 'CREATE' ? 'bg-slate-900' : 'bg-amber-500'}`}>
                 <h3 className="text-xl font-black uppercase tracking-tight flex items-center gap-3">
                    {modalMode === 'CREATE' ? <Sparkles size={24}/> : <Edit3 size={24}/>}
                    {modalMode === 'CREATE' ? 'Nouvelle Prestation' : 'Révision Service'}
                 </h3>
                 <button onClick={() => setModalMode(null)} className="p-3 hover:bg-white/10 rounded-2xl transition-all"><X size={24}/></button>
              </div>
-             <form onSubmit={handleSubmit} className="p-10 space-y-6">
-                <div className="grid grid-cols-2 gap-6">
-                  <div className="space-y-4">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-2">Identification <span className="text-rose-600">*</span></label>
-                    <input type="text" required value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 text-sm font-black outline-none focus:ring-4 focus:ring-indigo-500/10" placeholder="Nom du service" />
-                    <div className="relative">
-                        <DollarSign className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-300" size={18} />
-                        <input type="number" required value={formData.price} onChange={e => setFormData({...formData, price: Number(e.target.value)})} className="w-full bg-slate-50 border border-slate-100 rounded-2xl pl-12 pr-6 py-4 text-sm font-black outline-none" placeholder="Prix de vente" />
+             <form onSubmit={handleSubmit} className="p-10 space-y-6 flex-1 overflow-y-auto">
+                {formDataList.map((fd, idx) => (
+                  <div key={idx} className={`space-y-6 ${modalMode === 'CREATE' && formDataList.length > 1 ? 'border-b border-slate-100 pb-6 mb-2' : ''}`}>
+                    {modalMode === 'CREATE' && (
+                      <div className="flex justify-between items-center">
+                        <span className="font-black text-indigo-600 text-xs uppercase">Service {idx + 1}</span>
+                        {formDataList.length > 1 && (
+                          <button type="button" onClick={() => setFormDataList(list => list.filter((_, i) => i !== idx))} className="text-rose-500 text-xs font-black hover:text-rose-700 transition-colors">Supprimer</button>
+                        )}
+                      </div>
+                    )}
+                    <div className="grid grid-cols-2 gap-6">
+                      <div className="space-y-4">
+                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-2">Identification <span className="text-rose-600">*</span></label>
+                        <input type="text" required value={fd.name} onChange={e => setFormDataList(list => list.map((f, i) => i === idx ? { ...f, name: e.target.value } : f))} className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 text-sm font-black outline-none focus:ring-4 focus:ring-indigo-500/10" placeholder="Nom du service" />
+                        <div className="relative">
+                          <DollarSign className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-300" size={18} />
+                          <input type="number" required value={fd.price} onChange={e => setFormDataList(list => list.map((f, i) => i === idx ? { ...f, price: Number(e.target.value) } : f))} className="w-full bg-slate-50 border border-slate-100 rounded-2xl pl-12 pr-6 py-4 text-sm font-black outline-none" placeholder="Prix de vente" />
+                        </div>
+                      </div>
+                      <div className="space-y-4">
+                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-2">Illustration</label>
+                        <div className="relative group">
+                          <input type="file" id={`service_img_up_${idx}`} hidden onChange={e => handleFileUpload(e, idx)} accept="image/*" />
+                          <label htmlFor={`service_img_up_${idx}`} className={`block p-4 border-2 border-dashed rounded-2xl text-center cursor-pointer transition-all ${fd.imageUrl ? 'border-emerald-500 bg-emerald-50/30' : 'border-slate-200 hover:border-indigo-600'}`}>
+                            {isUploading ? (
+                              <Loader2 className="animate-spin mx-auto text-indigo-600" />
+                            ) : fd.imageUrl ? (
+                              <img src={fd.imageUrl} className="h-16 mx-auto rounded-lg object-contain" alt="Preview" />
+                            ) : (
+                              <div className="py-2">
+                                <ImageIcon className="mx-auto text-slate-300" size={24} />
+                                <p className="text-[8px] font-black uppercase mt-1 text-slate-500">Ajouter Image</p>
+                              </div>
+                            )}
+                          </label>
+                        </div>
+                      </div>
+                    </div>
+
+                    <textarea value={fd.description} onChange={e => setFormDataList(list => list.map((f, i) => i === idx ? { ...f, description: e.target.value } : f))} className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 text-sm font-medium outline-none min-h-[80px]" placeholder="Description détaillée de la prestation..."></textarea>
+
+                    <div className="flex items-center gap-3 px-6 py-4 bg-slate-50 rounded-2xl border border-slate-100">
+                      <input type="checkbox" id={`srv_active_${idx}`} checked={fd.isActive} onChange={e => setFormDataList(list => list.map((f, i) => i === idx ? { ...f, isActive: e.target.checked } : f))} className="w-5 h-5 rounded accent-indigo-600" />
+                      <label htmlFor={`srv_active_${idx}`} className="text-[10px] font-black text-slate-700 uppercase tracking-widest">Service Actif pour la vente</label>
                     </div>
                   </div>
-                  <div className="space-y-4">
-                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-2">Illustration</label>
-                      <div className="relative group">
-                        <input type="file" id="service_img_up" hidden onChange={handleFileUpload} accept="image/*" />
-                        <label htmlFor="service_img_up" className={`block p-4 border-2 border-dashed rounded-2xl text-center cursor-pointer transition-all ${formData.imageUrl ? 'border-emerald-500 bg-emerald-50/30' : 'border-slate-200 hover:border-indigo-600'}`}>
-                          {isUploading ? (
-                            <Loader2 className="animate-spin mx-auto text-indigo-600" />
-                          ) : formData.imageUrl ? (
-                            <img src={formData.imageUrl} className="h-16 mx-auto rounded-lg object-contain" alt="Preview" />
-                          ) : (
-                            <div className="py-2">
-                               <ImageIcon className="mx-auto text-slate-300" size={24} />
-                               <p className="text-[8px] font-black uppercase mt-1 text-slate-500">Ajouter Image</p>
-                            </div>
-                          )}
-                        </label>
-                      </div>
-                  </div>
-                </div>
-                
-                <textarea value={formData.description} onChange={e => setFormData({...formData, description: e.target.value})} className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 text-sm font-medium outline-none min-h-[100px]" placeholder="Description détaillée de la prestation..."></textarea>
-                
-                <div className="flex items-center gap-3 px-6 py-4 bg-slate-50 rounded-2xl border border-slate-100">
-                    <input type="checkbox" id="srv_active" checked={formData.isActive} onChange={e => setFormData({...formData, isActive: e.target.checked})} className="w-5 h-5 rounded accent-indigo-600" />
-                    <label htmlFor="srv_active" className="text-[10px] font-black text-slate-700 uppercase tracking-widest">Service Actif pour la vente</label>
-                </div>
+                ))}
+
+                {modalMode === 'CREATE' && formDataList.length < 5 && (
+                  <button type="button" onClick={() => setFormDataList(list => [...list, emptyService()])} className="w-full py-3 bg-indigo-50 text-indigo-700 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-indigo-100 transition-all">+ Ajouter un service</button>
+                )}
 
                 <div className="flex gap-4 pt-4">
                   <button type="button" onClick={() => setModalMode(null)} className="flex-1 py-5 border-2 border-slate-100 text-slate-400 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-slate-50 transition-all">ANNULER</button>

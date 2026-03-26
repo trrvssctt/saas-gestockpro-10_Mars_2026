@@ -1,12 +1,12 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { 
-  CreditCard, Check, ShieldCheck, Zap, Download, Calendar, 
+import {
+  CreditCard, Check, ShieldCheck, Zap, Download, Calendar,
   Receipt, Info, Lock, ArrowUpRight, Loader2, X, AlertTriangle,
   History, TrendingUp, ShieldAlert, Sparkles, Star, ChevronRight,
   FileText, CheckCircle2, Clock, RefreshCw, Smartphone, QrCode,
   Camera, CheckCircle, ArrowRight, BadgeCheck, ToggleLeft, ToggleRight,
-  FileDown, Printer
+  FileDown, Printer, Percent
 } from 'lucide-react';
 import { SUBSCRIPTION_PLANS } from '../constants';
 import { User, UserRole, SubscriptionPlan } from '../types';
@@ -16,12 +16,41 @@ import { useToast } from './ToastProvider';
 import waveQr from '../assets/qr_code_marchant_wave.png';
 import waveLogo from '../assets/wave_logo.png';
 
+// ─── Grille tarifaire avec remises ─────────────────────────────────────────
+type BillingPeriod = '1M' | '3M' | '1Y';
+
+interface PeriodOption {
+  id: BillingPeriod;
+  label: string;
+  months: number;
+  discountPct: number; // % de réduction vs mensuel
+}
+
+const PERIOD_OPTIONS: PeriodOption[] = [
+  { id: '1M', label: '1 Mois',  months: 1,  discountPct: 0  },
+  { id: '3M', label: '3 Mois',  months: 3,  discountPct: 15 },
+  { id: '1Y', label: '1 An',    months: 12, discountPct: 30 },
+];
+
+function getPeriodPrice(baseMonthlyPrice: number, period: BillingPeriod): number {
+  const opt = PERIOD_OPTIONS.find(p => p.id === period)!;
+  const fullPrice = baseMonthlyPrice * opt.months;
+  return Math.round(fullPrice * (1 - opt.discountPct / 100));
+}
+
+function getSavings(baseMonthlyPrice: number, period: BillingPeriod): number {
+  const opt = PERIOD_OPTIONS.find(p => p.id === period)!;
+  const fullPrice = baseMonthlyPrice * opt.months;
+  return fullPrice - getPeriodPrice(baseMonthlyPrice, period);
+}
+
 interface SubscriptionProps {
   user: User;
   currency: string;
+  onUpgrade?: (plan: SubscriptionPlan) => void;
 }
 
-const Subscription: React.FC<SubscriptionProps> = ({ user, currency }) => {
+const Subscription: React.FC<SubscriptionProps> = ({ user, currency, onUpgrade }) => {
   const showToast = useToast();
   const [subscriptionData, setSubscriptionData] = useState<any>(null);
   const [availablePlans, setAvailablePlans] = useState<SubscriptionPlan[]>([]);
@@ -29,11 +58,16 @@ const Subscription: React.FC<SubscriptionProps> = ({ user, currency }) => {
   const [selectedPlan, setSelectedPlan] = useState<SubscriptionPlan | null>(null);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   
-  // États de transaction (forçons Wave pour le moment)
-  const [paymentMethod, setPaymentMethod] = useState<'CARD' | 'MOBILE' | null>('MOBILE');
+  // Durée de facturation sélectionnée
+  const [selectedDuration, setSelectedDuration] = useState<BillingPeriod>('1M');
+
+  // États de transaction
+  const [paymentMethod, setPaymentMethod] = useState<'CARD' | 'MOBILE' | null>(null);
   const [operator, setOperator] = useState<'WAVE' | 'ORANGE' | null>('WAVE');
   const [txReference, setTxReference] = useState('');
   const [phoneNumber, setPhoneNumber] = useState('');
+  const [cardHolder, setCardHolder] = useState('');
+  const [isStripeLoading, setIsStripeLoading] = useState(false);
   
   const [isProcessing, setIsProcessing] = useState(false);
   const [success, setSuccess] = useState(false);
@@ -85,6 +119,12 @@ const Subscription: React.FC<SubscriptionProps> = ({ user, currency }) => {
 
   const handleUpgradeClick = (plan: SubscriptionPlan) => {
     if (!isAdmin) return;
+    if (onUpgrade) {
+      // Déléguer à App.tsx → Checkout.tsx dédié
+      onUpgrade(plan);
+      return;
+    }
+    // Fallback : modal interne
     setSelectedPlan(plan);
     setPaymentMethod(null);
     setOperator(null);
@@ -101,7 +141,7 @@ const Subscription: React.FC<SubscriptionProps> = ({ user, currency }) => {
         <div className="bg-white rounded-[3rem] p-6 md:p-12 border border-slate-100 shadow-sm text-center">
           <div className="flex flex-col items-center justify-center py-12">
             <Sparkles size={64} className="text-amber-400 animate-bounce" />
-            <h3 className="text-2xl font-black text-slate-900 mt-6">Votre entreprise est au sommet de la chaîne humanitaire 🎉</h3>
+            <h3 className="text-2xl font-black text-slate-900 mt-6">Votre entreprise est au sommet 🎉</h3>
             <p className="text-sm text-slate-500 mt-2">Aucune offre supérieure disponible — merci pour votre soutien.</p>
           </div>
         </div>
@@ -109,54 +149,131 @@ const Subscription: React.FC<SubscriptionProps> = ({ user, currency }) => {
     }
 
     return (
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-        {filteredPlans.map((plan) => (
-          <div key={plan.id} className="bg-white rounded-[3rem] border-2 border-slate-100 p-5 md:p-10 hover:border-indigo-600 transition-all group relative overflow-hidden flex flex-col shadow-sm hover:shadow-2xl">
-            {plan.isPopular && (
-              <div className="absolute top-6 right-6 bg-indigo-600 text-white px-3 py-1 rounded-full text-[8px] font-black uppercase tracking-widest">RECOMMANDÉ</div>
-            )}
-            <div className="mb-8">
-              <h3 className="text-[11px] font-black text-slate-400 uppercase tracking-widest mb-4">{plan.name}</h3>
-              <div className="flex items-baseline gap-1">
-                <span className="text-4xl font-black text-slate-900 tracking-tighter">{plan.price.toLocaleString()}</span>
-                <span className="text-slate-400 font-bold uppercase text-[10px]">{currency} / mois</span>
-              </div>
-            </div>
-            <div className="space-y-4 flex-1 mb-10">
-              <div className="flex items-center gap-3 text-xs font-bold text-slate-600">
-                <div className="w-5 h-5 bg-emerald-50 text-emerald-600 rounded-full flex items-center justify-center border border-emerald-100"><Check size={12}/></div>
-                {plan.maxUsers} Utilisateur(s)
-              </div>
-              {plan.hasAiChatbot && (
-                <div className="flex items-center gap-3 text-xs font-bold text-indigo-600">
-                  <div className="w-5 h-5 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center border border-indigo-100"><Zap size={12}/></div>
-                  IA Orchestrator Pro
-                </div>
-              )}
-            </div>
-            <button 
-              onClick={() => handleUpgradeClick(plan)}
-              disabled={!isAdmin}
-              className="w-full py-5 bg-slate-900 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-indigo-600 transition-all shadow-xl active:scale-95 disabled:opacity-50"
+      <div className="space-y-8">
+        {/* Sélecteur de durée */}
+        <div className="flex flex-wrap items-center gap-3 justify-center">
+          <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Durée :</span>
+          {PERIOD_OPTIONS.map(opt => (
+            <button
+              key={opt.id}
+              onClick={() => setSelectedDuration(opt.id)}
+              className={`flex items-center gap-2 px-5 py-2.5 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all border-2 ${
+                selectedDuration === opt.id
+                  ? 'bg-indigo-600 text-white border-indigo-600 shadow-lg'
+                  : 'bg-white text-slate-600 border-slate-200 hover:border-indigo-400'
+              }`}
             >
-              MIGRER VERS CE PLAN
+              {opt.label}
+              {opt.discountPct > 0 && (
+                <span className={`flex items-center gap-1 text-[8px] font-black px-2 py-0.5 rounded-full ${selectedDuration === opt.id ? 'bg-white text-indigo-600' : 'bg-emerald-100 text-emerald-700'}`}>
+                  <Percent size={8}/> -{opt.discountPct}%
+                </span>
+              )}
             </button>
-          </div>
-        ))}
+          ))}
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+          {filteredPlans.map((plan: SubscriptionPlan) => {
+            const periodPrice = getPeriodPrice(plan.price, selectedDuration);
+            const savings = getSavings(plan.price, selectedDuration);
+            const periodOpt = PERIOD_OPTIONS.find(p => p.id === selectedDuration)!;
+            return (
+              <div key={plan.id} className="bg-white rounded-[3rem] border-2 border-slate-100 p-5 md:p-10 hover:border-indigo-600 transition-all group relative overflow-hidden flex flex-col shadow-sm hover:shadow-2xl">
+                {plan.isPopular && (
+                  <div className="absolute top-6 right-6 bg-indigo-600 text-white px-3 py-1 rounded-full text-[8px] font-black uppercase tracking-widest">RECOMMANDÉ</div>
+                )}
+                {savings > 0 && (
+                  <div className="absolute top-6 left-6 bg-emerald-500 text-white px-3 py-1 rounded-full text-[8px] font-black uppercase tracking-widest">
+                    -{periodOpt.discountPct}%
+                  </div>
+                )}
+                <div className="mb-8 mt-2">
+                  <h3 className="text-[11px] font-black text-slate-400 uppercase tracking-widest mb-4">{plan.name}</h3>
+                  <div className="flex items-baseline gap-1">
+                    <span className="text-4xl font-black text-slate-900 tracking-tighter">{periodPrice.toLocaleString()}</span>
+                    <span className="text-slate-400 font-bold uppercase text-[10px]">{currency}</span>
+                  </div>
+                  <div className="mt-1 space-y-0.5">
+                    {selectedDuration !== '1M' && (
+                      <p className="text-[9px] text-slate-400 font-bold uppercase tracking-widest line-through">
+                        {(plan.price * periodOpt.months).toLocaleString()} {currency}
+                      </p>
+                    )}
+                    <p className="text-[9px] text-slate-500 font-bold uppercase tracking-widest">
+                      {selectedDuration === '1M' ? '/ mois' : selectedDuration === '3M' ? '/ 3 mois' : '/ an'}
+                      {savings > 0 && <span className="text-emerald-600 ml-2">— Économisez {savings.toLocaleString()} {currency}</span>}
+                    </p>
+                  </div>
+                </div>
+                <div className="space-y-4 flex-1 mb-10">
+                  <div className="flex items-center gap-3 text-xs font-bold text-slate-600">
+                    <div className="w-5 h-5 bg-emerald-50 text-emerald-600 rounded-full flex items-center justify-center border border-emerald-100"><Check size={12}/></div>
+                    {plan.maxUsers} Utilisateur(s)
+                  </div>
+                  {plan.hasAiChatbot && (
+                    <div className="flex items-center gap-3 text-xs font-bold text-indigo-600">
+                      <div className="w-5 h-5 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center border border-indigo-100"><Zap size={12}/></div>
+                      IA Orchestrator Pro
+                    </div>
+                  )}
+                  <div className="flex items-center gap-3 text-xs font-bold text-slate-600">
+                    <div className="w-5 h-5 bg-slate-50 text-slate-400 rounded-full flex items-center justify-center border border-slate-100"><Check size={12}/></div>
+                    Clients & Factures illimités
+                  </div>
+                </div>
+                <button
+                  onClick={() => handleUpgradeClick(plan)}
+                  disabled={!isAdmin}
+                  className="w-full py-5 bg-slate-900 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-indigo-600 transition-all shadow-xl active:scale-95 disabled:opacity-50"
+                >
+                  SOUSCRIRE — {periodPrice.toLocaleString()} {currency}
+                </button>
+              </div>
+            );
+          })}
+        </div>
       </div>
     );
-  }, [filteredPlans, currency, handleUpgradeClick, isAdmin]);
+  }, [filteredPlans, currency, handleUpgradeClick, isAdmin, selectedDuration]);
 
+
+  const handleStripeCheckout = async () => {
+    if (!selectedPlan) return;
+    setIsStripeLoading(true);
+    try {
+      const periodPrice = getPeriodPrice(selectedPlan.price, selectedDuration);
+      const resp = await apiClient.post('/billing/stripe/checkout', {
+        planId: selectedPlan.id,
+        period: selectedDuration,
+        amount: periodPrice,
+        cardHolder,
+      });
+      if (resp.url) {
+        window.location.href = resp.url;
+      } else {
+        showToast('Impossible de créer la session Stripe.', 'error');
+      }
+    } catch (err: any) {
+      showToast('Erreur Stripe : ' + (err.message || 'Veuillez réessayer.'), 'error');
+    } finally {
+      setIsStripeLoading(false);
+    }
+  };
 
   const processPayment = async () => {
     if (!selectedPlan) return;
     setIsProcessing(true);
     try {
+      const periodPrice = getPeriodPrice(selectedPlan.price, selectedDuration);
       const transactionId = operator === 'WAVE' ? txReference : `TX-${Date.now()}`;
       const payload = {
         planId: selectedPlan.id,
+        period: selectedDuration,
         paymentMethod: operator || paymentMethod,
         transactionId,
+        amount: periodPrice,          // montant total avec remise
+        phone: phoneNumber || undefined,
         status: 'PENDING',
         notifyAdmin: true,
         reference: transactionId
@@ -170,7 +287,7 @@ const Subscription: React.FC<SubscriptionProps> = ({ user, currency }) => {
         const fakePayment = {
           id: `local-${Date.now()}`,
           reference: transactionId || `LOCAL-${Date.now()}`,
-          amount: selectedPlan.price,
+          amount: periodPrice,        // montant réel payé
           method: operator || paymentMethod || 'WAVE',
           paymentDate: now.toISOString(),
           status: 'PENDING',
@@ -238,29 +355,31 @@ const Subscription: React.FC<SubscriptionProps> = ({ user, currency }) => {
   const handleDownloadInvoice = async (paymentId: string) => {
     try {
       const invoiceData = await apiClient.get(`/billing/invoice/${paymentId}`);
-      
+
+      const tenant = invoiceData.tenant || {};
+      const plan   = invoiceData.plan   || {};
+
       // On mock un objet "sale" compatible avec DocumentPreview
       const subSale = {
         id: paymentId,
-        reference: invoiceData.invoiceId,
-        createdAt: invoiceData.date,
-        totalTtc: invoiceData.amount,
-        amountPaid: invoiceData.amount,
-        // mark whether the SuperAdmin has validated this subscription/payment
-        isValidated: invoiceData.tenant?.paymentStatus === 'UP_TO_DATE' || !!invoiceData.paymentValidated,
+        reference: invoiceData.invoiceId || `F-SUB-${paymentId.slice(0,8).toUpperCase()}`,
+        createdAt: invoiceData.date || new Date().toISOString(),
+        totalTtc: invoiceData.amount || 0,
+        amountPaid: invoiceData.amount || 0,
+        isValidated: tenant?.paymentStatus === 'UP_TO_DATE' || !!invoiceData.paymentValidated,
         customer: {
-           companyName: invoiceData.tenant.name,
-           billingAddress: invoiceData.tenant.address,
-           phone: invoiceData.tenant.phone,
-           email: invoiceData.tenant.email
+          companyName: tenant?.name || 'Mon Entreprise',
+          billingAddress: tenant?.address || '',
+          phone: tenant?.phone || '',
+          email: tenant?.email || ''
         },
         items: [
           {
-             name: `Abonnement GeStocPro Cloud - Plan ${invoiceData.plan.name}`,
-             quantity: 1,
-             unitPrice: invoiceData.amount,
-             totalTtc: invoiceData.amount,
-             taxRate: 18
+            name: `Abonnement GeStockPro Cloud - Plan ${plan?.name || 'Standard'}`,
+            quantity: 1,
+            unitPrice: invoiceData.amount || 0,
+            totalTtc: invoiceData.amount || 0,
+            taxRate: 18
           }
         ]
       };
@@ -514,40 +633,110 @@ const Subscription: React.FC<SubscriptionProps> = ({ user, currency }) => {
                   <button onClick={() => setShowPaymentModal(false)} className="p-3 hover:bg-white/10 rounded-2xl transition-all"><X size={24}/></button>
                 </div>
 
-                <div className="flex-1 overflow-y-auto p-6 md:p-12 space-y-10 custom-scrollbar">
-                   <div className="p-4 md:p-8 bg-indigo-50 border border-indigo-100 rounded-[2.5rem] flex justify-between items-center">
-                      <div>
-                        <p className="text-[9px] font-black text-indigo-400 uppercase tracking-widest mb-1">Nouveau montant mensuel</p>
-                        <p className="text-xs text-indigo-900 font-bold uppercase tracking-widest">{selectedPlan?.name}</p>
+                <div className="flex-1 overflow-y-auto p-6 md:p-12 space-y-8 custom-scrollbar">
+                  {/* Résumé du montant */}
+                  {(() => {
+                    const periodPrice = selectedPlan ? getPeriodPrice(selectedPlan.price, selectedDuration) : 0;
+                    const savings = selectedPlan ? getSavings(selectedPlan.price, selectedDuration) : 0;
+                    const periodOpt = PERIOD_OPTIONS.find(p => p.id === selectedDuration)!;
+                    return (
+                      <div className="p-4 md:p-6 bg-indigo-50 border border-indigo-100 rounded-[2rem] flex justify-between items-center">
+                        <div>
+                          <p className="text-[9px] font-black text-indigo-400 uppercase tracking-widest mb-1">{selectedPlan?.name} — {periodOpt.label}</p>
+                          {savings > 0 && <p className="text-[9px] text-emerald-600 font-black uppercase">Économie : {savings.toLocaleString()} {currency}</p>}
+                        </div>
+                        <div className="text-right">
+                          <span className="text-xl md:text-3xl font-black text-indigo-600">{periodPrice.toLocaleString()}</span>
+                          <span className="text-sm font-black text-indigo-400 ml-2">{currency}</span>
+                        </div>
                       </div>
-                      <div className="text-right">
-                         <span className="text-xl md:text-3xl font-black text-indigo-600">{selectedPlan?.price.toLocaleString()}</span>
-                         <span className="text-sm font-black text-indigo-400 ml-2">{currency}</span>
-                      </div>
-                   </div>
+                    );
+                  })()}
 
-                   {/* Forcons l'affichage Wave uniquement */}
-                   <div className="space-y-6">
+                  {/* Choix de la méthode de paiement */}
+                  {!paymentMethod && (
+                    <div className="space-y-4">
+                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Choisir le mode de paiement</p>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <button onClick={() => { setPaymentMethod('MOBILE'); setOperator('WAVE'); }}
+                          className="p-5 rounded-[2rem] border-2 border-slate-200 hover:border-indigo-400 hover:bg-indigo-50 text-left transition-all group">
+                          <div className="flex items-center gap-3 mb-2">
+                            <img src={waveLogo} alt="Wave" className="w-8 h-8 object-contain" />
+                            <p className="font-black text-sm uppercase">Mobile Money</p>
+                          </div>
+                          <p className="text-[9px] text-slate-400 font-bold uppercase">Wave, Orange Money, MTN MoMo</p>
+                        </button>
+                        <button onClick={() => { setPaymentMethod('CARD'); setOperator(null); }}
+                          className="p-5 rounded-[2rem] border-2 border-slate-200 hover:border-indigo-400 hover:bg-indigo-50 text-left transition-all group">
+                          <div className="flex items-center gap-3 mb-2">
+                            <CreditCard size={28} className="text-slate-700" />
+                            <p className="font-black text-sm uppercase">Carte Bancaire</p>
+                          </div>
+                          <p className="text-[9px] text-slate-400 font-bold uppercase">Visa, Mastercard via Stripe</p>
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Mobile Money (Wave) */}
+                  {paymentMethod === 'MOBILE' && (
+                    <div className="space-y-6">
+                      <div className="flex gap-3">
+                        {(['WAVE', 'ORANGE', 'MTN'] as const).map(op => (
+                          <button key={op}
+                            onClick={() => setOperator(op === 'MTN' ? 'ORANGE' : op as 'WAVE' | 'ORANGE')}
+                            className={`flex-1 py-2.5 rounded-xl font-black text-[10px] uppercase tracking-widest border-2 transition-all ${operator === op || (op === 'MTN' && operator === 'ORANGE') ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-500 border-slate-200'}`}>
+                            {op}
+                          </button>
+                        ))}
+                      </div>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-center">
-                        <div className="flex flex-col items-center gap-4">
-                          <img src={waveQr} alt="Wave QR" className="w-48 h-48 object-contain rounded-xl shadow-md border" />
-                          <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">Scannez le QR avec l'application Wave puis renseignez la référence de transaction ci-dessous.</p>
+                        <div className="flex flex-col items-center gap-3">
+                          <img src={waveQr} alt="Wave QR" className="w-40 h-40 object-contain rounded-xl shadow-md border" />
+                          <p className="text-[9px] text-slate-400 font-bold uppercase tracking-widest text-center">Scannez ce QR avec l'app Wave</p>
                         </div>
                         <div className="space-y-4">
-                          <div className="flex items-center gap-3">
-                            <img src={waveLogo} alt="Wave" className="w-12 h-12 object-contain" />
-                            <div>
-                              <p className="text-sm font-black uppercase">Wave - Paiement Mobile</p>
-                              <p className="text-xs text-slate-400">Suivez les instructions sur votre application Wave pour transférer le montant indiqué.</p>
-                            </div>
-                          </div>
-                          <input type="text" placeholder="Référence Transaction Wave" value={txReference} onChange={e => setTxReference(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-6 py-4 text-sm font-black outline-none focus:ring-4 focus:ring-indigo-500/10" />
-                          <button onClick={processPayment} disabled={isProcessing || !txReference} className="w-full py-5 bg-indigo-600 text-white rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl flex items-center justify-center gap-3">
-                            {isProcessing ? <Loader2 className="animate-spin" /> : <>VALIDER LE PAIEMENT <ArrowRight size={18}/></>}
+                          {operator !== 'WAVE' && (
+                            <input type="tel" placeholder="Numéro de téléphone" value={phoneNumber} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setPhoneNumber(e.target.value)}
+                              className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-6 py-4 text-sm font-black outline-none focus:ring-4 focus:ring-indigo-500/10" />
+                          )}
+                          <input type="text" placeholder="Référence de transaction" value={txReference} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setTxReference(e.target.value)}
+                            className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-6 py-4 text-sm font-black outline-none focus:ring-4 focus:ring-indigo-500/10" />
+                          <button onClick={processPayment} disabled={isProcessing || !txReference}
+                            className="w-full py-4 bg-indigo-600 text-white rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl flex items-center justify-center gap-3 disabled:opacity-50">
+                            {isProcessing ? <Loader2 className="animate-spin" /> : <>VALIDER <ArrowRight size={18}/></>}
+                          </button>
+                          <button onClick={() => setPaymentMethod(null)} className="w-full py-2 text-slate-400 text-[9px] font-black uppercase tracking-widest hover:text-slate-600">
+                            ← Changer de méthode
                           </button>
                         </div>
                       </div>
-                   </div>
+                    </div>
+                  )}
+
+                  {/* Stripe — Carte Bancaire */}
+                  {paymentMethod === 'CARD' && (
+                    <div className="space-y-6">
+                      <div className="p-5 bg-slate-50 rounded-[2rem] border border-slate-100 space-y-4">
+                        <div className="flex items-center gap-3">
+                          <CreditCard size={20} className="text-indigo-600" />
+                          <p className="text-sm font-black uppercase">Paiement Sécurisé par Stripe</p>
+                        </div>
+                        <input type="text" placeholder="Nom sur la carte (optionnel)" value={cardHolder} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCardHolder(e.target.value)}
+                          className="w-full bg-white border border-slate-200 rounded-2xl px-6 py-4 text-sm font-black outline-none focus:ring-4 focus:ring-indigo-500/10" />
+                        <p className="text-[9px] text-slate-400 font-bold uppercase tracking-widest">
+                          Vous serez redirigé vers la page sécurisée Stripe pour entrer vos coordonnées bancaires.
+                        </p>
+                      </div>
+                      <button onClick={handleStripeCheckout} disabled={isStripeLoading}
+                        className="w-full py-5 bg-indigo-600 text-white rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl flex items-center justify-center gap-3 disabled:opacity-50">
+                        {isStripeLoading ? <Loader2 className="animate-spin" /> : <><CreditCard size={18}/> PAYER PAR CARTE — {selectedPlan ? getPeriodPrice(selectedPlan.price, selectedDuration).toLocaleString() : 0} {currency}</>}
+                      </button>
+                      <button onClick={() => setPaymentMethod(null)} className="w-full py-2 text-slate-400 text-[9px] font-black uppercase tracking-widest hover:text-slate-600">
+                        ← Changer de méthode
+                      </button>
+                    </div>
+                  )}
                 </div>
               </>
             )}

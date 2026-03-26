@@ -11,20 +11,30 @@ import {
   Trophy, Medal, AlertCircle, CreditCard,
   ShieldAlert, ArrowRight, Bell, ChevronRight,
   ArrowDownCircle, ArrowUpCircle, DollarSign,
-  BarChart2, PieChart as PieIcon, Star
+  BarChart2, PieChart as PieIcon, Star,
+  Calendar, Briefcase, Building2, FileText, MapPin
 } from 'lucide-react';
 import {
   Area, XAxis, YAxis, CartesianGrid, Tooltip,
-  ResponsiveContainer, PieChart, Pie, Cell, Bar,
+  ResponsiveContainer, PieChart, Pie, Cell,
   Legend, ComposedChart
 } from 'recharts';
 import { User, UserRole, StockItem } from '../types';
 import { apiClient } from '../services/api';
 import { authBridge } from '../services/authBridge';
 import waveQr from '../assets/qr_code_marchant_wave.png';
+import { Timer } from 'lucide-react';
+import YearMonthPicker from './YearMonthPicker';
 
 const fmt = (n: number, currency: string) => `${Number(n || 0).toLocaleString('fr-FR')} ${currency}`;
 const fmtShort = (n: number) => Number(n || 0).toLocaleString('fr-FR');
+// Normalise un champ customer qui peut être une string ou un objet Customer complet
+const getCustomerName = (c: any): string => {
+  if (!c) return '';
+  if (typeof c === 'string') return c;
+  if (typeof c === 'object') return c.companyName || c.name || c.email || '';
+  return String(c);
+};
 
 const StatCard = ({ title, value, subValue, icon: Icon, color, trend, onClick }: any) => (
   <div
@@ -98,6 +108,10 @@ const Dashboard: React.FC<{
   const [usersList, setUsersList] = useState<any[]>([]);
   const [subscription, setSubscription] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+
+  // Year/Month filter
+  const [selectedYear, setSelectedYear] = useState<number | null>(new Date().getFullYear());
+  const [selectedMonth, setSelectedMonth] = useState<number | null>(null);
 
   // Extended state for admin dashboard
   const [adminStats, setAdminStats] = useState<any>(null);
@@ -186,6 +200,9 @@ const Dashboard: React.FC<{
     fetchDashboardData();
   }, [userRoles]);
 
+  // --- ESSAI GRATUIT : jours restants ---
+  const trialDaysLeft = useMemo(() => authBridge.getTrialDaysRemaining(user), [user]);
+
   // --- ABONNEMENT ALERT ---
   const subAlert = useMemo(() => {
     const subObj = subscription?.subscription || subscription;
@@ -201,10 +218,40 @@ const Dashboard: React.FC<{
     };
   }, [subscription]);
 
+  // --- AVAILABLE YEARS (for year/month picker) ---
+  const availableYears = useMemo(() => {
+    const years = new Set<number>();
+    years.add(new Date().getFullYear());
+    sales.forEach(s => { if (s.createdAt) years.add(new Date(s.createdAt).getFullYear()); });
+    revenueStats.forEach(r => { if (r.month) years.add(new Date(r.month).getFullYear()); });
+    return Array.from(years).sort((a, b) => b - a);
+  }, [sales, revenueStats]);
+
   // --- SALES STATS ---
   const salesStats = useMemo(() => {
     const s = adminStats;
+
+    // ADMIN PATH: use pre-computed server stats
     if (s) {
+      // If year filter + monthly revenue data → compute year totals from revenueStats
+      if (selectedYear && revenueStats.length > 0) {
+        const filtered = revenueStats.filter(r => {
+          const d = new Date(r.month);
+          return d.getFullYear() === selectedYear &&
+            (selectedMonth === null || d.getMonth() === selectedMonth);
+        });
+        const totalRevenue = filtered.reduce((sum, r) => sum + (r.total || 0), 0);
+        const totalCollected = filtered.reduce((sum, r) => sum + (r.collected || 0), 0);
+        // Créances: use all-time outstanding (server doesn't give per-year unpaid)
+        const totalUnpaid = s.totalUnpaid ?? Math.max(0, (s.totalRevenue || 0) - (s.totalCollected || 0));
+        const overdueCount = s.overdueCount || s.latePayments || 0;
+        const recoveryData = [
+          { name: 'Encaissé', value: totalCollected, color: '#10b981' },
+          { name: 'À Recouvrer', value: Math.max(0, totalUnpaid), color: '#f43f5e' }
+        ];
+        return { totalRevenue, totalCollected, totalUnpaid, overdueCount, totalSalesCount: s.totalSalesCount || sales.length, avgBasket: totalRevenue > 0 && s.totalSalesCount ? totalRevenue / s.totalSalesCount : 0, recoveryData, monthRevenue: 0 };
+      }
+      // Default admin stats (no year filter or no revenueStats)
       const totalRevenue = s.totalRevenue || 0;
       const totalCollected = s.totalCollected || 0;
       const totalUnpaid = s.totalUnpaid ?? (totalRevenue - totalCollected);
@@ -217,20 +264,68 @@ const Dashboard: React.FC<{
       ];
       return { totalRevenue, totalCollected, totalUnpaid, overdueCount, totalSalesCount, avgBasket, recoveryData, monthRevenue: 0 };
     }
+
+    // NON-ADMIN PATH: client-side computation from full sales array
     const validSales = sales.filter(s => s.status !== 'ANNULE');
-    const totalRevenue = validSales.reduce((sum, s) => sum + parseFloat(s.totalTtc || 0), 0);
-    const totalCollected = validSales.reduce((sum, s) => sum + parseFloat(s.amountPaid || 0), 0);
-    const totalUnpaid = totalRevenue - totalCollected;
-    const overdueCount = validSales.filter(s => s.status === 'EN_COURS').length;
+
+    // CA: sales created in the selected period
+    const periodSales = selectedYear ? validSales.filter(s => {
+      const d = new Date(s.createdAt);
+      return d.getFullYear() === selectedYear &&
+        (selectedMonth === null || d.getMonth() === selectedMonth);
+    }) : validSales;
+
+    const totalRevenue = periodSales.reduce((sum, s) => sum + parseFloat(s.totalTtc || 0), 0);
+
+    // Trésorerie: payments received (by payment date) in the selected period
+    let totalCollected: number;
+    if (selectedYear) {
+      totalCollected = validSales
+        .flatMap(s => (s.payments || []).filter((p: any) => {
+          const d = new Date(p.createdAt);
+          return d.getFullYear() === selectedYear &&
+            (selectedMonth === null || d.getMonth() === selectedMonth);
+        }))
+        .reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
+    } else {
+      totalCollected = validSales.reduce((sum, s) => sum + parseFloat(s.amountPaid || 0), 0);
+    }
+
+    // Créances historiques: outstanding from ALL sales up to end of selected period
+    // (Ali's 2023 debt still shows in 2024 view until paid)
+    let totalUnpaid: number;
+    let overdueCount: number;
+    if (selectedYear) {
+      const endOfPeriod = selectedMonth !== null
+        ? new Date(selectedYear, selectedMonth + 1, 0, 23, 59, 59)
+        : new Date(selectedYear, 12, 0, 23, 59, 59);
+      const historicalSales = validSales.filter(s => new Date(s.createdAt) <= endOfPeriod);
+      totalUnpaid = historicalSales.reduce((sum, s) =>
+        sum + Math.max(0, parseFloat(s.totalTtc || 0) - parseFloat(s.amountPaid || 0)), 0);
+      overdueCount = historicalSales.filter(s => s.status === 'EN_COURS').length;
+    } else {
+      totalUnpaid = totalRevenue - totalCollected;
+      overdueCount = validSales.filter(s => s.status === 'EN_COURS').length;
+    }
+
     const now = new Date();
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-    const monthRevenue = validSales.filter(s => new Date(s.createdAt) >= startOfMonth).reduce((sum, s) => sum + parseFloat(s.totalTtc || 0), 0);
+    const monthRevenue = (!selectedYear || selectedYear === now.getFullYear())
+      ? periodSales.filter(s => new Date(s.createdAt) >= startOfMonth)
+          .reduce((sum, s) => sum + parseFloat(s.totalTtc || 0), 0)
+      : 0;
+
     const recoveryData = [
       { name: 'Encaissé', value: totalCollected, color: '#10b981' },
       { name: 'À Recouvrer', value: Math.max(0, totalUnpaid), color: '#f43f5e' }
     ];
-    return { totalRevenue, totalCollected, totalUnpaid, overdueCount, totalSalesCount: sales.length, avgBasket: sales.length > 0 ? totalRevenue / sales.length : 0, recoveryData, monthRevenue };
-  }, [sales, adminStats]);
+    return {
+      totalRevenue, totalCollected, totalUnpaid, overdueCount,
+      totalSalesCount: periodSales.length,
+      avgBasket: periodSales.length > 0 ? totalRevenue / periodSales.length : 0,
+      recoveryData, monthRevenue
+    };
+  }, [sales, adminStats, selectedYear, selectedMonth, revenueStats]);
 
   // --- STOCK STATS ---
   const stockStats = useMemo(() => {
@@ -276,21 +371,87 @@ const Dashboard: React.FC<{
 
   // --- REVENUE CHART DATA ---
   const revenueChartData = useMemo(() => {
+    const monthsToShow = selectedMonth !== null
+      ? [selectedMonth]
+      : Array.from({ length: 12 }, (_, i) => i);
+
     if (revenueStats.length > 0) {
+      if (selectedYear) {
+        // Show all months of selected year (0 for months with no data)
+        const yearStats = revenueStats.filter(r => new Date(r.month).getFullYear() === selectedYear);
+        return monthsToShow.map(m => {
+          const r = yearStats.find(r => new Date(r.month).getMonth() === m);
+          return { label: MONTH_LABELS[m], total: r?.total || 0, collected: r?.collected || 0 };
+        });
+      }
+      // No year filter: original behavior
       return revenueStats.map((r: any) => {
         const d = new Date(r.month);
-        return { label: MONTH_LABELS[d.getMonth()], total: r.total || 0 };
+        return {
+          label: `${MONTH_LABELS[d.getMonth()]} ${d.getFullYear()}`,
+          total: r.total || 0,
+          collected: r.collected || 0
+        };
       });
     }
-    // Fallback: build from recent sales grouped by month
-    const map: Record<string, number> = {};
-    sales.forEach((s: any) => {
+
+    // Fallback: build from sales
+    const validSales = sales
+      .filter((s: any) => s.status !== 'ANNULE')
+      .filter((s: any) => {
+        if (s.tenantId && user?.tenantId) return s.tenantId === user.tenantId;
+        return true;
+      });
+
+    if (selectedYear) {
+      // Initialize all months with 0
+      const map: Record<number, { total: number; collected: number }> = {};
+      monthsToShow.forEach(m => { map[m] = { total: 0, collected: 0 }; });
+
+      // CA: by sale creation date
+      validSales
+        .filter(s => new Date(s.createdAt).getFullYear() === selectedYear)
+        .forEach((s: any) => {
+          const m = new Date(s.createdAt).getMonth();
+          if (map[m] !== undefined) map[m].total += parseFloat(s.totalTtc || 0);
+        });
+
+      // Collected: by payment date (historical — payments from any sale year counted to payment year)
+      validSales.forEach((s: any) => {
+        (s.payments || []).forEach((p: any) => {
+          const d = new Date(p.createdAt);
+          if (d.getFullYear() === selectedYear) {
+            const m = d.getMonth();
+            if (map[m] !== undefined) map[m].collected += parseFloat(p.amount || 0);
+          }
+        });
+      });
+
+      return monthsToShow.map(m => ({
+        label: MONTH_LABELS[m],
+        total: map[m]?.total || 0,
+        collected: map[m]?.collected || 0
+      }));
+    }
+
+    // All-time: original behavior (last 6 months)
+    const map: Record<string, { total: number; collected: number }> = {};
+    validSales.forEach((s: any) => {
       const d = new Date(s.createdAt);
-      const key = MONTH_LABELS[d.getMonth()];
-      map[key] = (map[key] || 0) + parseFloat(s.totalTtc || 0);
+      const key = `${MONTH_LABELS[d.getMonth()]} ${d.getFullYear()}`;
+      if (!map[key]) map[key] = { total: 0, collected: 0 };
+      map[key].total += parseFloat(s.totalTtc || 0);
+      map[key].collected += parseFloat(s.amountPaid || 0);
     });
-    return Object.entries(map).map(([label, total]) => ({ label, total })).slice(-6);
-  }, [revenueStats, sales]);
+    return Object.entries(map)
+      .map(([label, vals]) => {
+        const [mois, annee] = label.split(' ');
+        return { label, ...vals, sortKey: Number(annee) * 12 + MONTH_LABELS.indexOf(mois) };
+      })
+      .sort((a, b) => a.sortKey - b.sortKey)
+      .slice(-6)
+      .map(({ label, total, collected }) => ({ label, total, collected }));
+  }, [revenueStats, sales, user, selectedYear, selectedMonth]);
 
   // --- ACTIVITY FEED (movements + payments + customers combined) ---
   const activityFeed = useMemo(() => {
@@ -305,7 +466,7 @@ const Dashboard: React.FC<{
     }));
     latestPayments.slice(0, 5).forEach((p: any) => items.push({
       type: 'payment',
-      title: p.customer || 'Paiement reçu',
+      title: getCustomerName(p.customer) || 'Paiement reçu',
       sub: `${Number(p.amount || 0).toLocaleString('fr-FR')} ${currency} encaissé`,
       date: p.createdAt,
       icon: DollarSign,
@@ -329,16 +490,32 @@ const Dashboard: React.FC<{
     return { ruptures: ruptures.slice(0, 6), low: low.slice(0, 6) };
   }, [stocks]);
 
-  // --- TODAY STATS ---
+  // --- TODAY / PERIOD STATS ---
   const todayStats = useMemo(() => {
+    if (selectedYear) {
+      const periodSales = sales.filter(s => {
+        if (s.status === 'ANNULE') return false;
+        const d = new Date(s.createdAt);
+        return d.getFullYear() === selectedYear &&
+          (selectedMonth === null || d.getMonth() === selectedMonth);
+      });
+      return {
+        count: periodSales.length,
+        revenue: periodSales.reduce((sum, s) => sum + parseFloat(s.totalTtc || 0), 0),
+        periodLabel: selectedMonth !== null
+          ? `${MONTH_LABELS[selectedMonth]} ${selectedYear}`
+          : String(selectedYear)
+      };
+    }
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const todaySales = sales.filter(s => new Date(s.createdAt) >= today);
     return {
       count: todaySales.length,
-      revenue: todaySales.reduce((sum, s) => sum + parseFloat(s.totalTtc || 0), 0)
+      revenue: todaySales.reduce((sum, s) => sum + parseFloat(s.totalTtc || 0), 0),
+      periodLabel: "aujourd'hui"
     };
-  }, [sales]);
+  }, [sales, selectedYear, selectedMonth]);
 
   // --- PAYMENT MODAL ---
   const [showPaymentModal, setShowPaymentModal] = useState(false);
@@ -383,6 +560,31 @@ const Dashboard: React.FC<{
     return (
       <div className="space-y-8 animate-in fade-in duration-700">
 
+        {/* BANNIÈRE ESSAI GRATUIT 14 JOURS */}
+        {trialDaysLeft !== null && (
+          <div className={`p-5 md:p-7 rounded-3xl border-2 flex flex-col md:flex-row items-center justify-between gap-4 shadow-xl ${trialDaysLeft <= 3 ? 'bg-rose-50 border-rose-300' : trialDaysLeft <= 7 ? 'bg-amber-50 border-amber-300' : 'bg-indigo-50 border-indigo-200'}`}>
+            <div className="flex items-center gap-4">
+              <div className={`w-12 h-12 rounded-2xl flex items-center justify-center shadow ${trialDaysLeft <= 3 ? 'bg-rose-600' : trialDaysLeft <= 7 ? 'bg-amber-500' : 'bg-indigo-600'} text-white`}>
+                <Timer size={24} />
+              </div>
+              <div>
+                <h3 className={`text-base font-black uppercase tracking-tight ${trialDaysLeft <= 3 ? 'text-rose-700' : trialDaysLeft <= 7 ? 'text-amber-700' : 'text-indigo-700'}`}>
+                  {trialDaysLeft === 0 ? 'Essai expiré — Passez à un plan payant' : `Essai gratuit — ${trialDaysLeft} jour${trialDaysLeft > 1 ? 's' : ''} restant${trialDaysLeft > 1 ? 's' : ''}`}
+                </h3>
+                <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">
+                  {trialDaysLeft === 0
+                    ? 'Votre accès est limité. Souscrivez pour continuer.'
+                    : `Profitez de toutes les fonctionnalités gratuitement jusqu'à expiration.`}
+                </p>
+              </div>
+            </div>
+            <button onClick={() => onNavigate?.('subscription')}
+              className={`px-6 py-3 rounded-2xl font-black text-[10px] uppercase tracking-widest flex items-center gap-2 shadow-lg text-white transition-all ${trialDaysLeft <= 3 ? 'bg-rose-600 hover:bg-rose-700' : trialDaysLeft <= 7 ? 'bg-amber-500 hover:bg-amber-600' : 'bg-indigo-600 hover:bg-indigo-700'}`}>
+              <CreditCard size={14}/> Voir les plans
+            </button>
+          </div>
+        )}
+
         {/* ALERTE ABONNEMENT */}
         {subAlert && subAlert.isCritical && (
           <div className={`p-5 md:p-7 rounded-3xl border-2 flex flex-col md:flex-row items-center justify-between gap-4 shadow-xl ${subAlert.isExpired ? 'bg-rose-50 border-rose-200' : 'bg-amber-50 border-amber-200'}`}>
@@ -410,10 +612,10 @@ const Dashboard: React.FC<{
 
         {/* ── ROW 1 : 8 KPI CARDS ── */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <StatCard title="Chiffre d'Affaires" value={fmtShort(salesStats.totalRevenue) + ' ' + currency.split(' ')[0]} subValue={`${todayStats.count} vente(s) aujourd'hui`} icon={TrendingUp} color="bg-indigo-600" trend="up" onClick={() => onNavigate?.('sales')}/>
+          <StatCard title="Chiffre d'Affaires" value={fmtShort(salesStats.totalRevenue) + ' ' + currency.split(' ')[0]} subValue={`${todayStats.count} vente(s) — ${todayStats.periodLabel}`} icon={TrendingUp} color="bg-indigo-600" trend="up" onClick={() => onNavigate?.('sales')}/>
           <StatCard title="Trésorerie Réelle" value={fmtShort(salesStats.totalCollected) + ' ' + currency.split(' ')[0]} subValue={`Taux encaissement : ${collectionRate}%`} icon={Wallet} color="bg-emerald-500" trend="up" onClick={() => onNavigate?.('payments')}/>
-          <StatCard title="Créances Clients" value={fmtShort(salesStats.totalUnpaid) + ' ' + currency.split(' ')[0]} subValue={`${salesStats.overdueCount} facture(s) en retard`} icon={Landmark} color="bg-rose-500" trend="down" onClick={() => onNavigate?.('recovery')}/>
-          <StatCard title="Ventes du jour" value={`${todayStats.count}`} subValue={fmtShort(todayStats.revenue) + ' ' + currency.split(' ')[0]} icon={ShoppingCart} color="bg-violet-500" trend={todayStats.count > 0 ? 'up' : undefined} onClick={() => onNavigate?.('sales')}/>
+          <StatCard title="Créances Clients" value={fmtShort(salesStats.totalUnpaid) + ' ' + currency.split(' ')[0]} subValue={`${salesStats.overdueCount} facture(s) en retard${selectedYear ? ' (historique)' : ''}`} icon={Landmark} color="bg-rose-500" trend="down" onClick={() => onNavigate?.('recovery')}/>
+          <StatCard title={selectedYear ? `Ventes ${todayStats.periodLabel}` : 'Ventes du jour'} value={`${todayStats.count}`} subValue={fmtShort(todayStats.revenue) + ' ' + currency.split(' ')[0]} icon={ShoppingCart} color="bg-violet-500" trend={todayStats.count > 0 ? 'up' : undefined} onClick={() => onNavigate?.('sales')}/>
           <StatCard title="Clients" value={(adminStats?.customersCount ?? customers.length).toLocaleString()} subValue={`${customers.slice(0,1)[0] ? 'Dernier : ' + (customers[0]?.companyName || customers[0]?.name || '—') : 'Portefeuille actif'}`} icon={Users} color="bg-sky-500" onClick={() => onNavigate?.('customers')}/>
           <StatCard title="Références Stock" value={(adminStats?.stocksTotal ?? stocks.length).toLocaleString()} subValue={`${stockStats.out} rupture(s) • ${stockStats.low} alerte(s)`} icon={Package} color="bg-amber-500" trend={stockStats.out > 0 ? 'down' : 'up'} onClick={() => onNavigate?.('inventory')}/>
           <StatCard title="Utilisateurs" value={(adminStats?.usersCount ?? usersList.length).toLocaleString()} subValue="Accès actifs" icon={UserCheck} color="bg-slate-700" onClick={() => onNavigate?.('governance')}/>
@@ -425,17 +627,22 @@ const Dashboard: React.FC<{
 
           {/* Tendance CA 6 mois */}
           <div className="lg:col-span-8 bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
-            <SectionHeader icon={BarChart2} title="Tendance Revenus — 6 Derniers Mois" badge="Live" color="text-indigo-600"/>
+            <SectionHeader icon={BarChart2} title={selectedYear ? `Revenus ${selectedYear}${selectedMonth !== null ? ' — ' + MONTH_LABELS[selectedMonth] : ''}` : 'Tendance Revenus — 6 Derniers Mois'} badge="Live" color="text-indigo-600"/>
             <div className="h-64">
               <ResponsiveContainer width="100%" height="100%">
-                <ComposedChart data={revenueChartData.length > 0 ? revenueChartData : sales.slice(-10).map((s: any) => ({
+                <ComposedChart data={revenueChartData.length > 0 ? revenueChartData : sales.filter((s: any) => s.status !== 'ANNULE').slice(-10).map((s: any) => ({
                   label: new Date(s.createdAt).toLocaleDateString('fr-FR', { day:'2-digit', month:'short' }),
-                  total: parseFloat(s.totalTtc)
+                  total: parseFloat(s.totalTtc),
+                  collected: parseFloat(s.amountPaid || 0)
                 }))}>
                   <defs>
                     <linearGradient id="gradRevenue" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="5%" stopColor="#6366f1" stopOpacity={0.15}/>
                       <stop offset="95%" stopColor="#6366f1" stopOpacity={0}/>
+                    </linearGradient>
+                    <linearGradient id="gradCollected" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#10b981" stopOpacity={0.15}/>
+                      <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
                     </linearGradient>
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9"/>
@@ -443,10 +650,12 @@ const Dashboard: React.FC<{
                   <YAxis hide/>
                   <Tooltip
                     contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)', fontSize: 11 }}
-                    formatter={(v: any) => [`${Number(v).toLocaleString('fr-FR')} ${currency.split(' ')[0]}`, 'Revenus']}
+                    formatter={(v: any, name: string) => [`${Number(v).toLocaleString('fr-FR')} ${currency.split(' ')[0]}`, name === 'total' ? 'CA Facturé' : 'Encaissé']}
                   />
+                  <Legend wrapperStyle={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase' }}
+                    formatter={(val: string) => val === 'total' ? 'CA Facturé' : 'Encaissé'} />
                   <Area type="monotone" dataKey="total" stroke="#6366f1" strokeWidth={3} fill="url(#gradRevenue)"/>
-                  <Bar dataKey="total" fill="#6366f1" opacity={0.15} radius={[4,4,0,0]} barSize={20}/>
+                  <Area type="monotone" dataKey="collected" stroke="#10b981" strokeWidth={2} strokeDasharray="4 2" fill="url(#gradCollected)"/>
                 </ComposedChart>
               </ResponsiveContainer>
             </div>
@@ -631,7 +840,7 @@ const Dashboard: React.FC<{
                   {sales.slice(0, 8).map((s: any) => (
                     <tr key={s.id} className="border-b border-slate-50 last:border-0 hover:bg-slate-50 transition-all">
                       <td className="py-2.5 pr-3 text-[10px] font-black text-slate-700">{s.reference || `#${s.id?.slice(-6)}`}</td>
-                      <td className="py-2.5 pr-3 text-[10px] text-slate-500 truncate max-w-[120px]">{s.customer || 'N/A'}</td>
+                      <td className="py-2.5 pr-3 text-[10px] text-slate-500 truncate max-w-[120px]">{getCustomerName(s.customer) || 'N/A'}</td>
                       <td className="py-2.5 pr-3 text-[10px] font-black text-slate-800 text-right">{Number(s.totalTtc).toLocaleString('fr-FR')}</td>
                       <td className="py-2.5 text-center">
                         <span className={`text-[8px] font-black px-2 py-0.5 rounded-lg uppercase ${
@@ -666,7 +875,7 @@ const Dashboard: React.FC<{
                     <DollarSign size={12} className="text-emerald-600"/>
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-[10px] font-black text-slate-800 truncate">{p.customer || 'Paiement'}</p>
+                    <p className="text-[10px] font-black text-slate-800 truncate">{getCustomerName(p.customer) || 'Paiement'}</p>
                     <p className="text-[8px] text-slate-400">{timeAgo(p.createdAt)} · Vente #{p.saleId?.slice(-6) || '—'}</p>
                   </div>
                   <p className="text-[10px] font-black text-emerald-600 flex-shrink-0">+{Number(p.amount).toLocaleString('fr-FR')}</p>
@@ -764,7 +973,7 @@ const Dashboard: React.FC<{
               <div key={s.id} className="flex items-center gap-3 p-2.5 bg-slate-50 rounded-xl">
                 <div className="flex-1 min-w-0">
                   <p className="text-[10px] font-black text-slate-800 truncate">{s.reference || `#${String(s.id).slice(-6)}`}</p>
-                  <p className="text-[8px] text-slate-400">{s.customer || 'N/A'}</p>
+                  <p className="text-[8px] text-slate-400">{getCustomerName(s.customer) || 'N/A'}</p>
                 </div>
                 <div className="text-right flex-shrink-0">
                   <p className="text-[10px] font-black text-slate-700">{Number(s.totalTtc).toLocaleString('fr-FR')}</p>
@@ -842,40 +1051,168 @@ const Dashboard: React.FC<{
   // ============================================================
   // SALES DASHBOARD
   // ============================================================
-  const renderSalesDashboard = () => (
-    <div className="space-y-8 animate-in fade-in duration-700">
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <StatCard title="Chiffre d'Affaires" value={fmtShort(salesStats.totalRevenue) + ' ' + currency.split(' ')[0]} subValue="Ventes enregistrées" icon={TrendingUp} color="bg-indigo-600" trend="up"/>
-        <StatCard title="Ventes" value={sales.length} subValue="Transactions totales" icon={ShoppingBag} color="bg-emerald-600"/>
-        <StatCard title="Clients actifs" value={customers.length} subValue="Portefeuille" icon={UserCheck} color="bg-sky-600"/>
-        <StatCard title="Panier moyen" value={fmtShort(salesStats.avgBasket) + ' ' + currency.split(' ')[0]} subValue="Par transaction" icon={Target} color="bg-amber-500"/>
-      </div>
-      <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
-        <SectionHeader icon={ShoppingBag} title="Mes Dernières Ventes" color="text-indigo-600"/>
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead><tr className="border-b border-slate-50">
-              <th className="text-left text-[8px] font-black text-slate-400 uppercase pb-2 pr-3">Référence</th>
-              <th className="text-left text-[8px] font-black text-slate-400 uppercase pb-2 pr-3">Client</th>
-              <th className="text-right text-[8px] font-black text-slate-400 uppercase pb-2 pr-3">Montant</th>
-              <th className="text-center text-[8px] font-black text-slate-400 uppercase pb-2">Statut</th>
-            </tr></thead>
-            <tbody>
-              {sales.slice(0, 10).map((s: any) => (
-                <tr key={s.id} className="border-b border-slate-50 last:border-0 hover:bg-slate-50 transition-all">
-                  <td className="py-2.5 pr-3 text-[10px] font-black text-slate-700">{s.reference || `#${String(s.id).slice(-6)}`}</td>
-                  <td className="py-2.5 pr-3 text-[10px] text-slate-500 truncate max-w-[120px]">{s.customer || 'N/A'}</td>
-                  <td className="py-2.5 pr-3 text-[10px] font-black text-slate-800 text-right">{Number(s.totalTtc).toLocaleString('fr-FR')}</td>
-                  <td className="py-2.5 text-center">
-                    <span className={`text-[8px] font-black px-2 py-0.5 rounded-lg uppercase ${s.status === 'TERMINE' ? 'bg-emerald-100 text-emerald-700' : s.status === 'EN_COURS' ? 'bg-amber-100 text-amber-700' : 'bg-rose-100 text-rose-700'}`}>
-                      {s.status === 'TERMINE' ? 'Soldé' : s.status === 'EN_COURS' ? 'En cours' : 'Annulé'}
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+  const renderSalesDashboard = () => {
+    const soldedCount = sales.filter((s: any) => s.status === 'TERMINE').length;
+    const pendingCount = sales.filter((s: any) => s.status === 'EN_COURS').length;
+    const collectionRate = salesStats.totalRevenue > 0
+      ? Math.round((salesStats.totalCollected / salesStats.totalRevenue) * 100) : 0;
+    return (
+      <div className="space-y-6 animate-in fade-in duration-700">
+        {/* Bannière Performance */}
+        <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-emerald-500 via-teal-600 to-cyan-700 p-6 md:p-8 text-white shadow-xl">
+          <div className="absolute -right-10 -top-10 w-56 h-56 bg-white/5 rounded-full pointer-events-none"/>
+          <div className="absolute -left-6 bottom-0 w-28 h-28 bg-white/5 rounded-full pointer-events-none"/>
+          <div className="relative flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+            <div>
+              <p className="text-[9px] font-black uppercase tracking-widest text-white/60 mb-1">Performance Commerciale</p>
+              <h3 className="text-2xl md:text-3xl font-black uppercase tracking-tight">Tableau de Bord Ventes</h3>
+              <div className="flex flex-wrap gap-3 mt-2">
+                <span className="bg-white/20 border border-white/30 px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest">{sales.length} transactions</span>
+                <span className="bg-white/20 border border-white/30 px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest">{collectionRate}% encaissé</span>
+              </div>
+            </div>
+            <button onClick={() => onNavigate?.('sales')}
+              className="bg-white text-emerald-700 px-6 py-3 rounded-xl font-black text-[10px] uppercase tracking-widest hover:bg-emerald-50 transition-all flex items-center gap-2 shadow-lg flex-shrink-0">
+              <ShoppingCart size={14}/> Nouvelle Vente
+            </button>
+          </div>
         </div>
+
+        {/* KPI Cards */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <StatCard title="Chiffre d'Affaires" value={fmtShort(salesStats.totalRevenue) + ' ' + currency.split(' ')[0]} subValue="CA total période" icon={TrendingUp} color="bg-indigo-600" trend="up" onClick={() => onNavigate?.('sales')}/>
+          <StatCard title="Encaissé" value={fmtShort(salesStats.totalCollected) + ' ' + currency.split(' ')[0]} subValue={`Taux : ${collectionRate}%`} icon={Wallet} color="bg-emerald-600" trend="up"/>
+          <StatCard title="Clients" value={customers.length} subValue="Portefeuille actif" icon={UserCheck} color="bg-sky-600" onClick={() => onNavigate?.('customers')}/>
+          <StatCard title="Panier Moyen" value={fmtShort(salesStats.avgBasket) + ' ' + currency.split(' ')[0]} subValue="Par transaction" icon={Target} color="bg-amber-500"/>
+        </div>
+
+        {/* Progression */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm col-span-1 md:col-span-2">
+            <SectionHeader icon={ShoppingBag} title="Mes Dernières Ventes" color="text-indigo-600"/>
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-slate-50">
+                    <th className="text-left text-[8px] font-black text-slate-400 uppercase pb-2 pr-3">Référence</th>
+                    <th className="text-left text-[8px] font-black text-slate-400 uppercase pb-2 pr-3">Client</th>
+                    <th className="text-right text-[8px] font-black text-slate-400 uppercase pb-2 pr-3">Montant</th>
+                    <th className="text-center text-[8px] font-black text-slate-400 uppercase pb-2">Statut</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {sales.slice(0, 10).map((s: any) => (
+                    <tr key={s.id} className="border-b border-slate-50 last:border-0 hover:bg-slate-50 transition-all">
+                      <td className="py-2.5 pr-3 text-[10px] font-black text-slate-700">{s.reference || `#${String(s.id).slice(-6)}`}</td>
+                      <td className="py-2.5 pr-3 text-[10px] text-slate-500 truncate max-w-[120px]">{getCustomerName(s.customer) || 'N/A'}</td>
+                      <td className="py-2.5 pr-3 text-[10px] font-black text-slate-800 text-right">{Number(s.totalTtc).toLocaleString('fr-FR')}</td>
+                      <td className="py-2.5 text-center">
+                        <span className={`text-[8px] font-black px-2 py-0.5 rounded-lg uppercase ${s.status === 'TERMINE' ? 'bg-emerald-100 text-emerald-700' : s.status === 'EN_COURS' ? 'bg-amber-100 text-amber-700' : 'bg-rose-100 text-rose-700'}`}>
+                          {s.status === 'TERMINE' ? 'Soldé' : s.status === 'EN_COURS' ? 'En cours' : 'Annulé'}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {sales.length === 0 && <div className="py-8 text-center text-slate-300 text-[10px] font-black uppercase">Aucune vente enregistrée</div>}
+            </div>
+            <button onClick={() => onNavigate?.('sales')} className="mt-4 w-full py-2.5 border border-slate-200 rounded-2xl text-[9px] font-black uppercase text-slate-400 hover:bg-indigo-600 hover:text-white hover:border-indigo-600 transition-all flex items-center justify-center gap-2">
+              Toutes les ventes <ArrowRight size={11}/>
+            </button>
+          </div>
+
+          {/* Mini stats */}
+          <div className="flex flex-col gap-4">
+            <div className="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm flex-1">
+              <SectionHeader icon={CheckCircle2} title="Résumé" color="text-emerald-600"/>
+              <div className="space-y-3">
+                <div className="flex items-center justify-between p-3 bg-emerald-50 rounded-xl">
+                  <div className="flex items-center gap-2">
+                    <div className="w-2 h-2 rounded-full bg-emerald-500"/>
+                    <span className="text-[10px] font-black text-slate-700 uppercase">Soldées</span>
+                  </div>
+                  <span className="text-sm font-black text-emerald-600">{soldedCount}</span>
+                </div>
+                <div className="flex items-center justify-between p-3 bg-amber-50 rounded-xl">
+                  <div className="flex items-center gap-2">
+                    <div className="w-2 h-2 rounded-full bg-amber-400"/>
+                    <span className="text-[10px] font-black text-slate-700 uppercase">En cours</span>
+                  </div>
+                  <span className="text-sm font-black text-amber-600">{pendingCount}</span>
+                </div>
+                <div className="flex items-center justify-between p-3 bg-rose-50 rounded-xl">
+                  <div className="flex items-center gap-2">
+                    <div className="w-2 h-2 rounded-full bg-rose-500"/>
+                    <span className="text-[10px] font-black text-slate-700 uppercase">Impayé</span>
+                  </div>
+                  <span className="text-sm font-black text-rose-600">{fmtShort(salesStats.totalUnpaid)}</span>
+                </div>
+              </div>
+            </div>
+            <button onClick={() => onNavigate?.('customers')}
+              className="bg-gradient-to-br from-sky-500 to-blue-600 text-white p-5 rounded-3xl shadow-md hover:shadow-xl hover:scale-[1.02] transition-all text-left">
+              <Users size={20} className="mb-2 opacity-90"/>
+              <p className="text-[11px] font-black uppercase tracking-tight">{customers.length} Clients</p>
+              <p className="text-[9px] text-white/70 font-bold mt-1">Gérer le portefeuille</p>
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // ============================================================
+  // HR MANAGER DASHBOARD
+  // ============================================================
+  const renderHRManagerDashboard = () => (
+    <div className="space-y-6 animate-in fade-in duration-700">
+      {/* Bannière RH */}
+      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-rose-500 via-pink-600 to-purple-700 p-6 md:p-8 text-white shadow-xl">
+        <div className="absolute -right-10 -top-10 w-56 h-56 bg-white/5 rounded-full pointer-events-none"/>
+        <div className="absolute -left-6 bottom-0 w-32 h-32 bg-white/5 rounded-full pointer-events-none"/>
+        <div className="relative flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+          <div>
+            <p className="text-[9px] font-black uppercase tracking-widest text-white/60 mb-1">Module Ressources Humaines</p>
+            <h3 className="text-2xl md:text-3xl font-black uppercase tracking-tight">Centre RH</h3>
+            <p className="text-white/70 text-xs font-bold uppercase mt-1 tracking-widest">Gestion du Capital Humain</p>
+          </div>
+          <button onClick={() => onNavigate?.('rh')}
+            className="bg-white/20 backdrop-blur-sm border border-white/30 text-white px-5 py-3 rounded-xl font-black text-[10px] uppercase tracking-widest hover:bg-white/30 transition-all flex items-center gap-2 shadow-lg flex-shrink-0">
+            <Users size={14}/> Tableau de Bord RH Complet
+          </button>
+        </div>
+      </div>
+
+      {/* Modules RH rapides */}
+      <div>
+        <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-3">Accès Modules RH</p>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          {([
+            { label: 'Employés', icon: Users, gradient: 'from-rose-500 to-pink-600', tab: 'rh.employees', desc: 'Gérer les employés' },
+            { label: 'Congés', icon: Calendar, gradient: 'from-sky-500 to-blue-600', tab: 'rh.leaves', desc: 'Demandes en attente' },
+            { label: 'Paie', icon: Wallet, gradient: 'from-emerald-500 to-teal-600', tab: 'rh.payroll.settings', desc: 'Gestion de la paie' },
+            { label: 'Pointage', icon: Clock, gradient: 'from-violet-500 to-purple-600', tab: 'rh.attendance', desc: 'Suivi des présences' },
+            { label: 'Contrats', icon: Briefcase, gradient: 'from-amber-400 to-orange-500', tab: 'rh.contracts', desc: 'Gérer les contrats' },
+            { label: 'Fiches de Paie', icon: Receipt, gradient: 'from-indigo-500 to-blue-600', tab: 'rh.payroll.slips', desc: 'Bulletins de salaire' },
+            { label: 'Documents', icon: FileText, gradient: 'from-slate-600 to-slate-800', tab: 'rh.docs', desc: 'Centre documentaire' },
+            { label: 'Organigramme', icon: Building2, gradient: 'from-pink-500 to-rose-600', tab: 'rh.org', desc: "Structure d'entreprise" },
+          ] as const).map(({ label, icon: Icon, gradient, tab, desc }) => (
+            <button key={tab} onClick={() => onNavigate?.(tab)}
+              className={`group bg-gradient-to-br ${gradient} text-white p-5 rounded-2xl shadow-md hover:shadow-xl hover:scale-[1.03] transition-all text-left`}>
+              <Icon size={20} className="mb-3 opacity-90"/>
+              <p className="text-[11px] font-black uppercase tracking-tight leading-tight">{label}</p>
+              <p className="text-[9px] text-white/70 font-bold mt-1">{desc}</p>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Stats rapides */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <StatCard title="Mes Congés" value="—" subValue="Consulter mes demandes" icon={Calendar} color="bg-sky-500" onClick={() => onNavigate?.('my-leaves')}/>
+        <StatCard title="Avances Salariales" icon={HandCoins} value="—" subValue="Suivi des avances" color="bg-amber-500" onClick={() => onNavigate?.('rh.payroll.advances')}/>
+        <StatCard title="Primes & Bonus" icon={Sparkles} value="—" subValue="Gestion des primes" color="bg-violet-600" onClick={() => onNavigate?.('rh.payroll.bonuses')}/>
       </div>
     </div>
   );
@@ -883,15 +1220,66 @@ const Dashboard: React.FC<{
   // ============================================================
   // EMPLOYEE DASHBOARD
   // ============================================================
-  const renderEmployeeDashboard = () => (
-    <div className="space-y-8 animate-in fade-in duration-700">
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <StatCard title="Produits Disponibles" value={stocks.length} subValue="Catalogue en rayon" icon={Package} color="bg-indigo-600"/>
-        <StatCard title="Services Actifs" value={services.filter(s => s.isActive).length} subValue="Offres disponibles" icon={Sparkles} color="bg-amber-500"/>
-        <StatCard title="Base Partenaires" value={customers.length} subValue="Clients enregistrés" icon={Users} color="bg-emerald-600"/>
+  const renderEmployeeDashboard = () => {
+    const activeServices = services.filter((s: any) => s.isActive !== false);
+    return (
+      <div className="space-y-6 animate-in fade-in duration-700">
+        {/* Bannière Mon Espace */}
+        <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-indigo-600 via-violet-600 to-purple-700 p-6 md:p-8 text-white shadow-xl">
+          <div className="absolute -right-10 -top-10 w-56 h-56 bg-white/5 rounded-full pointer-events-none"/>
+          <div className="absolute -left-6 bottom-0 w-28 h-28 bg-white/5 rounded-full pointer-events-none"/>
+          <div className="relative">
+            <p className="text-[9px] font-black uppercase tracking-widest text-white/60 mb-1">Mon Espace Collaborateur</p>
+            <h3 className="text-2xl md:text-3xl font-black uppercase tracking-tight">{user.name}</h3>
+            <div className="flex flex-wrap items-center gap-3 mt-2">
+              <span className="bg-white/20 border border-white/30 px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest">Employé</span>
+              <span className="text-white/60 text-[9px] font-bold uppercase tracking-widest flex items-center gap-1">
+                <MapPin size={10}/> {new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* Accès Rapide */}
+        <div>
+          <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-3">Accès Rapide</p>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            {([
+              { label: 'Mon Pointage', icon: Clock, gradient: 'from-violet-500 to-purple-600', tab: 'employee-pointage', desc: 'Enregistrer ma présence' },
+              { label: 'Mes Congés', icon: Calendar, gradient: 'from-sky-500 to-blue-600', tab: 'my-leaves', desc: 'Demander un congé' },
+              { label: 'Catalogue Produits', icon: Package, gradient: 'from-amber-400 to-orange-500', tab: 'inventory', desc: `${stocks.length} références dispo.` },
+              { label: 'Base Clients', icon: Users, gradient: 'from-emerald-500 to-teal-600', tab: 'customers', desc: `${customers.length} clients enregistrés` },
+            ] as const).map(({ label, icon: Icon, gradient, tab, desc }) => (
+              <button key={tab} onClick={() => onNavigate?.(tab)}
+                className={`group bg-gradient-to-br ${gradient} text-white p-5 rounded-2xl shadow-md hover:shadow-xl hover:scale-[1.03] transition-all text-left`}>
+                <Icon size={22} className="mb-3 opacity-90"/>
+                <p className="text-[11px] font-black uppercase tracking-tight leading-tight">{label}</p>
+                <p className="text-[9px] text-white/70 font-bold mt-1">{desc}</p>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* KPI Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <StatCard title="Produits Disponibles" value={stocks.length} subValue="Catalogue en rayon" icon={Package} color="bg-indigo-600" onClick={() => onNavigate?.('inventory')}/>
+          <StatCard title="Services Actifs" value={activeServices.length} subValue="Offres disponibles" icon={Sparkles} color="bg-amber-500"/>
+          <StatCard title="Base Partenaires" value={customers.length} subValue="Clients enregistrés" icon={Users} color="bg-emerald-600" onClick={() => onNavigate?.('customers')}/>
+        </div>
+
+        {/* Info / conseil */}
+        <div className="bg-indigo-50 border border-indigo-100 rounded-2xl p-5 flex items-start gap-4">
+          <div className="w-10 h-10 rounded-xl bg-indigo-600 text-white flex items-center justify-center flex-shrink-0">
+            <Bell size={18}/>
+          </div>
+          <div>
+            <p className="text-[11px] font-black text-indigo-800 uppercase tracking-wide">Bienvenue dans votre espace</p>
+            <p className="text-[10px] text-indigo-600 font-semibold mt-1">Utilisez les raccourcis ci-dessus pour accéder à vos fonctionnalités. Pour tout besoin de congé ou signaler une présence, utilisez les modules dédiés.</p>
+          </div>
+        </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   // ============================================================
   // ROUTER
@@ -908,6 +1296,7 @@ const Dashboard: React.FC<{
     if (userRoles.includes(UserRole.SUPER_ADMIN) || userRoles.includes(UserRole.ADMIN)) return renderAdminDashboard();
     if (userRoles.includes(UserRole.ACCOUNTANT)) return renderAccountantDashboard();
     if (userRoles.includes(UserRole.STOCK_MANAGER)) return renderStockManagerDashboard();
+    if (userRoles.includes(UserRole.HR_MANAGER)) return renderHRManagerDashboard();
     if (userRoles.includes(UserRole.EMPLOYEE)) return renderEmployeeDashboard();
     return renderSalesDashboard();
   };
@@ -915,9 +1304,29 @@ const Dashboard: React.FC<{
   const now = new Date();
   const greeting = now.getHours() < 12 ? 'Bonjour' : now.getHours() < 18 ? 'Bon après-midi' : 'Bonsoir';
 
+  const roleColors: Record<string, string> = {
+    SUPER_ADMIN: 'bg-rose-600 text-white',
+    ADMIN: 'bg-indigo-600 text-white',
+    HR_MANAGER: 'bg-pink-600 text-white',
+    STOCK_MANAGER: 'bg-amber-500 text-white',
+    ACCOUNTANT: 'bg-emerald-600 text-white',
+    SALES: 'bg-teal-600 text-white',
+    EMPLOYEE: 'bg-slate-700 text-white',
+  };
+  const roleLabels: Record<string, string> = {
+    SUPER_ADMIN: 'Super Admin',
+    ADMIN: 'Administrateur',
+    HR_MANAGER: 'Responsable RH',
+    STOCK_MANAGER: 'Gestionnaire Stock',
+    ACCOUNTANT: 'Comptable',
+    SALES: 'Commercial',
+    EMPLOYEE: 'Employé',
+  };
+
   return (
-    <div className="space-y-8">
-      <div className="flex flex-col md:flex-row justify-between md:items-end gap-4">
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex flex-col md:flex-row justify-between md:items-center gap-4">
         <div>
           <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">
             {now.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
@@ -927,16 +1336,44 @@ const Dashboard: React.FC<{
           </h2>
           <div className="flex flex-wrap gap-2 mt-2">
             {userRoles.map(r => (
-              <span key={r} className="text-slate-400 text-[8px] font-black uppercase tracking-widest border border-slate-200 px-2 py-0.5 rounded-lg bg-white shadow-sm">
-                {r.replace('_', ' ')}
+              <span key={r} className={`text-[9px] font-black uppercase tracking-widest px-3 py-1 rounded-full shadow-sm ${roleColors[r] || 'bg-slate-200 text-slate-700'}`}>
+                {roleLabels[r] || r.replace(/_/g, ' ')}
               </span>
             ))}
           </div>
         </div>
-        <div className="flex items-center gap-3 px-4 py-2 bg-emerald-50 text-emerald-600 rounded-full border border-emerald-100 text-[9px] font-black uppercase tracking-widest">
+        <div className="flex items-center gap-3 px-4 py-2.5 bg-emerald-50 text-emerald-600 rounded-full border border-emerald-100 text-[9px] font-black uppercase tracking-widest self-start md:self-auto">
           <ShieldCheck size={12}/> Connexion Sécurisée • Kernel v3.2.1
         </div>
       </div>
+
+      {/* FILTRE ANNÉE / MOIS — visible pour tous les rôles */}
+      <div className="bg-white px-5 py-4 rounded-2xl border border-slate-100 shadow-sm">
+        <YearMonthPicker
+          dataYears={availableYears}
+          selectedYear={selectedYear}
+          selectedMonth={selectedMonth}
+          onYearChange={setSelectedYear}
+          onMonthChange={setSelectedMonth}
+        />
+      </div>
+
+      {/* BANNIÈRE ESSAI GRATUIT — visible pour tous les rôles non-admin aussi */}
+      {trialDaysLeft !== null && !userRoles.includes(UserRole.ADMIN) && !userRoles.includes(UserRole.SUPER_ADMIN) && (
+        <div className={`p-5 rounded-3xl border-2 flex flex-col sm:flex-row items-center justify-between gap-4 shadow-md ${trialDaysLeft <= 3 ? 'bg-rose-50 border-rose-300' : trialDaysLeft <= 7 ? 'bg-amber-50 border-amber-300' : 'bg-indigo-50 border-indigo-200'}`}>
+          <div className="flex items-center gap-4">
+            <div className={`w-10 h-10 rounded-2xl flex items-center justify-center shadow text-white ${trialDaysLeft <= 3 ? 'bg-rose-600' : trialDaysLeft <= 7 ? 'bg-amber-500' : 'bg-indigo-600'}`}>
+              <Timer size={20} />
+            </div>
+            <div>
+              <p className={`text-sm font-black uppercase tracking-tight ${trialDaysLeft <= 3 ? 'text-rose-700' : trialDaysLeft <= 7 ? 'text-amber-700' : 'text-indigo-700'}`}>
+                {trialDaysLeft === 0 ? 'Essai expiré' : `Essai gratuit — ${trialDaysLeft} jour${trialDaysLeft > 1 ? 's' : ''} restant${trialDaysLeft > 1 ? 's' : ''}`}
+              </p>
+              <p className="text-[9px] text-slate-400 font-bold uppercase tracking-widest">Contactez l'administrateur pour renouveler l'accès.</p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {activeDashboard()}
     </div>

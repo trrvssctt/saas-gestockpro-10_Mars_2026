@@ -8,6 +8,7 @@ import {
 import { Customer, UserRole, User, SubscriptionPlan } from '../types';
 import { authBridge } from '../services/authBridge';
 import { apiClient } from '../services/api';
+import YearMonthPicker from './YearMonthPicker';
 
 interface CustomersProps {
   user: User;
@@ -25,6 +26,31 @@ const Customers: React.FC<CustomersProps> = ({ user, currency, plan }) => {
   const [pageSize, setPageSize] = useState(6);
   const [showFilters, setShowFilters] = useState(false);
   const [filters, setFilters] = useState({ dateFrom: '', dateTo: '', minOutstanding: '', maxOutstanding: '', status: 'ALL' });
+
+  // Year/Month filter
+  const [selectedYear, setSelectedYear] = useState<number | null>(null);
+  const [selectedMonth, setSelectedMonth] = useState<number | null>(null);
+
+  const availableYears = useMemo(() => {
+    const years = new Set<number>();
+    years.add(new Date().getFullYear());
+    customers.forEach((c: any) => { if (c.createdAt) years.add(new Date(c.createdAt).getFullYear()); });
+    return Array.from(years).sort((a, b) => b - a);
+  }, [customers]);
+
+  useEffect(() => {
+    if (selectedYear === null) {
+      setFilters(f => ({ ...f, dateFrom: '', dateTo: '' }));
+      return;
+    }
+    const ms = selectedMonth !== null ? selectedMonth : 0;
+    const me = selectedMonth !== null ? selectedMonth : 11;
+    setFilters(f => ({
+      ...f,
+      dateFrom: new Date(selectedYear, ms, 1).toISOString().split('T')[0],
+      dateTo:   new Date(selectedYear, me + 1, 0).toISOString().split('T')[0]
+    }));
+  }, [selectedYear, selectedMonth]);
   
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState<Customer | null>(null);
@@ -273,7 +299,14 @@ const Customers: React.FC<CustomersProps> = ({ user, currency, plan }) => {
       </div>
 
       {showFilters && (
-        <div className="bg-white p-4 rounded-[1.5rem] border border-slate-100 shadow-sm mt-4">
+        <div className="bg-white p-4 rounded-[1.5rem] border border-slate-100 shadow-sm mt-4 space-y-4">
+          <YearMonthPicker
+            dataYears={availableYears}
+            selectedYear={selectedYear}
+            selectedMonth={selectedMonth}
+            onYearChange={setSelectedYear}
+            onMonthChange={setSelectedMonth}
+          />
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
             <div>
               <label className="text-[10px] font-black uppercase text-slate-400">Date de création (début)</label>

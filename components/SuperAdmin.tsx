@@ -6,7 +6,8 @@ import {
   Zap, DollarSign, Wallet, Plus, X, Eye,
   Layers, Save, Clock, History, ChevronRight, Terminal,
   Filter, Check, Send, Trash2, ArrowLeft, BadgeCheck,
-  Building2, TrendingDown, ArrowDown, ArrowUp, Activity
+  Building2, TrendingDown, ArrowDown, ArrowUp, Activity,
+  LifeBuoy, MessageCircle
 } from 'lucide-react';
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -16,7 +17,7 @@ import { apiClient } from '../services/api';
 import { useToast } from './ToastProvider';
 
 const SuperAdmin: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'DASHBOARD' | 'COMPTES' | 'PAIEMENTS' | 'PLANS' | 'ALERTES' | 'MESSAGES' | 'LOGS'>('DASHBOARD');
+  const [activeTab, setActiveTab] = useState<'DASHBOARD' | 'COMPTES' | 'PAIEMENTS' | 'PLANS' | 'ALERTES' | 'MESSAGES' | 'LOGS' | 'SUPPORT' | 'COMMUNICATION'>('DASHBOARD');
   const [loading, setLoading] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
   const [data, setData] = useState<any>(null);
@@ -55,6 +56,22 @@ const SuperAdmin: React.FC = () => {
   const [emailModal, setEmailModal] = useState<{ tenantId: string; tenantName: string } | null>(null);
   const [emailSubject, setEmailSubject] = useState('');
   const [emailBody, setEmailBody] = useState('');
+
+  // Support tickets state
+  const [supportTickets, setSupportTickets] = useState<any[]>([]);
+  const [supportStats, setSupportStats] = useState({ total: 0, open: 0, inProgress: 0, resolved: 0, urgent: 0 });
+  const [supportLoading, setSupportLoading] = useState(false);
+  const [supportStatusFilter, setSupportStatusFilter] = useState('');
+  const [selectedTicket, setSelectedTicket] = useState<any>(null);
+  const [ticketReply, setTicketReply] = useState('');
+  const [ticketReplyLoading, setTicketReplyLoading] = useState(false);
+
+  // Communication / announcements state
+  const [announcements, setAnnouncements] = useState<any[]>([]);
+  const [announcementsLoading, setAnnouncementsLoading] = useState(false);
+  const [annForm, setAnnForm] = useState({ title: '', body: '', type: 'INFO', targetPlan: '', isPinned: false, expiresAt: '' });
+  const [annSaving, setAnnSaving] = useState(false);
+  const [annEditId, setAnnEditId] = useState<string | null>(null);
 
   const showToast = useToast();
 
@@ -117,8 +134,83 @@ const SuperAdmin: React.FC = () => {
     } catch { setLogs([]); } finally { setLogsLoading(false); }
   };
 
+  const fetchSupport = async () => {
+    setSupportLoading(true);
+    try {
+      const [ticketsRes, statsRes] = await Promise.all([
+        apiClient.get(`/admin/support${supportStatusFilter ? `?status=${supportStatusFilter}` : ''}`),
+        apiClient.get('/admin/support/stats')
+      ]);
+      setSupportTickets((ticketsRes as any)?.tickets || ticketsRes || []);
+      setSupportStats(statsRes as any || { total: 0, open: 0, inProgress: 0, resolved: 0, urgent: 0 });
+    } catch { setSupportTickets([]); } finally { setSupportLoading(false); }
+  };
+
+  const handleTicketReply = async () => {
+    if (!selectedTicket || !ticketReply.trim()) return;
+    setTicketReplyLoading(true);
+    try {
+      const res = await apiClient.patch(`/admin/support/${selectedTicket.id}`, {
+        adminReply: ticketReply,
+        status: 'RESOLVED'
+      });
+      setSelectedTicket((res as any)?.ticket || null);
+      setTicketReply('');
+      fetchSupport();
+      showToast('Réponse envoyée', 'success');
+    } catch (e: any) {
+      showToast(e?.message || 'Erreur', 'error');
+    } finally { setTicketReplyLoading(false); }
+  };
+
+  const handleTicketStatus = async (id: string, status: string) => {
+    try {
+      await apiClient.patch(`/admin/support/${id}`, { status });
+      setSupportTickets((prev: any[]) => prev.map((t: any) => t.id === id ? { ...t, status } : t));
+      if (selectedTicket?.id === id) setSelectedTicket((prev: any) => prev ? { ...prev, status } : prev);
+      showToast('Statut mis à jour', 'success');
+    } catch (e: any) { showToast(e?.message || 'Erreur', 'error'); }
+  };
+
+  const fetchAnnouncements = async () => {
+    setAnnouncementsLoading(true);
+    try {
+      const res = await apiClient.get('/admin/announcements');
+      setAnnouncements(Array.isArray(res) ? res : []);
+    } catch (e: any) { showToast(e?.message || 'Erreur', 'error'); }
+    finally { setAnnouncementsLoading(false); }
+  };
+
+  const handleSaveAnnouncement = async () => {
+    if (!annForm.title.trim() || !annForm.body.trim()) { showToast('Titre et message requis', 'error'); return; }
+    setAnnSaving(true);
+    try {
+      if (annEditId) {
+        await apiClient.patch(`/admin/announcements/${annEditId}`, annForm);
+        showToast('Annonce mise à jour', 'success');
+      } else {
+        await apiClient.post('/admin/announcements', annForm);
+        showToast('Annonce publiée', 'success');
+      }
+      setAnnForm({ title: '', body: '', type: 'INFO', targetPlan: '', isPinned: false, expiresAt: '' });
+      setAnnEditId(null);
+      fetchAnnouncements();
+    } catch (e: any) { showToast(e?.message || 'Erreur', 'error'); }
+    finally { setAnnSaving(false); }
+  };
+
+  const handleDeleteAnnouncement = async (id: string) => {
+    try {
+      await apiClient.delete(`/admin/announcements/${id}`);
+      setAnnouncements(prev => prev.filter((a: any) => a.id !== id));
+      showToast('Annonce supprimée', 'success');
+    } catch (e: any) { showToast(e?.message || 'Erreur', 'error'); }
+  };
+
   useEffect(() => { fetchData(); }, []);
   useEffect(() => { if (activeTab === 'MESSAGES') fetchMessages(); }, [activeTab, messagesFilter, messagesSearch, messagesPage]);
+  useEffect(() => { if (activeTab === 'SUPPORT') fetchSupport(); }, [activeTab, supportStatusFilter]);
+  useEffect(() => { if (activeTab === 'COMMUNICATION') fetchAnnouncements(); }, [activeTab]);
 
   /* ─── ACTIONS ─── */
   const handleToggleLock = (tenantId: string, tenantName: string, currentStatus: boolean) => {
@@ -365,6 +457,8 @@ const SuperAdmin: React.FC = () => {
               { id: 'PLANS', label: 'Offres', icon: Layers },
               { id: 'ALERTES', label: 'Alertes', icon: AlertTriangle },
               { id: 'MESSAGES', label: 'Messages', icon: Mail },
+              { id: 'COMMUNICATION', label: 'Communication', icon: Send },
+              { id: 'SUPPORT', label: 'Support', icon: LifeBuoy },
               { id: 'LOGS', label: 'Logs', icon: Terminal }
             ].map(tab => (
               <button
@@ -375,6 +469,9 @@ const SuperAdmin: React.FC = () => {
                 <tab.icon size={13} /> {tab.label}
                 {tab.id === 'ALERTES' && overdueTenantsRaw.length > 0 && (
                   <span className="bg-rose-500 text-white text-[8px] font-black px-1 rounded-full">{overdueTenantsRaw.length}</span>
+                )}
+                {tab.id === 'SUPPORT' && supportStats.urgent > 0 && (
+                  <span className="bg-rose-500 text-white text-[8px] font-black px-1 rounded-full">{supportStats.urgent}</span>
                 )}
               </button>
             ))}
@@ -1078,6 +1175,148 @@ const SuperAdmin: React.FC = () => {
             </div>
           )}
 
+          {/* ══════════ COMMUNICATION ══════════ */}
+          {activeTab === 'COMMUNICATION' && (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+              {/* Formulaire création / édition */}
+              <div className="bg-white border border-slate-200 p-6 space-y-4">
+                <p className="text-xs font-black uppercase tracking-widest text-slate-700">
+                  {annEditId ? 'Modifier l\'annonce' : 'Nouvelle annonce'}
+                </p>
+                <input
+                  type="text"
+                  placeholder="Titre"
+                  value={annForm.title}
+                  onChange={e => setAnnForm(f => ({ ...f, title: e.target.value }))}
+                  className="w-full border border-slate-200 px-3 py-2 text-sm outline-none"
+                />
+                <textarea
+                  rows={4}
+                  placeholder="Contenu de l'annonce..."
+                  value={annForm.body}
+                  onChange={e => setAnnForm(f => ({ ...f, body: e.target.value }))}
+                  className="w-full border border-slate-200 px-3 py-2 text-sm outline-none resize-none"
+                />
+                <div className="grid grid-cols-2 gap-3">
+                  <select
+                    value={annForm.type}
+                    onChange={e => setAnnForm(f => ({ ...f, type: e.target.value }))}
+                    className="border border-slate-200 px-3 py-2 text-xs outline-none bg-white"
+                  >
+                    <option value="INFO">Information</option>
+                    <option value="WARNING">Avertissement</option>
+                    <option value="UPDATE">Mise à jour</option>
+                    <option value="PROMO">Offre / Promo</option>
+                    <option value="MAINTENANCE">Maintenance</option>
+                  </select>
+                  <select
+                    value={annForm.targetPlan}
+                    onChange={e => setAnnForm(f => ({ ...f, targetPlan: e.target.value }))}
+                    className="border border-slate-200 px-3 py-2 text-xs outline-none bg-white"
+                  >
+                    <option value="">Tous les plans</option>
+                    {plans.map((p: any) => (
+                      <option key={p.id} value={p.id}>{p.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="flex items-center gap-4">
+                  <label className="flex items-center gap-2 text-xs font-bold text-slate-600 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={annForm.isPinned}
+                      onChange={e => setAnnForm(f => ({ ...f, isPinned: e.target.checked }))}
+                      className="w-4 h-4"
+                    />
+                    Épingler
+                  </label>
+                  <div className="flex-1">
+                    <input
+                      type="date"
+                      value={annForm.expiresAt}
+                      onChange={e => setAnnForm(f => ({ ...f, expiresAt: e.target.value }))}
+                      className="border border-slate-200 px-3 py-2 text-xs outline-none w-full"
+                      placeholder="Expiration (optionnel)"
+                    />
+                  </div>
+                </div>
+                <div className="flex gap-3">
+                  <button
+                    onClick={handleSaveAnnouncement}
+                    disabled={annSaving}
+                    className="flex items-center gap-2 px-5 py-2 bg-slate-900 text-white text-xs font-bold disabled:opacity-60"
+                  >
+                    {annSaving ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
+                    {annEditId ? 'Mettre à jour' : 'Publier'}
+                  </button>
+                  {annEditId && (
+                    <button
+                      onClick={() => { setAnnEditId(null); setAnnForm({ title: '', body: '', type: 'INFO', targetPlan: '', isPinned: false, expiresAt: '' }); }}
+                      className="px-4 py-2 text-xs text-slate-500 border border-slate-200 hover:bg-slate-50"
+                    >
+                      Annuler
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Liste des annonces */}
+              <div className="bg-white border border-slate-200 overflow-hidden">
+                <div className="p-4 border-b border-slate-100 flex items-center justify-between">
+                  <p className="text-xs font-black uppercase tracking-widest text-slate-700">Annonces publiées</p>
+                  <button onClick={fetchAnnouncements} className="p-1.5 bg-slate-100 hover:bg-slate-200 rounded">
+                    <RefreshCw size={13} className={announcementsLoading ? 'animate-spin' : ''} />
+                  </button>
+                </div>
+                {announcementsLoading ? (
+                  <div className="flex justify-center py-12"><Loader2 className="animate-spin text-slate-400" size={24} /></div>
+                ) : announcements.length === 0 ? (
+                  <div className="py-12 text-center text-slate-400 text-xs font-black uppercase">Aucune annonce</div>
+                ) : (
+                  <div className="divide-y divide-slate-100 max-h-[600px] overflow-y-auto">
+                    {announcements.map((a: any) => (
+                      <div key={a.id} className="p-4 hover:bg-slate-50 space-y-1.5">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              {a.isPinned && <span className="text-[9px] font-black uppercase px-1.5 py-0.5 bg-indigo-100 text-indigo-700 rounded">Épinglé</span>}
+                              <span className="text-[9px] font-black uppercase px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded">{a.type}</span>
+                              {!a.isActive && <span className="text-[9px] font-black uppercase px-1.5 py-0.5 bg-rose-100 text-rose-600 rounded">Inactif</span>}
+                              {a.targetPlan && <span className="text-[9px] font-black uppercase px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded">Plan: {a.targetPlan}</span>}
+                            </div>
+                            <p className="text-sm font-bold text-slate-800 mt-1">{a.title}</p>
+                            <p className="text-xs text-slate-500 line-clamp-2 mt-0.5">{a.body}</p>
+                          </div>
+                          <div className="flex gap-1 flex-shrink-0">
+                            <button
+                              onClick={() => {
+                                setAnnEditId(a.id);
+                                setAnnForm({ title: a.title, body: a.body, type: a.type, targetPlan: a.targetPlan || '', isPinned: a.isPinned, expiresAt: a.expiresAt ? a.expiresAt.slice(0, 10) : '' });
+                              }}
+                              className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded"
+                              title="Modifier"
+                            >
+                              <Save size={13} />
+                            </button>
+                            <button
+                              onClick={() => handleDeleteAnnouncement(a.id)}
+                              className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded"
+                              title="Supprimer"
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          </div>
+                        </div>
+                        <p className="text-[10px] text-slate-400">{new Date(a.createdAt).toLocaleDateString('fr-FR')}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* ══════════ LOGS ══════════ */}
           {activeTab === 'LOGS' && (
             <div className="space-y-5">
@@ -1146,6 +1385,128 @@ const SuperAdmin: React.FC = () => {
                     </table>
                   </div>
                 )}
+              </div>
+            </div>
+          )}
+
+          {/* ══════════ SUPPORT ══════════ */}
+          {activeTab === 'SUPPORT' && (
+            <div className="space-y-5">
+              {/* Stats bar */}
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                {[
+                  { label: 'Total', value: supportStats.total, color: 'bg-slate-100 text-slate-700' },
+                  { label: 'Ouverts', value: supportStats.open, color: 'bg-sky-100 text-sky-700' },
+                  { label: 'En cours', value: supportStats.inProgress, color: 'bg-amber-100 text-amber-700' },
+                  { label: 'Résolus', value: supportStats.resolved, color: 'bg-emerald-100 text-emerald-700' },
+                  { label: 'Urgents', value: supportStats.urgent, color: 'bg-rose-100 text-rose-700' },
+                ].map(s => (
+                  <div key={s.label} className={`rounded-2xl p-4 text-center ${s.color}`}>
+                    <p className="text-2xl font-black">{s.value}</p>
+                    <p className="text-[9px] font-black uppercase tracking-widest mt-1">{s.label}</p>
+                  </div>
+                ))}
+              </div>
+
+              {/* Filters */}
+              <div className="bg-white border border-slate-200 p-4 flex flex-wrap gap-3 items-center">
+                <select value={supportStatusFilter} onChange={e => setSupportStatusFilter(e.target.value)}
+                  className="border border-slate-200 px-3 py-2 text-xs bg-white outline-none">
+                  <option value="">Tous les statuts</option>
+                  <option value="OPEN">Ouverts</option>
+                  <option value="IN_PROGRESS">En cours</option>
+                  <option value="RESOLVED">Résolus</option>
+                  <option value="CLOSED">Fermés</option>
+                </select>
+                <button onClick={fetchSupport} className="p-2 bg-slate-100 hover:bg-slate-200 rounded text-slate-600 ml-auto">
+                  <RefreshCw size={14} className={supportLoading ? 'animate-spin' : ''} />
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+                {/* Ticket list */}
+                <div className="bg-white border border-slate-200 overflow-hidden">
+                  {supportLoading ? (
+                    <div className="flex justify-center py-12"><Loader2 className="animate-spin text-slate-400" size={28}/></div>
+                  ) : supportTickets.length === 0 ? (
+                    <div className="py-12 text-center text-slate-400 text-xs font-black uppercase">Aucun ticket</div>
+                  ) : (
+                    <div className="divide-y divide-slate-100 max-h-[600px] overflow-y-auto">
+                      {supportTickets.map((t: any) => {
+                        const statusColors: Record<string, string> = {
+                          OPEN: 'bg-sky-100 text-sky-700',
+                          IN_PROGRESS: 'bg-amber-100 text-amber-700',
+                          RESOLVED: 'bg-emerald-100 text-emerald-700',
+                          CLOSED: 'bg-slate-100 text-slate-500'
+                        };
+                        const priorityColors: Record<string, string> = {
+                          URGENT: 'text-rose-600 font-black', HIGH: 'text-amber-600', NORMAL: 'text-slate-500', LOW: 'text-slate-400'
+                        };
+                        return (
+                          <button key={t.id} onClick={() => { setSelectedTicket(t); setTicketReply(t.adminReply || ''); }}
+                            className={`w-full text-left px-4 py-3 hover:bg-slate-50 transition-colors ${selectedTicket?.id === t.id ? 'bg-indigo-50 border-l-2 border-indigo-500' : ''}`}>
+                            <div className="flex items-start justify-between gap-2">
+                              <p className="text-xs font-black text-slate-900 truncate flex-1">{t.subject}</p>
+                              <span className={`text-[8px] font-black px-2 py-0.5 rounded-full flex-shrink-0 ${statusColors[t.status] || 'bg-slate-100 text-slate-500'}`}>
+                                {t.status === 'OPEN' ? 'Ouvert' : t.status === 'IN_PROGRESS' ? 'En cours' : t.status === 'RESOLVED' ? 'Résolu' : 'Fermé'}
+                              </span>
+                            </div>
+                            <p className="text-[9px] text-slate-400 mt-0.5 truncate">{t.tenantName || t.tenantId} • {t.userName}</p>
+                            <p className={`text-[9px] mt-0.5 ${priorityColors[t.priority] || ''}`}>{t.priority} • {new Date(t.createdAt).toLocaleDateString('fr-FR')}</p>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                {/* Ticket detail + reply */}
+                <div className="bg-white border border-slate-200 p-5 space-y-4">
+                  {!selectedTicket ? (
+                    <div className="flex flex-col items-center justify-center h-64 text-slate-300">
+                      <MessageCircle size={40}/>
+                      <p className="text-xs font-black uppercase mt-3">Sélectionnez un ticket</p>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="flex items-start justify-between gap-2">
+                        <h3 className="text-sm font-black text-slate-900">{selectedTicket.subject}</h3>
+                        <button onClick={() => setSelectedTicket(null)} className="text-slate-400 hover:text-slate-700 flex-shrink-0"><X size={16}/></button>
+                      </div>
+                      <div className="text-[9px] font-bold text-slate-400 uppercase space-x-2">
+                        <span>{selectedTicket.tenantName}</span>
+                        <span>•</span>
+                        <span>{selectedTicket.userName}</span>
+                        <span>•</span>
+                        <span>{selectedTicket.category}</span>
+                      </div>
+                      <div className="bg-slate-50 rounded-xl p-3">
+                        <p className="text-xs text-slate-700 whitespace-pre-wrap">{selectedTicket.message}</p>
+                      </div>
+                      {/* Status actions */}
+                      <div className="flex gap-2 flex-wrap">
+                        {(['OPEN', 'IN_PROGRESS', 'RESOLVED', 'CLOSED'] as const).map(s => (
+                          <button key={s} onClick={() => handleTicketStatus(selectedTicket.id, s)}
+                            className={`px-3 py-1.5 text-[9px] font-black uppercase border transition-all ${selectedTicket.status === s ? 'bg-slate-900 text-white border-slate-900' : 'border-slate-200 text-slate-500 hover:border-slate-400'}`}>
+                            {s === 'OPEN' ? 'Ouvert' : s === 'IN_PROGRESS' ? 'En cours' : s === 'RESOLVED' ? 'Résolu' : 'Fermé'}
+                          </button>
+                        ))}
+                      </div>
+                      {/* Reply */}
+                      <div>
+                        <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-1">Réponse</label>
+                        <textarea value={ticketReply} onChange={e => setTicketReply(e.target.value)} rows={4}
+                          placeholder="Rédigez votre réponse..."
+                          className="w-full border border-slate-200 rounded-xl px-3 py-2 text-xs outline-none focus:border-indigo-300 resize-none"/>
+                        <button onClick={handleTicketReply} disabled={ticketReplyLoading || !ticketReply.trim()}
+                          className="mt-2 w-full flex items-center justify-center gap-2 py-2.5 bg-indigo-600 text-white text-[10px] font-black uppercase tracking-widest rounded-xl disabled:opacity-50 hover:bg-indigo-700 transition-all">
+                          {ticketReplyLoading ? <Loader2 size={14} className="animate-spin"/> : <Send size={14}/>}
+                          Répondre et résoudre
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
               </div>
             </div>
           )}

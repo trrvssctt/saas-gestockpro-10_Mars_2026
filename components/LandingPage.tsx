@@ -1,3 +1,16 @@
+// Options de durée d'abonnement
+const PERIOD_OPTIONS = [
+  { id: '1M', label: '1 Mois', months: 1, discountPct: 0 },
+  { id: '3M', label: '3 Mois', months: 3, discountPct: 15 },
+  { id: '1Y', label: '1 An', months: 12, discountPct: 30 },
+];
+
+function getPeriodPrice(baseMonthlyPrice: number, periodId: string) {
+  const opt = PERIOD_OPTIONS.find(p => p.id === periodId);
+  if (!opt) return baseMonthlyPrice;
+  const fullPrice = baseMonthlyPrice * opt.months;
+  return Math.round(fullPrice * (1 - opt.discountPct / 100));
+}
 
 import React, { useState } from 'react';
 import {
@@ -50,16 +63,19 @@ if (buildTimeBackend) {
     const origin = (typeof window !== 'undefined' && window.location && window.location.origin) ? window.location.origin : '';
     // En développement avec Vite (localhost:5173-5179), pointer vers le backend sur port 3000
     if (origin && /localhost:517[3-9]/.test(origin)) {
-      rawBackend = 'https://gestockpro.realtechprint.com';
+      //rawBackend = 'http://localhost:3000';
+      rawBackend = 'https://gestock.realtechprint.com';
     } else if (origin && !/localhost|127\.0\.0\.1/.test(origin)) {
       // Production: API co-localisée sous la même origine
       rawBackend = origin;
     } else {
       // Fallback pour développement
-      rawBackend = 'https://gestockpro.realtechprint.com';
+      //rawBackend = 'http://localhost:3000';
+      rawBackend = 'https://gestock.realtechprint.com';
     }
   } catch (e) {
-    rawBackend = 'https://gestockpro.realtechprint.com';
+    //rawBackend = 'http://localhost:3000';
+    rawBackend = 'https://gestock.realtechprint.com';
   }
 }
 
@@ -68,7 +84,7 @@ type LegalPage = 'mentions' | 'confidentialite' | 'cgu' | 'cookies' | null;
 const LandingPage: React.FC<LandingPageProps> = ({ onLogin }) => {
   const [activeLegalPage, setActiveLegalPage] = useState<LegalPage>(null);
   const [activeFaq, setActiveFaq] = useState<number | null>(null);
-  
+  const [selectedPeriod, setSelectedPeriod] = useState('1M');
   // État du formulaire de contact
   const [contactForm, setContactForm] = useState({
     fullName: '',
@@ -454,15 +470,30 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLogin }) => {
             <h2 className="text-2xl md:text-3xl font-bold mb-4">Tarification</h2>
             <p className="text-slate-600">Choisissez le plan qui correspond à votre entreprise.</p>
           </div>
+          {/* Sélecteur de durée */}
+          <div className="flex justify-center gap-3 mb-8">
+            {PERIOD_OPTIONS.map(opt => (
+              <button
+                key={opt.id}
+                onClick={() => setSelectedPeriod(opt.id)}
+                className={`px-6 py-2 rounded-2xl font-black text-xs uppercase tracking-widest border transition-all ${selectedPeriod === opt.id ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600 border-slate-200 hover:bg-indigo-50'}`}
+              >
+                {opt.label} {opt.discountPct > 0 && <span className="ml-2 text-emerald-600 font-bold">-{opt.discountPct}%</span>}
+              </button>
+            ))}
+          </div>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {/* Starter */}
             <div className="p-6 md:p-8 bg-white border border-slate-200 flex flex-col">
               <div className="mb-6">
                 <span className="px-3 py-1 bg-slate-100 text-slate-600 text-xs font-medium">Starter</span>
                 <div className="mt-4 flex items-baseline gap-1">
-                  <span className="text-3xl font-bold">9 900</span>
-                  <span className="text-slate-600 text-sm">FCFA / mois</span>
+                  <span className="text-3xl font-bold">{getPeriodPrice(9900, selectedPeriod).toLocaleString()}</span>
+                  <span className="text-slate-600 text-sm">FCFA / {PERIOD_OPTIONS.find(p=>p.id===selectedPeriod)?.label.toLowerCase()}</span>
                 </div>
+                {selectedPeriod !== '1M' && (
+                  <div className="text-xs text-emerald-600 font-bold mt-1">Économie : {((9900 * PERIOD_OPTIONS.find(p=>p.id===selectedPeriod)?.months) - getPeriodPrice(9900, selectedPeriod)).toLocaleString()} FCFA</div>
+                )}
               </div>
               <ul className="space-y-3 mb-8 flex-grow">
                 {["3 Utilisateurs", "5 Clients", "Modules Essentiels", "Support Standard", "Dashboard Basique"].map((item, i) => (
@@ -471,7 +502,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLogin }) => {
                   </li>
                 ))}
               </ul>
-              <button onClick={() => onLogin({ openRegister: true, planId: 'BASIC', regStep: 1 })} className="w-full py-3 bg-slate-900 text-white text-sm font-medium hover:bg-slate-800 transition-colors" style={{ fontSize: '14px', fontWeight: '500', fontFamily: 'inherit', border: 'none', cursor: 'pointer' }}>Commencer</button>
+              <button onClick={() => onLogin({ openRegister: true, planId: 'BASIC', regStep: 1, period: selectedPeriod })} className="w-full py-3 bg-slate-900 text-white text-sm font-medium hover:bg-slate-800 transition-colors" style={{ fontSize: '14px', fontWeight: '500', fontFamily: 'inherit', border: 'none', cursor: 'pointer' }}>Commencer</button>
             </div>
 
             {/* PRO */}
@@ -480,9 +511,12 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLogin }) => {
               <div className="mb-6">
                 <span className="px-3 py-1 bg-slate-800 text-slate-300 text-xs font-medium">PRO</span>
                 <div className="mt-4 flex items-baseline gap-1">
-                  <span className="text-3xl font-bold">49 000</span>
-                  <span className="text-slate-400 text-sm">FCFA / mois</span>
+                  <span className="text-3xl font-bold">{getPeriodPrice(49000, selectedPeriod).toLocaleString()}</span>
+                  <span className="text-slate-400 text-sm">FCFA / {PERIOD_OPTIONS.find(p=>p.id===selectedPeriod)?.label.toLowerCase()}</span>
                 </div>
+                {selectedPeriod !== '1M' && (
+                  <div className="text-xs text-emerald-400 font-bold mt-1">Économie : {((49000 * PERIOD_OPTIONS.find(p=>p.id===selectedPeriod)?.months) - getPeriodPrice(49000, selectedPeriod)).toLocaleString()} FCFA</div>
+                )}
               </div>
               <ul className="space-y-3 mb-8 flex-grow">
                 {["10 Utilisateurs", "12 Clients", "Security + Recovery", "Support Prioritaire", "Chatbot", "Facturation Factur-X"].map((item, i) => (
@@ -491,7 +525,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLogin }) => {
                   </li>
                 ))}
               </ul>
-              <button onClick={() => onLogin({ openRegister: true, planId: 'PRO', regStep: 1 })} className="w-full py-3 bg-white text-slate-900 text-sm font-medium hover:bg-slate-100 transition-colors" style={{ fontSize: '14px', fontWeight: '500', fontFamily: 'inherit', border: 'none', cursor: 'pointer' }}>Commencer</button>
+              <button onClick={() => onLogin({ openRegister: true, planId: 'PRO', regStep: 1, period: selectedPeriod })} className="w-full py-3 bg-white text-slate-900 text-sm font-medium hover:bg-slate-100 transition-colors" style={{ fontSize: '14px', fontWeight: '500', fontFamily: 'inherit', border: 'none', cursor: 'pointer' }}>Commencer</button>
             </div>
 
             {/* Enterprise */}
@@ -499,9 +533,12 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLogin }) => {
               <div className="mb-8">
                 <span className="px-3 py-1 bg-purple-50 text-purple-600 rounded-full text-[10px] font-black uppercase tracking-widest">Enterprise Cloud</span>
                 <div className="mt-6 flex items-baseline gap-1">
-                  <span className="text-4xl font-black tracking-tighter">79 000</span>
-                  <span className="text-slate-500 font-bold text-sm">FCFA / mois</span>
+                  <span className="text-4xl font-black tracking-tighter">{getPeriodPrice(79000, selectedPeriod).toLocaleString()}</span>
+                  <span className="text-slate-500 font-bold text-sm">FCFA / {PERIOD_OPTIONS.find(p=>p.id===selectedPeriod)?.label.toLowerCase()}</span>
                 </div>
+                {selectedPeriod !== '1M' && (
+                  <div className="text-xs text-emerald-600 font-bold mt-1">Économie : {((79000 * PERIOD_OPTIONS.find(p=>p.id===selectedPeriod)?.months) - getPeriodPrice(79000, selectedPeriod)).toLocaleString()} FCFA</div>
+                )}
               </div>
               <ul className="space-y-4 mb-10 flex-grow">
                 {["Utilisateurs Illimités","Module RH Avancé","Inventory Campaigns", "Récouvrement", "Chatbot Intelligent", "Support Premium 24/7"].map((item, i) => (
@@ -510,7 +547,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLogin }) => {
                   </li>
                 ))}
               </ul>
-              <button onClick={() => onLogin({ openRegister: true, planId: 'ENTERPRISE', regStep: 1 })} className="w-full py-4 bg-slate-50 text-slate-900 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-slate-900 hover:text-white transition-all">Commencer</button>
+              <button onClick={() => onLogin({ openRegister: true, planId: 'ENTERPRISE', regStep: 1, period: selectedPeriod })} className="w-full py-4 bg-slate-50 text-slate-900 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-slate-900 hover:text-white transition-all">Commencer</button>
             </div>  
           </div>
         </div>

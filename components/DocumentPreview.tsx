@@ -346,7 +346,7 @@ const DocumentPreview: React.FC<DocumentProps> = ({ type, sale, tenant, currency
                     <span className="text-slate-900 font-black italic">
                       {isSubInvoice
                         ? 'Facture acquittée. Merci de votre confiance en GeStocPro.'
-                        : tenant.invoiceFooter || 'Paiement selon conditions générales.'}
+                        : (tenant?.invoiceFooter || 'Paiement selon conditions générales.')}
                     </span>
                   </div>
                 </div>
@@ -397,8 +397,8 @@ const DocumentPreview: React.FC<DocumentProps> = ({ type, sale, tenant, currency
               isSubInvoice={isSubInvoice}
               isBonSortie={isBonSortie}
               isPaid={isPaid}
-              tenantName={tenant.name}
-              cachetUrl={tenant.cachetUrl}
+              tenantName={tenant?.name || ''}
+              cachetUrl={tenant?.cachetUrl}
               isValidated={sale?.isValidated}
               saleId={sale.id}
               reference={sale.reference}

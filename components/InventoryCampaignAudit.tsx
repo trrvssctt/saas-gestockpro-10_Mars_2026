@@ -8,6 +8,7 @@ import {
 import { apiClient } from '../services/api';
 import InventoryAuditReport from './InventoryAuditReport';
 import { useToast } from './ToastProvider';
+import { buildExportHandlers, exportToImage, ExportColumn } from '../services/exportUtils';
 
 interface Props {
   campaign: any;
@@ -31,7 +32,27 @@ const InventoryCampaignAudit: React.FC<Props> = ({ campaign, settings, onBack, o
   const [isActing, setIsActing] = useState(false);
   const [showSuspendModal, setShowSuspendModal] = useState(false);
   const [showCancelModal, setShowCancelModal] = useState(false);
+  const [showExportMenu, setShowExportMenu] = useState(false);
   const showToast = useToast();
+
+  // Colonnes pour export CSV/Excel/PDF du rapport d'audit
+  const auditExportColumns: ExportColumn[] = [
+    { key: 'stock_item', label: 'Article', format: (_v, row) => row.stock_item?.name || '' },
+    { key: 'stock_item', label: 'SKU', format: (_v, row) => row.stock_item?.sku || '' },
+    { key: 'systemQty', label: 'Qté Système', format: (v) => Number(v || 0) },
+    { key: 'countedQty', label: 'Qté Comptée', format: (v) => Number(v || 0) },
+    { key: 'countedQty', label: 'Écart', format: (_v, row) => Number(row.countedQty || 0) - Number(row.systemQty || 0) },
+    {
+      key: 'countedQty', label: 'Constat',
+      format: (_v, row) => {
+        const diff = Math.abs((Number(row.countedQty || 0) - Number(row.systemQty || 0)));
+        const pct = Number(row.systemQty) > 0 ? (diff / Number(row.systemQty)) * 100 : 0;
+        if (Number(row.countedQty) === Number(row.systemQty)) return 'Normal';
+        if (pct <= 5) return 'Cohérent';
+        return 'Incohérent';
+      }
+    },
+  ];
 
   const fetchItems = async () => {
     setLoading(true);
@@ -184,44 +205,66 @@ const InventoryCampaignAudit: React.FC<Props> = ({ campaign, settings, onBack, o
               >
                 <Plus size={18} /> NOUVELLE CAMPAGNE
               </button>
-              <div className="flex items-center justify-end gap-3">
-                <button onClick={async () => {
-                  try {
-                    if (!(window as any).html2canvas) {
-                      await new Promise<void>((resolve, reject) => {
-                        const s = document.createElement('script');
-                        s.src = 'https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js';
-                        s.async = true;
-                        s.onload = () => resolve();
-                        s.onerror = () => reject(new Error('Chargement html2canvas échoué'));
-                        document.head.appendChild(s);
+              {/* MENU EXPORT RAPPORT AUDIT */}
+              <div className="relative">
+                <button
+                  onClick={() => setShowExportMenu(!showExportMenu)}
+                  className="px-6 py-4 bg-white border border-slate-200 text-slate-900 rounded-2xl font-black text-xs uppercase tracking-widest flex items-center gap-3 shadow-sm hover:bg-slate-50"
+                >
+                  <Download size={18}/> Exporter
+                </button>
+                {showExportMenu && (
+                  <div className="absolute right-0 top-full mt-2 bg-white border border-slate-100 rounded-2xl shadow-2xl z-50 w-52 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200">
+                    {(() => {
+                      const fname = `audit-${(campaign?.name || campaign?.id || 'rapport').replace(/\s+/g, '-').toLowerCase()}`;
+                      const exportInfo = buildExportHandlers({
+                        data: items,
+                        columns: auditExportColumns,
+                        options: {
+                          filename: fname,
+                          sheetName: 'Audit',
+                          title: `Rapport d'Audit — ${campaign?.name || ''}`,
+                          companyInfo: {
+                            name: settings?.name,
+                            address: settings?.address,
+                            phone: settings?.phone,
+                            email: settings?.email,
+                          }
+                        },
+                        tableElementId: 'document-render',
+                        showToast,
                       });
-                    }
-
-                    const html2canvas = (window as any).html2canvas;
-                    if (!html2canvas) throw new Error('html2canvas non disponible');
-
-                    const node = document.getElementById('document-render');
-                    if (!node) throw new Error('Aperçu introuvable');
-
-                    const canvas = await html2canvas(node as HTMLElement, { scale: 2, useCORS: true, backgroundColor: '#ffffff' });
-                    canvas.toBlob((blob: Blob | null) => {
-                      if (!blob) { showToast('Impossible de générer l\'image', 'error'); return; }
-                      const url = window.URL.createObjectURL(blob);
-                      const a = document.createElement('a');
-                      a.href = url;
-                      const filename = `${(campaign?.name || campaign?.id)}.png`;
-                      a.download = filename;
-                      document.body.appendChild(a);
-                      a.click();
-                      a.remove();
-                      window.URL.revokeObjectURL(url);
-                    }, 'image/png', 0.95);
-                  } catch (err: any) {
-                    console.error('Capture/download error', err);
-                    showToast(err?.message || 'Erreur lors de la génération de l\'image', 'error');
-                  }
-                }} className="px-8 py-4 bg-white border border-slate-200 text-slate-900 rounded-2xl font-black text-xs uppercase tracking-widest flex items-center gap-3 shadow-sm hover:bg-slate-50"><Download size={18}/> Télécharger</button>
+                      const menuItems = [
+                        { label: 'CSV (.csv)', action: exportInfo.csv, icon: '📄' },
+                        { label: 'Excel (.xlsx)', action: exportInfo.excel, icon: '📊' },
+                        { label: 'PDF (impression)', action: exportInfo.pdf, icon: '🖨️' },
+                        {
+                          label: 'Image PNG',
+                          action: () => exportToImage('document-render', fname, 'png')
+                            .then(() => showToast('Export PNG réussi', 'success'))
+                            .catch((e: any) => showToast(e.message || 'Erreur image', 'error')),
+                          icon: '🖼️'
+                        },
+                        {
+                          label: 'Image JPG',
+                          action: () => exportToImage('document-render', fname, 'jpg')
+                            .then(() => showToast('Export JPG réussi', 'success'))
+                            .catch((e: any) => showToast(e.message || 'Erreur image', 'error')),
+                          icon: '📷'
+                        },
+                      ];
+                      return menuItems.map(({ label, action, icon }) => (
+                        <button
+                          key={label}
+                          onClick={() => { action(); setShowExportMenu(false); }}
+                          className="w-full flex items-center gap-3 px-5 py-3 text-[10px] font-black uppercase tracking-widest text-slate-600 hover:bg-indigo-50 hover:text-indigo-700 transition-all"
+                        >
+                          <span>{icon}</span> {label}
+                        </button>
+                      ));
+                    })()}
+                  </div>
+                )}
               </div>
           </div>
         </div>

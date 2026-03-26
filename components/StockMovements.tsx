@@ -13,6 +13,7 @@ import {
 } from 'recharts';
 import { apiClient } from '../services/api';
 import { StockItem } from '../types';
+import YearMonthPicker from './YearMonthPicker';
 
 // ─── Composant document paginé (défini HORS du composant principal) ────────
 
@@ -226,13 +227,38 @@ const StockMovements = ({ currency, tenantSettings }: { currency: string, tenant
   });
   
   const [filters, setFilters] = useState({
-    search: '', 
-    dateFrom: '', 
-    dateTo: '', 
+    search: '',
+    dateFrom: '',
+    dateTo: '',
     type: 'ALL',
     operator: '',
     reason: 'ALL'
   });
+
+  // Year/Month filter
+  const [selectedYear, setSelectedYear] = useState<number | null>(null);
+  const [selectedMonth, setSelectedMonth] = useState<number | null>(null);
+
+  const availableYears = useMemo(() => {
+    const years = new Set<number>();
+    years.add(new Date().getFullYear());
+    movements.forEach((m: any) => { if (m.createdAt) years.add(new Date(m.createdAt).getFullYear()); });
+    return Array.from(years).sort((a, b) => b - a);
+  }, [movements]);
+
+  useEffect(() => {
+    if (selectedYear === null) {
+      setFilters(f => ({ ...f, dateFrom: '', dateTo: '' }));
+      return;
+    }
+    const ms = selectedMonth !== null ? selectedMonth : 0;
+    const me = selectedMonth !== null ? selectedMonth : 11;
+    setFilters(f => ({
+      ...f,
+      dateFrom: new Date(selectedYear, ms, 1).toISOString().split('T')[0],
+      dateTo:   new Date(selectedYear, me + 1, 0).toISOString().split('T')[0]
+    }));
+  }, [selectedYear, selectedMonth]);
 
   const [bulkInForm, setBulkInForm] = useState({
     items: [] as { productId: string, quantity: number }[],
@@ -502,6 +528,13 @@ const StockMovements = ({ currency, tenantSettings }: { currency: string, tenant
       {/* ZONE FILTRES AVANCÉS */}
       {showFilters && (
         <div className="bg-white p-4 md:p-8 rounded-[3rem] border border-slate-100 shadow-xl animate-in slide-in-from-top-4 duration-300 space-y-6">
+          <YearMonthPicker
+            dataYears={availableYears}
+            selectedYear={selectedYear}
+            selectedMonth={selectedMonth}
+            onYearChange={setSelectedYear}
+            onMonthChange={setSelectedMonth}
+          />
           <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
             <div className="space-y-2">
               <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest px-2">Article / SKU</label>

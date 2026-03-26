@@ -1,5 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
+import Support from './Support';
+import { User } from '../types';
 import { 
   Settings as SettingsIcon, Globe, DollarSign, Image as ImageIcon, 
   ShieldCheck, Save, Check, X, FileText, ShieldAlert, 
@@ -7,7 +9,7 @@ import {
   LayoutDashboard, CreditCard, Sparkles, History,
   Sun, Moon,
   CheckCircle2, ChevronRight, Building2, Phone, Mail, MapPin,
-  Stamp, RefreshCw, Upload, Loader2, Pipette
+  Stamp, RefreshCw, Upload, Loader2, Pipette, LifeBuoy
 } from 'lucide-react';
 import { AppSettings, UserRole, Currency, Language } from '../types';
 import { apiClient } from '../services/api';
@@ -18,13 +20,80 @@ interface SettingsProps {
 }
 
 const Settings: React.FC<SettingsProps> = ({ settings, onSave }) => {
-  const [activeSubTab, setActiveSubTab] = useState<'general' | 'branding' | 'fiscal' | 'profile'>('general');
+  // TODO: Remplacer ceci par l'utilisateur courant réel si disponible dans le contexte global
+  const fakeUser: User = {
+    id: '1',
+    name: 'Admin',
+    role: UserRole.SUPER_ADMIN,
+    roles: [UserRole.SUPER_ADMIN],
+    email: 'admin@example.com',
+    mfaEnabled: false,
+    lastLogin: '',
+    activeSession: true,
+    isActive: true,
+    tenantId: '1',
+  };
+  const [activeSubTab, setActiveSubTab] = useState<'general' | 'branding' | 'fiscal' | 'profile' | 'support'>('general');
   const [localTenant, setLocalTenant] = useState<any>(null);
   const [buttonColor, setButtonColor] = useState<string>('');
   const [loading, setLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [success, setSuccess] = useState(false);
   const [isUploading, setIsUploading] = useState<string | null>(null);
+
+  // Password change state
+  const [pwCurrent, setPwCurrent] = useState('');
+  const [pwNew, setPwNew] = useState('');
+  const [pwConfirm, setPwConfirm] = useState('');
+  const [pwShowCurrent, setPwShowCurrent] = useState(false);
+  const [pwShowNew, setPwShowNew] = useState(false);
+  const [pwSaving, setPwSaving] = useState(false);
+  const [pwSuccess, setPwSuccess] = useState(false);
+  const [pwError, setPwError] = useState<string | null>(null);
+
+  const generateStrongPassword = () => {
+    const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%&*';
+    let pwd = '';
+    const arr = new Uint32Array(16);
+    window.crypto.getRandomValues(arr);
+    arr.forEach(v => { pwd += chars[v % chars.length]; });
+    setPwNew(pwd);
+    setPwConfirm(pwd);
+    setPwShowNew(true);
+  };
+
+  const getPasswordStrength = (pwd: string): { label: string; color: string; width: string } => {
+    if (pwd.length === 0) return { label: '', color: 'bg-slate-200', width: '0%' };
+    let score = 0;
+    if (pwd.length >= 8) score++;
+    if (pwd.length >= 12) score++;
+    if (/[A-Z]/.test(pwd)) score++;
+    if (/[0-9]/.test(pwd)) score++;
+    if (/[^a-zA-Z0-9]/.test(pwd)) score++;
+    if (score <= 1) return { label: 'Faible', color: 'bg-red-500', width: '20%' };
+    if (score === 2) return { label: 'Moyen', color: 'bg-orange-400', width: '40%' };
+    if (score === 3) return { label: 'Correct', color: 'bg-yellow-400', width: '60%' };
+    if (score === 4) return { label: 'Fort', color: 'bg-green-400', width: '80%' };
+    return { label: 'Très fort', color: 'bg-green-600', width: '100%' };
+  };
+
+  const handleChangePassword = async () => {
+    setPwError(null);
+    if (!pwCurrent || !pwNew || !pwConfirm) { setPwError('Tous les champs sont requis.'); return; }
+    if (pwNew !== pwConfirm) { setPwError('Les mots de passe ne correspondent pas.'); return; }
+    if (pwNew.length < 8) { setPwError('Le nouveau mot de passe doit contenir au moins 8 caractères.'); return; }
+    setPwSaving(true);
+    try {
+      await apiClient.post('/auth/change-password', { currentPassword: pwCurrent, newPassword: pwNew });
+      setPwSuccess(true);
+      setPwCurrent(''); setPwNew(''); setPwConfirm('');
+      setTimeout(() => setPwSuccess(false), 3000);
+    } catch (err: any) {
+      setPwError(err?.message || 'Erreur lors du changement de mot de passe.');
+    } finally {
+      setPwSaving(false);
+    }
+  };
 
   useEffect(() => {
     const fetchSettings = async () => {
@@ -262,6 +331,7 @@ const Settings: React.FC<SettingsProps> = ({ settings, onSave }) => {
             { id: 'branding', label: 'Design & Branding', icon: Palette },
             { id: 'fiscal', label: 'Fiscalité & Factures', icon: FileText },
             { id: 'profile', label: 'Accès Sécurité', icon: Lock },
+            { id: 'support', label: 'Support', icon: LifeBuoy },
           ].map(tab => (
             <button
               key={tab.id}
@@ -556,24 +626,106 @@ const Settings: React.FC<SettingsProps> = ({ settings, onSave }) => {
       )}
 
       {activeSubTab === 'profile' && (
-        <div className="bg-white p-5 md:p-10 rounded-[3rem] border border-slate-100 shadow-sm max-w-2xl animate-in slide-in-from-bottom-4">
-           <h3 className="text-xs font-black uppercase tracking-widest text-indigo-600 flex items-center gap-2 mb-8"><Lock size={16}/> Sécurité de votre Session Administrateur</h3>
-           <div className="space-y-6">
-              <div className="flex flex-wrap items-center justify-between gap-4 p-6 bg-slate-50 rounded-3xl border border-slate-100">
-                 <div>
-                    <p className="text-sm font-black text-slate-900 uppercase">Double Authentification (MFA)</p>
-                    <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-1">Sécurise l'accès par code mobile</p>
-                 </div>
-                 <button className="px-6 py-2 bg-indigo-600 text-white rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-slate-900 transition-all">GÉRER LE MFA</button>
-              </div>
-              <div className="flex flex-wrap items-center justify-between gap-4 p-6 bg-slate-50 rounded-3xl border border-slate-100">
-                 <div>
-                    <p className="text-sm font-black text-slate-900 uppercase">Registre de connexion</p>
-                    <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-1">Historique des accès de l'instance</p>
-                 </div>
-                 <button className="px-6 py-2 bg-slate-200 text-slate-500 rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-indigo-600 hover:text-white transition-all">CONSULTER</button>
-              </div>
+        <div className="bg-white p-5 md:p-10 rounded-[3rem] border border-slate-100 shadow-sm max-w-2xl animate-in slide-in-from-bottom-4 space-y-8">
+           <h3 className="text-xs font-black uppercase tracking-widest text-indigo-600 flex items-center gap-2"><Lock size={16}/> Sécurité de votre Session Administrateur</h3>
+
+           {/* Password change form */}
+           <div className="p-6 bg-slate-50 rounded-3xl border border-slate-100 space-y-4">
+             <p className="text-sm font-black text-slate-900 uppercase">Changer le mot de passe</p>
+
+             <div className="space-y-3">
+               <div className="relative">
+                 <input
+                   type={pwShowCurrent ? 'text' : 'password'}
+                   value={pwCurrent}
+                   onChange={e => setPwCurrent(e.target.value)}
+                   placeholder="Mot de passe actuel"
+                   className="w-full px-4 py-3 pr-12 border border-slate-200 rounded-2xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-white"
+                 />
+                 <button type="button" onClick={() => setPwShowCurrent(v => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700">
+                   <Lock size={15}/>
+                 </button>
+               </div>
+
+               <div className="relative">
+                 <input
+                   type={pwShowNew ? 'text' : 'password'}
+                   value={pwNew}
+                   onChange={e => setPwNew(e.target.value)}
+                   placeholder="Nouveau mot de passe"
+                   className="w-full px-4 py-3 pr-12 border border-slate-200 rounded-2xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-white"
+                 />
+                 <button type="button" onClick={() => setPwShowNew(v => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700">
+                   <Lock size={15}/>
+                 </button>
+               </div>
+
+               {pwNew && (() => {
+                 const s = getPasswordStrength(pwNew);
+                 return (
+                   <div className="space-y-1">
+                     <div className="h-1.5 bg-slate-200 rounded-full overflow-hidden">
+                       <div className={`h-full rounded-full transition-all ${s.color}`} style={{ width: s.width }}/>
+                     </div>
+                     <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">{s.label}</p>
+                   </div>
+                 );
+               })()}
+
+               <div className="relative">
+                 <input
+                   type="password"
+                   value={pwConfirm}
+                   onChange={e => setPwConfirm(e.target.value)}
+                   placeholder="Confirmer le nouveau mot de passe"
+                   className="w-full px-4 py-3 border border-slate-200 rounded-2xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-white"
+                 />
+               </div>
+             </div>
+
+             {pwError && <p className="text-xs text-red-500 font-bold">{pwError}</p>}
+             {pwSuccess && <p className="text-xs text-green-600 font-bold">Mot de passe mis à jour avec succès.</p>}
+
+             <div className="flex flex-wrap gap-3 pt-1">
+               <button
+                 type="button"
+                 onClick={generateStrongPassword}
+                 className="px-5 py-2 bg-slate-100 text-slate-700 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-indigo-50 hover:text-indigo-700 transition-all flex items-center gap-2"
+               >
+                 <Sparkles size={13}/> Générer un mot de passe
+               </button>
+               <button
+                 type="button"
+                 onClick={handleChangePassword}
+                 disabled={pwSaving}
+                 className="px-6 py-2 bg-indigo-600 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-900 transition-all flex items-center gap-2 disabled:opacity-60"
+               >
+                 {pwSaving ? <Loader2 size={13} className="animate-spin"/> : <Save size={13}/>}
+                 Enregistrer
+               </button>
+             </div>
            </div>
+
+           <div className="flex flex-wrap items-center justify-between gap-4 p-6 bg-slate-50 rounded-3xl border border-slate-100">
+              <div>
+                 <p className="text-sm font-black text-slate-900 uppercase">Double Authentification (MFA)</p>
+                 <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-1">Sécurise l'accès par code mobile</p>
+              </div>
+              <button className="px-6 py-2 bg-indigo-600 text-white rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-slate-900 transition-all">GÉRER LE MFA</button>
+           </div>
+           <div className="flex flex-wrap items-center justify-between gap-4 p-6 bg-slate-50 rounded-3xl border border-slate-100">
+              <div>
+                 <p className="text-sm font-black text-slate-900 uppercase">Registre de connexion</p>
+                 <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-1">Historique des accès de l'instance</p>
+              </div>
+              <button className="px-6 py-2 bg-slate-200 text-slate-500 rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-indigo-600 hover:text-white transition-all">CONSULTER</button>
+           </div>
+        </div>
+      )}
+
+      {activeSubTab === 'support' && (
+        <div className="bg-white p-5 md:p-10 rounded-[3rem] border border-slate-100 shadow-sm max-w-4xl animate-in slide-in-from-bottom-4">
+         <Support user={fakeUser} />
         </div>
       )}
     </div>
