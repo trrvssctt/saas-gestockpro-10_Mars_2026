@@ -8,10 +8,11 @@ import {
   TrendingUp, 
   CreditCard, 
   FileCheck, 
-  Download, 
-  Plus, 
-  Search, 
-  Filter, 
+  Download,
+  FolderDown,
+  Plus,
+  Search,
+  Filter,
   DollarSign, 
   Calendar, 
   CheckCircle2, 
@@ -32,7 +33,10 @@ import {
   FileText,
   X,
   Shield,
-  MinusCircle
+  MinusCircle,
+  Zap,
+  ToggleLeft,
+  ToggleRight
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import HRModal from './HRModal';
@@ -130,11 +134,148 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
     displayName: new Date().toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })
   });
 
+  // ---- États Moteur de Règles RH ----
+  const [hrRules, setHrRules] = useState<any[]>([]);
+  const [rulesLoading, setRulesLoading] = useState(false);
+  const [rulesSaving, setRulesSaving] = useState(false);
+  const [ruleForm, setRuleForm] = useState({
+    name: '',
+    description: '',
+    type: 'LATE',
+    conditionOperator: 'GT',
+    conditionValue: '',
+    conditionUnit: 'MINUTES',
+    actionType: 'DEDUCT_SALARY_HOURS',
+    actionValue: '',
+    isActive: true
+  });
+  const [editingRuleId, setEditingRuleId] = useState<string | null>(null);
+
+  const [zipDownloading, setZipDownloading] = useState(false);
+
+  const handleDownloadAllZip = async () => {
+    try {
+      setZipDownloading(true);
+      const month = `${currentPeriod.year}-${String(currentPeriod.month).padStart(2, '0')}`;
+      const session = authBridge.getSession();
+      const token = session?.token;
+
+      const url = new URL('http://localhost:3000/api/hr/payslips/download-all-zip');
+      url.searchParams.set('month', month);
+
+      const response = await fetch(url.toString(), {
+        method: 'GET',
+        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) }
+      });
+
+      if (!response.ok) {
+        const errBody = await response.json().catch(() => ({}));
+        throw new Error(errBody.error || `Erreur ${response.status}`);
+      }
+
+      const blob = await response.blob();
+      const downloadUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = downloadUrl;
+      link.download = `fiches_paie_${month}.zip`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(downloadUrl);
+
+      setAlertMessage(`ZIP des fiches de paie (${month}) téléchargé avec succès`);
+      setShowSuccessAlert(true);
+      setTimeout(() => setShowSuccessAlert(false), 4000);
+    } catch (error: any) {
+      setAlertMessage(error.message || 'Erreur lors du téléchargement du ZIP');
+      setShowSuccessAlert(true);
+      setTimeout(() => setShowSuccessAlert(false), 4000);
+    } finally {
+      setZipDownloading(false);
+    }
+  };
+
+  const loadHrRules = async () => {
+    try {
+      setRulesLoading(true);
+      const data = await api.get('/hr/rules');
+      setHrRules(Array.isArray(data) ? data : []);
+    } catch (err: any) {
+      console.error('Erreur chargement règles RH:', err);
+    } finally {
+      setRulesLoading(false);
+    }
+  };
+
+  const handleSaveRule = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!ruleForm.name || !ruleForm.conditionValue || !ruleForm.actionValue) return;
+    try {
+      setRulesSaving(true);
+      if (editingRuleId) {
+        await api.put(`/hr/rules/${editingRuleId}`, ruleForm);
+      } else {
+        await api.post('/hr/rules', ruleForm);
+      }
+      setRuleForm({ name: '', description: '', type: 'LATE', conditionOperator: 'GT', conditionValue: '', conditionUnit: 'MINUTES', actionType: 'DEDUCT_SALARY_HOURS', actionValue: '', isActive: true });
+      setEditingRuleId(null);
+      await loadHrRules();
+    } catch (err: any) {
+      console.error('Erreur sauvegarde règle:', err);
+    } finally {
+      setRulesSaving(false);
+    }
+  };
+
+  const handleDeleteRule = async (id: string) => {
+    if (!window.confirm('Supprimer cette règle ?')) return;
+    try {
+      await api.delete(`/hr/rules/${id}`);
+      await loadHrRules();
+    } catch (err: any) {
+      console.error('Erreur suppression règle:', err);
+    }
+  };
+
+  const handleToggleRule = async (id: string) => {
+    try {
+      await api.patch(`/hr/rules/${id}/toggle`);
+      await loadHrRules();
+    } catch (err: any) {
+      console.error('Erreur toggle règle:', err);
+    }
+  };
+
+  const handleEditRule = (rule: any) => {
+    setEditingRuleId(rule.id);
+    setRuleForm({
+      name: rule.name || '',
+      description: rule.description || '',
+      type: rule.type || 'LATE',
+      conditionOperator: rule.conditionOperator || 'GT',
+      conditionValue: String(rule.conditionValue || ''),
+      conditionUnit: rule.conditionUnit || 'MINUTES',
+      actionType: rule.actionType || 'DEDUCT_SALARY_HOURS',
+      actionValue: String(rule.actionValue || ''),
+      isActive: rule.isActive !== false
+    });
+  };
+
+  const RULE_TYPE_LABELS: Record<string, string> = {
+    LATE: 'Retard', ABSENCE: 'Absence', OVERTIME: 'Heures sup', UNPAID_LEAVE: 'Congé non payé'
+  };
+  const ACTION_TYPE_LABELS: Record<string, string> = {
+    DEDUCT_FIXED: 'Montant fixe (F CFA)', DEDUCT_SALARY_HOURS: 'N heures de salaire', DEDUCT_SALARY_DAYS: 'N jours de salaire', DEDUCT_PERCENT: '% du salaire de base'
+  };
+  const OPERATOR_LABELS: Record<string, string> = { GT: '>', GTE: '≥', LT: '<', LTE: '≤', EQ: '=' };
+  const UNIT_LABELS: Record<string, string> = { MINUTES: 'min', HOURS: 'h', DAYS: 'jour(s)' };
+
   const tabs = [
     { id: 'generation', label: 'Génération Paie', icon: <Play size={16} /> },
     { id: 'slips', label: 'Bulletins', icon: <ClipboardList size={16} /> },
     { id: 'advances', label: 'Avances & Primes', icon: <TrendingUp size={16} /> },
     { id: 'declarations', label: 'Déclarations', icon: <FileCheck size={16} /> },
+    { id: 'rules', label: 'Règles RH', icon: <Zap size={16} /> },
     { id: 'settings', label: 'Paramétrage', icon: <Settings size={16} /> },
   ];
 
@@ -157,6 +298,9 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
     }
     if (activeTab === 'slips') {
       loadPayslips();
+    }
+    if (activeTab === 'rules') {
+      loadHrRules();
     }
   }, [activeTab]);
 
@@ -1456,17 +1600,32 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
                   <h3 className="text-lg font-black text-slate-900 uppercase tracking-tighter flex items-center gap-3">
                     <Users className="text-indigo-500" /> Détail par Employé
                   </h3>
-                  <button 
-                    onClick={() => {
-                      if (employees.length > 0) {
-                        handlePreviewPayslip(employees.find(emp => emp.status === 'ACTIVE'));
-                      }
-                    }}
-                    disabled={employees.length === 0}
-                    className="px-6 py-3 bg-indigo-50 text-indigo-600 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-indigo-100 transition-all disabled:opacity-50"
-                  >
-                    <Eye size={14} className="inline mr-2" /> Prévisualiser Bulletin
-                  </button>
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={handleDownloadAllZip}
+                      disabled={zipDownloading || employees.filter(e => e.hasActiveContract).length === 0}
+                      className="px-6 py-3 bg-emerald-50 text-emerald-700 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-emerald-100 transition-all disabled:opacity-50 flex items-center gap-2"
+                      title="Télécharger toutes les fiches de paie du mois en ZIP"
+                    >
+                      {zipDownloading ? (
+                        <RefreshCw size={14} className="animate-spin" />
+                      ) : (
+                        <FolderDown size={14} />
+                      )}
+                      {zipDownloading ? 'Génération…' : 'Tout en ZIP'}
+                    </button>
+                    <button
+                      onClick={() => {
+                        if (employees.length > 0) {
+                          handlePreviewPayslip(employees.find(emp => emp.status === 'ACTIVE'));
+                        }
+                      }}
+                      disabled={employees.length === 0}
+                      className="px-6 py-3 bg-indigo-50 text-indigo-600 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-indigo-100 transition-all disabled:opacity-50"
+                    >
+                      <Eye size={14} className="inline mr-2" /> Prévisualiser
+                    </button>
+                  </div>
                 </div>
                 <div className="overflow-x-auto">
                   <table className="w-full">
@@ -3080,6 +3239,257 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
 
           {activeTab === 'declarations' && (
             <DeclarationsSocialesFiscales />
+          )}
+
+          {/* ==================== ONGLET RÈGLES RH ==================== */}
+          {activeTab === 'rules' && (
+            <div className="space-y-8">
+              {/* Header */}
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-2xl font-black text-slate-900 uppercase tracking-tight">Moteur de Règles RH</h2>
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">
+                    Définissez des règles automatiques de retenue sur salaire
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-5 gap-8">
+                {/* ---- Formulaire (gauche) ---- */}
+                <div className="lg:col-span-2">
+                  <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm p-8 space-y-6 sticky top-4">
+                    <div className="flex items-center gap-3 mb-2">
+                      <div className="w-10 h-10 bg-indigo-50 rounded-2xl flex items-center justify-center">
+                        <Zap size={18} className="text-indigo-500" />
+                      </div>
+                      <h3 className="text-sm font-black text-slate-900 uppercase tracking-tight">
+                        {editingRuleId ? 'Modifier la règle' : 'Nouvelle règle'}
+                      </h3>
+                    </div>
+
+                    <form onSubmit={handleSaveRule} className="space-y-5">
+                      {/* Nom */}
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Nom de la règle *</label>
+                        <input
+                          type="text"
+                          placeholder="Ex: Retard > 15 min → 1h déduite"
+                          value={ruleForm.name}
+                          onChange={e => setRuleForm(p => ({ ...p, name: e.target.value }))}
+                          required
+                          className="w-full px-4 py-3 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-indigo-500 text-sm font-medium"
+                        />
+                      </div>
+
+                      {/* Type */}
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Déclencheur</label>
+                        <select
+                          value={ruleForm.type}
+                          onChange={e => setRuleForm(p => ({ ...p, type: e.target.value }))}
+                          className="w-full px-4 py-3 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-indigo-500 text-sm font-bold"
+                        >
+                          <option value="LATE">Retard</option>
+                          <option value="ABSENCE">Absence injustifiée</option>
+                          <option value="UNPAID_LEAVE">Congé non payé</option>
+                          <option value="OVERTIME">Heures supplémentaires</option>
+                        </select>
+                      </div>
+
+                      {/* Condition */}
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Condition (si…)</label>
+                        <div className="grid grid-cols-3 gap-2">
+                          <select
+                            value={ruleForm.conditionOperator}
+                            onChange={e => setRuleForm(p => ({ ...p, conditionOperator: e.target.value }))}
+                            className="px-3 py-3 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-indigo-500 text-sm font-bold"
+                          >
+                            <option value="GT">&gt;</option>
+                            <option value="GTE">≥</option>
+                            <option value="EQ">=</option>
+                            <option value="LTE">≤</option>
+                            <option value="LT">&lt;</option>
+                          </select>
+                          <input
+                            type="number"
+                            min="0"
+                            placeholder="Valeur"
+                            value={ruleForm.conditionValue}
+                            onChange={e => setRuleForm(p => ({ ...p, conditionValue: e.target.value }))}
+                            required
+                            className="px-3 py-3 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-indigo-500 text-sm font-medium"
+                          />
+                          <select
+                            value={ruleForm.conditionUnit}
+                            onChange={e => setRuleForm(p => ({ ...p, conditionUnit: e.target.value }))}
+                            className="px-3 py-3 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-indigo-500 text-sm font-bold"
+                          >
+                            <option value="MINUTES">min</option>
+                            <option value="HOURS">h</option>
+                            <option value="DAYS">jour(s)</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      {/* Action */}
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Alors déduire</label>
+                        <div className="grid grid-cols-2 gap-2">
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            placeholder="Valeur"
+                            value={ruleForm.actionValue}
+                            onChange={e => setRuleForm(p => ({ ...p, actionValue: e.target.value }))}
+                            required
+                            className="px-3 py-3 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-indigo-500 text-sm font-medium"
+                          />
+                          <select
+                            value={ruleForm.actionType}
+                            onChange={e => setRuleForm(p => ({ ...p, actionType: e.target.value }))}
+                            className="px-3 py-3 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-indigo-500 text-sm font-bold"
+                          >
+                            <option value="DEDUCT_SALARY_HOURS">heures de salaire</option>
+                            <option value="DEDUCT_SALARY_DAYS">jours de salaire</option>
+                            <option value="DEDUCT_PERCENT">% du salaire</option>
+                            <option value="DEDUCT_FIXED">montant fixe (F CFA)</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      {/* Description */}
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Description (optionnel)</label>
+                        <textarea
+                          rows={2}
+                          placeholder="Explication de la règle..."
+                          value={ruleForm.description}
+                          onChange={e => setRuleForm(p => ({ ...p, description: e.target.value }))}
+                          className="w-full px-4 py-3 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-indigo-500 text-sm font-medium resize-none"
+                        />
+                      </div>
+
+                      <div className="flex gap-3 pt-2">
+                        {editingRuleId && (
+                          <button
+                            type="button"
+                            onClick={() => { setEditingRuleId(null); setRuleForm({ name: '', description: '', type: 'LATE', conditionOperator: 'GT', conditionValue: '', conditionUnit: 'MINUTES', actionType: 'DEDUCT_SALARY_HOURS', actionValue: '', isActive: true }); }}
+                            className="flex-1 px-4 py-3 bg-slate-100 text-slate-600 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-slate-200 transition-all"
+                          >
+                            Annuler
+                          </button>
+                        )}
+                        <button
+                          type="submit"
+                          disabled={rulesSaving}
+                          className="flex-1 px-4 py-3 bg-indigo-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-indigo-700 transition-all shadow-lg disabled:opacity-60"
+                        >
+                          {rulesSaving ? 'Sauvegarde...' : editingRuleId ? 'Modifier' : 'Créer la règle'}
+                        </button>
+                      </div>
+                    </form>
+                  </div>
+                </div>
+
+                {/* ---- Liste des règles (droite) ---- */}
+                <div className="lg:col-span-3 space-y-4">
+                  {rulesLoading ? (
+                    <div className="flex items-center justify-center py-16">
+                      <div className="w-8 h-8 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin" />
+                    </div>
+                  ) : hrRules.length === 0 ? (
+                    <div className="bg-white rounded-[2.5rem] border border-slate-100 p-12 text-center">
+                      <div className="w-16 h-16 bg-slate-100 rounded-[2rem] flex items-center justify-center mx-auto mb-4">
+                        <Zap size={28} className="text-slate-400" />
+                      </div>
+                      <h3 className="text-base font-black text-slate-600 mb-2">Aucune règle configurée</h3>
+                      <p className="text-[11px] text-slate-400 font-medium">
+                        Créez des règles pour automatiser les déductions de retard et d'absence.
+                      </p>
+                    </div>
+                  ) : (
+                    hrRules.map((rule: any) => (
+                      <div key={rule.id} className={`bg-white rounded-[2rem] border p-6 transition-all ${rule.isActive ? 'border-slate-100 shadow-sm' : 'border-slate-100 opacity-60'}`}>
+                        <div className="flex items-start justify-between gap-4">
+                          <div className="flex-grow min-w-0">
+                            <div className="flex items-center gap-3 mb-2 flex-wrap">
+                              <span className="text-sm font-black text-slate-900">{rule.name}</span>
+                              <span className={`text-[9px] font-black uppercase tracking-widest px-2 py-1 rounded-full ${
+                                rule.type === 'LATE' ? 'bg-orange-50 text-orange-600' :
+                                rule.type === 'ABSENCE' ? 'bg-red-50 text-red-600' :
+                                rule.type === 'OVERTIME' ? 'bg-emerald-50 text-emerald-600' :
+                                'bg-blue-50 text-blue-600'
+                              }`}>
+                                {RULE_TYPE_LABELS[rule.type] || rule.type}
+                              </span>
+                              {!rule.isActive && (
+                                <span className="text-[9px] font-black uppercase tracking-widest px-2 py-1 rounded-full bg-slate-100 text-slate-400">Inactive</span>
+                              )}
+                            </div>
+                            {/* Résumé lisible */}
+                            <p className="text-[11px] font-bold text-slate-500 bg-slate-50 rounded-xl px-3 py-2 inline-block">
+                              Si {RULE_TYPE_LABELS[rule.type]?.toLowerCase()} {OPERATOR_LABELS[rule.conditionOperator]} {rule.conditionValue} {UNIT_LABELS[rule.conditionUnit]}
+                              {' → '}déduire {rule.actionValue} {ACTION_TYPE_LABELS[rule.actionType]?.toLowerCase()}
+                            </p>
+                            {rule.description && (
+                              <p className="text-[10px] text-slate-400 mt-2">{rule.description}</p>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2 flex-shrink-0">
+                            {/* Toggle actif/inactif */}
+                            <button
+                              onClick={() => handleToggleRule(rule.id)}
+                              title={rule.isActive ? 'Désactiver' : 'Activer'}
+                              className={`w-8 h-8 rounded-xl flex items-center justify-center transition-all ${rule.isActive ? 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100' : 'bg-slate-100 text-slate-400 hover:bg-slate-200'}`}
+                            >
+                              {rule.isActive ? <ToggleRight size={16} /> : <ToggleLeft size={16} />}
+                            </button>
+                            {/* Éditer */}
+                            <button
+                              onClick={() => handleEditRule(rule)}
+                              className="w-8 h-8 bg-indigo-50 text-indigo-500 rounded-xl flex items-center justify-center hover:bg-indigo-100 transition-all"
+                            >
+                              <Settings size={14} />
+                            </button>
+                            {/* Supprimer */}
+                            <button
+                              onClick={() => handleDeleteRule(rule.id)}
+                              className="w-8 h-8 bg-red-50 text-red-500 rounded-xl flex items-center justify-center hover:bg-red-100 transition-all"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ))
+                  )}
+
+                  {/* Exemples de règles fréquentes */}
+                  {hrRules.length === 0 && (
+                    <div className="bg-indigo-50 rounded-[2rem] border border-indigo-100 p-6">
+                      <h4 className="text-[10px] font-black text-indigo-600 uppercase tracking-widest mb-4">Exemples de règles fréquentes</h4>
+                      <div className="space-y-3">
+                        {[
+                          { label: 'Retard > 15 min → déduire 1h de salaire', type: 'LATE', conditionOperator: 'GT', conditionValue: '15', conditionUnit: 'MINUTES', actionType: 'DEDUCT_SALARY_HOURS', actionValue: '1' },
+                          { label: 'Absence injustifiée ≥ 1 jour → déduire 1 jour de salaire', type: 'ABSENCE', conditionOperator: 'GTE', conditionValue: '1', conditionUnit: 'DAYS', actionType: 'DEDUCT_SALARY_DAYS', actionValue: '1' },
+                        ].map((ex, i) => (
+                          <button
+                            key={i}
+                            type="button"
+                            onClick={() => setRuleForm(p => ({ ...p, name: ex.label, type: ex.type, conditionOperator: ex.conditionOperator, conditionValue: ex.conditionValue, conditionUnit: ex.conditionUnit, actionType: ex.actionType, actionValue: ex.actionValue }))}
+                            className="w-full text-left px-4 py-3 bg-white rounded-xl text-[11px] font-bold text-indigo-700 hover:bg-indigo-100 transition-all border border-indigo-100"
+                          >
+                            + {ex.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
           )}
         </motion.div>
       </AnimatePresence>

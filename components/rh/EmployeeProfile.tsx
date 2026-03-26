@@ -3232,25 +3232,22 @@ const EmployeeProfile: React.FC<EmployeeProfileProps> = ({ employeeId, onNavigat
                               <div className="text-2xl">📄</div>
                               <div>
                                 <p className="font-bold text-slate-900">Document PDF</p>
-                                <p className="text-xs text-slate-500">Utilisez les contrôles ci-dessous pour naviguer</p>
+                                <p className="text-xs text-slate-500">Prévisualisation via Google Docs Viewer</p>
                               </div>
                             </div>
-                            <button 
+                            <button
                               onClick={() => window.open(previewDoc.fileUrl, '_blank')}
                               className="px-4 py-2 bg-slate-900 text-white rounded-xl text-xs font-bold hover:bg-indigo-600 transition-all flex items-center gap-2"
                             >
-                              <ExternalLink size={14} /> Ouvrir dans un nouvel onglet
+                              <ExternalLink size={14} /> Ouvrir le fichier original
                             </button>
                           </div>
                           <div className="relative" style={{ height: '70vh' }}>
-                            <iframe 
-                              src={previewDoc.fileUrl}
+                            <iframe
+                              src={`https://docs.google.com/viewer?url=${encodeURIComponent(previewDoc.fileUrl)}&embedded=true`}
                               title={previewDoc.name}
                               className="w-full h-full border-0"
                               style={{ minHeight: '500px' }}
-                              onError={(e) => {
-                                console.error('Erreur de chargement PDF:', e);
-                              }}
                             />
                           </div>
                         </div>

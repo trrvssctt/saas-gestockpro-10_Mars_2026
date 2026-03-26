@@ -25,7 +25,7 @@ import {
   ExternalLink
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { leaveApi, employeeApi } from '../../services/api';
+import { leaveApi, employeeApi, apiClient } from '../../services/api';
 import { authBridge } from '../../services/authBridge';
 import { Leave, Employee, LeaveType, LeaveStatus, LeaveFormData, User, UserRole } from '../../types';
 import HRModal from './HRModal';
@@ -58,12 +58,25 @@ const LeaveManagement: React.FC<LeaveManagementProps> = ({ onNavigate, user }) =
   });
   const [formErrors, setFormErrors] = useState<{ [key: string]: string }>({});
   const [showActionModal, setShowActionModal] = useState(false);
+  const [docPreviewId, setDocPreviewId] = useState<string | null>(null);
   const [actionLeave, setActionLeave] = useState<Leave | null>(null);
   const [showRejectModal, setShowRejectModal] = useState(false);
   const [rejectLeave, setRejectLeave] = useState<Leave | null>(null);
   const [rejectionReason, setRejectionReason] = useState('');
   const [rejectionError, setRejectionError] = useState('');
   
+  // Solde de congés payés
+  const [leaveBalance, setLeaveBalance] = useState<{ acquiredDays: number; usedDays: number; remainingDays: number; year: number } | null>(null);
+
+  const loadLeaveBalance = async (employeeId: string) => {
+    try {
+      const data = await apiClient.get(`/hr/leaves/balance/${employeeId}`);
+      setLeaveBalance(data);
+    } catch {
+      setLeaveBalance(null);
+    }
+  };
+
   // Hook pour vérifier le statut d'absence de l'employé connecté
   const { absenceStatus, loading: absenceLoading } = useCurrentEmployeeAbsenceStatus();
   
@@ -154,7 +167,8 @@ const LeaveManagement: React.FC<LeaveManagementProps> = ({ onNavigate, user }) =
         // D'abord récupérer l'Employee correspondant
         const employee = await getCurrentEmployee();
         setCurrentEmployee(employee);
-        
+        if (employee) loadLeaveBalance(employee.id);
+
         if (employee) {
           const leavesResponse = await leaveApi.getAll({ 
             sortBy: 'start_date', 
@@ -590,6 +604,23 @@ const LeaveManagement: React.FC<LeaveManagementProps> = ({ onNavigate, user }) =
         </div>
       </div>
 
+      {/* ---- Solde de congés payés ---- */}
+      {leaveBalance && (
+        <div className="grid grid-cols-3 gap-4">
+          {[
+            { label: 'Jours acquis', value: leaveBalance.acquiredDays, color: 'indigo', desc: `2,5 j/mois · ${leaveBalance.year}` },
+            { label: 'Jours utilisés', value: leaveBalance.usedDays, color: 'orange', desc: 'Congés approuvés' },
+            { label: 'Solde restant', value: leaveBalance.remainingDays, color: leaveBalance.remainingDays <= 2 ? 'red' : 'emerald', desc: leaveBalance.remainingDays <= 0 ? 'Solde épuisé' : 'Disponibles' }
+          ].map(({ label, value, color, desc }) => (
+            <div key={label} className={`bg-white rounded-[2rem] border border-${color}-100 p-6 text-center shadow-sm`}>
+              <p className={`text-3xl font-black text-${color}-600 mb-1`}>{value}</p>
+              <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{label}</p>
+              <p className="text-[9px] text-slate-400 mt-1">{desc}</p>
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* Statut d'absence actuelle pour les employés */}
       {isEmployeeMode && !absenceLoading && absenceStatus && !absenceStatus.isPresent && absenceStatus.leave && (
         <motion.div
@@ -910,15 +941,41 @@ const LeaveManagement: React.FC<LeaveManagementProps> = ({ onNavigate, user }) =
                                       Document uploadé le {new Date(leave.createdAt).toLocaleDateString('fr-FR')}
                                     </p>
                                   </div>
-                                  <a 
-                                    href={leave.documentUrl} 
-                                    target="_blank" 
-                                    rel="noopener noreferrer"
-                                    className="flex items-center gap-2 px-3 py-2 bg-blue-500 text-white rounded-lg text-xs font-bold uppercase tracking-widest hover:bg-blue-600 transition-all"
-                                  >
-                                    <Eye size={12} /> Voir
-                                  </a>
+                                  <div className="flex gap-2">
+                                    <button
+                                      onClick={() => setDocPreviewId(docPreviewId === leave.id ? null : leave.id)}
+                                      className="flex items-center gap-1.5 px-3 py-2 bg-slate-100 text-slate-700 rounded-lg text-xs font-bold uppercase tracking-widest hover:bg-indigo-50 hover:text-indigo-700 transition-all"
+                                    >
+                                      <Eye size={12} /> {docPreviewId === leave.id ? 'Masquer' : 'Aperçu'}
+                                    </button>
+                                    <a
+                                      href={leave.documentUrl}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="flex items-center gap-1.5 px-3 py-2 bg-blue-500 text-white rounded-lg text-xs font-bold uppercase tracking-widest hover:bg-blue-600 transition-all"
+                                    >
+                                      <ExternalLink size={12} /> Ouvrir
+                                    </a>
+                                  </div>
                                 </div>
+                                {docPreviewId === leave.id && leave.documentUrl && (
+                                  <div className="mt-2 rounded-xl overflow-hidden border border-slate-200">
+                                    {leave.documentUrl.match(/\.(jpg|jpeg|png|gif|webp)/i) || leave.documentUrl.includes('/image/') ? (
+                                      <img
+                                        src={leave.documentUrl}
+                                        alt="Justificatif"
+                                        className="w-full max-h-80 object-contain bg-slate-50"
+                                      />
+                                    ) : (
+                                      <iframe
+                                        src={`https://docs.google.com/viewer?url=${encodeURIComponent(leave.documentUrl)}&embedded=true`}
+                                        title="Justificatif médical"
+                                        className="w-full border-0"
+                                        style={{ height: '400px' }}
+                                      />
+                                    )}
+                                  </div>
+                                )}
                               </div>
                             ) : (
                               <div className="flex items-start gap-2">

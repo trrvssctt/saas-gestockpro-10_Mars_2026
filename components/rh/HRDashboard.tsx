@@ -66,15 +66,21 @@ const HRDashboard: React.FC<HRDashboardProps> = ({ onNavigate }) => {
   const [showConfigModal, setShowConfigModal] = useState<boolean>(false);
   const [checkingConfig, setCheckingConfig] = useState<boolean>(true);
 
+  // Paramètres paie & temps
+  const [showPayrollSettingsModal, setShowPayrollSettingsModal] = useState<boolean>(false);
+  const [payrollOk, setPayrollOk] = useState<boolean>(true);
+  const [timeOk, setTimeOk] = useState<boolean>(true);
+
   // Charger les statistiques et vérifier la configuration au montage du composant
   useEffect(() => {
     checkCompanyConfiguration();
   }, []);
 
-  // Charger les stats seulement si l'entreprise est configurée
+  // Charger les stats + vérifier paramètres paie/temps seulement si l'entreprise est configurée
   useEffect(() => {
     if (companyConfigured && !checkingConfig) {
       loadHRStats();
+      checkPayrollAndTimeSettings();
     }
   }, [companyConfigured, checkingConfig]);
 
@@ -120,6 +126,34 @@ const HRDashboard: React.FC<HRDashboardProps> = ({ onNavigate }) => {
     }
   };
 
+  const checkPayrollAndTimeSettings = async () => {
+    try {
+      const [settingsData, rulesData] = await Promise.all([
+        apiClient.get('/hr/payroll-settings'),
+        apiClient.get('/hr/rules')
+      ]);
+      const s = settingsData?.data || settingsData || {};
+      const rules = Array.isArray(rulesData) ? rulesData : (rulesData?.data || []);
+
+      // Paie configurée : taux cotisations explicitement sauvegardés
+      const pOk = s.employerSocialChargeRate != null && s.employeeSocialChargeRate != null;
+      // Temps configurés : horaires de référence renseignés + au moins une règle active
+      const tOk = !!(s.workStartTime && s.workEndTime && s.workingDaysPerMonth) && rules.length > 0;
+
+      setPayrollOk(pOk);
+      setTimeOk(tOk);
+
+      if (!pOk || !tOk) {
+        setShowPayrollSettingsModal(true);
+      }
+    } catch (err) {
+      // Silencieux : on affiche le modal par précaution
+      setPayrollOk(false);
+      setTimeOk(false);
+      setShowPayrollSettingsModal(true);
+    }
+  };
+
   const handleModuleClick = (moduleId: string) => {
     // Vérifier si l'entreprise est configurée avant de permettre la navigation
     if (!companyConfigured) {
@@ -147,6 +181,8 @@ const HRDashboard: React.FC<HRDashboardProps> = ({ onNavigate }) => {
     { id: 'rh.org', title: 'Organigramme', desc: 'Vue graphique hiérarchique et structurelle.', icon: <GitPullRequest />, color: 'bg-purple-500' },
     { id: 'rh.docs', title: 'Documents', desc: 'Gestion centralisée des documents employés (CNI, Diplômes).', icon: <FolderOpen />, color: 'bg-amber-500' },
     { id: 'rh.leaves', title: 'Congés', desc: 'Gestion des absences, congés payés et planning d\'équipe.', icon: <Calendar />, color: 'bg-emerald-500' },
+    { id: 'rh.attendance', title: 'Pointage', desc: 'Suivi des présences, retards et heures d\'arrivée/départ.', icon: <Clock />, color: 'bg-amber-500' },
+    { id: 'rh.time-settings', title: 'Paramètres Temps', desc: 'Règles de déduction retard/absence, horaires de référence.', icon: <Settings />, color: 'bg-slate-500' },
     //{ id: 'rh.recruitment', title: 'Recrutement', desc: 'Gestion des offres d\'emploi et suivi des candidats.', icon: <Briefcase />, color: 'bg-rose-500' },
     //{ id: 'rh.training', title: 'Formation', desc: 'Planification des sessions et suivi des compétences.', icon: <GraduationCap />, color: 'bg-cyan-500' },
     //{ id: 'rh.performance', title: 'Performance', desc: 'Campagnes d\'évaluation et suivi des objectifs.', icon: <Activity />, color: 'bg-orange-500' },
@@ -282,6 +318,137 @@ const HRDashboard: React.FC<HRDashboardProps> = ({ onNavigate }) => {
                 <div className="text-xs text-slate-400 font-medium">
                   💡 La configuration peut être modifiée à tout moment dans les paramètres de paie
                 </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Modal Paramètres Paie & Temps */}
+      <AnimatePresence>
+        {showPayrollSettingsModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-white rounded-[3rem] p-6 md:p-10 max-w-2xl w-full shadow-2xl relative"
+            >
+              {/* Close */}
+              <button
+                onClick={() => setShowPayrollSettingsModal(false)}
+                className="absolute top-6 right-6 p-2 hover:bg-slate-100 rounded-2xl transition-all"
+              >
+                <X size={20} className="text-slate-400" />
+              </button>
+
+              <div className="space-y-8">
+                {/* Header */}
+                <div className="flex items-start gap-5">
+                  <div className="w-16 h-16 bg-gradient-to-br from-amber-400 to-orange-500 rounded-[1.5rem] flex items-center justify-center shrink-0">
+                    <AlertCircle className="text-white" size={32} />
+                  </div>
+                  <div>
+                    <h2 className="text-xl md:text-2xl font-black text-slate-900 uppercase tracking-tighter mb-2">
+                      Paramètres de Paie Incomplets
+                    </h2>
+                    <p className="text-sm text-slate-500 font-medium leading-relaxed">
+                      Ces paramètres sont appliqués automatiquement à <strong className="text-slate-700">tous les calculs</strong> :
+                      salaires, primes, avances, déductions retard/absence et déclarations sociales.
+                      Sans eux, les résultats de paie seront incorrects ou impossibles à générer.
+                    </p>
+                  </div>
+                </div>
+
+                {/* Cartes statut */}
+                <div className="grid sm:grid-cols-2 gap-4">
+                  {/* Gestion de la Paie */}
+                  <div className={`p-5 rounded-2xl border-2 space-y-3 ${payrollOk ? 'border-emerald-200 bg-emerald-50' : 'border-amber-200 bg-amber-50'}`}>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${payrollOk ? 'bg-emerald-100 text-emerald-600' : 'bg-amber-100 text-amber-600'}`}>
+                          <DollarSign size={20} />
+                        </div>
+                        <span className="font-black text-slate-900 text-sm uppercase tracking-tight">Gestion de la Paie</span>
+                      </div>
+                      {payrollOk
+                        ? <CheckCircle2 size={18} className="text-emerald-500" />
+                        : <AlertCircle size={18} className="text-amber-500" />
+                      }
+                    </div>
+                    <p className="text-xs text-slate-500 leading-relaxed">
+                      Taux de cotisations patronales & salariales, rubriques de paie, monnaie.
+                      Utilisés pour chaque bulletin de salaire et déclaration sociale.
+                    </p>
+                    {!payrollOk && (
+                      <button
+                        onClick={() => { setShowPayrollSettingsModal(false); onNavigate('rh.payroll', { initialTab: 'settings' }); }}
+                        className="w-full py-2.5 bg-amber-500 text-white rounded-xl font-black text-[10px] uppercase tracking-widest flex items-center justify-center gap-2 hover:bg-amber-600 transition-all"
+                      >
+                        <Settings size={14} /> Configurer maintenant <ArrowRight size={14} />
+                      </button>
+                    )}
+                    {payrollOk && (
+                      <p className="text-[10px] font-black text-emerald-600 uppercase tracking-widest flex items-center gap-1">
+                        <CheckCircle2 size={12} /> Configuré
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Gestion des Temps */}
+                  <div className={`p-5 rounded-2xl border-2 space-y-3 ${timeOk ? 'border-emerald-200 bg-emerald-50' : 'border-rose-200 bg-rose-50'}`}>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${timeOk ? 'bg-emerald-100 text-emerald-600' : 'bg-rose-100 text-rose-600'}`}>
+                          <Clock size={20} />
+                        </div>
+                        <span className="font-black text-slate-900 text-sm uppercase tracking-tight">Gestion des Temps</span>
+                      </div>
+                      {timeOk
+                        ? <CheckCircle2 size={18} className="text-emerald-500" />
+                        : <AlertCircle size={18} className="text-rose-500" />
+                      }
+                    </div>
+                    <p className="text-xs text-slate-500 leading-relaxed">
+                      Horaires de référence, nombre de jours/mois et règles de déduction retard & absence.
+                      Appliqués automatiquement à la fiche de paie.
+                    </p>
+                    {!timeOk && (
+                      <button
+                        onClick={() => { setShowPayrollSettingsModal(false); onNavigate('rh.time-settings'); }}
+                        className="w-full py-2.5 bg-rose-500 text-white rounded-xl font-black text-[10px] uppercase tracking-widest flex items-center justify-center gap-2 hover:bg-rose-600 transition-all"
+                      >
+                        <Settings size={14} /> Configurer maintenant <ArrowRight size={14} />
+                      </button>
+                    )}
+                    {timeOk && (
+                      <p className="text-[10px] font-black text-emerald-600 uppercase tracking-widest flex items-center gap-1">
+                        <CheckCircle2 size={12} /> Configuré
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                {/* Note importance */}
+                <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 flex items-start gap-3">
+                  <ShieldCheck size={18} className="text-indigo-500 shrink-0 mt-0.5" />
+                  <p className="text-xs text-slate-600 font-medium leading-relaxed">
+                    Ces paramètres sont <strong>partagés et appliqués globalement</strong> à tous vos employés.
+                    Une modification ultérieure affectera les prochains calculs de paie.
+                  </p>
+                </div>
+
+                <button
+                  onClick={() => setShowPayrollSettingsModal(false)}
+                  className="w-full py-3 border-2 border-slate-100 text-slate-400 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-slate-50 transition-all"
+                >
+                  Configurer plus tard
+                </button>
               </div>
             </motion.div>
           </motion.div>

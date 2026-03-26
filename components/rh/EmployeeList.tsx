@@ -66,6 +66,7 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ onNavigate }) => {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [leaves, setLeaves] = useState<any[]>([]);
+  const [contracts, setContracts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -98,6 +99,20 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ onNavigate }) => {
     };
   };
 
+  const getActiveContract = (employeeId: string) => {
+    return contracts.find(
+      (c: any) => String(c.employeeId) === String(employeeId) && c.status === 'ACTIVE'
+    ) || null;
+  };
+
+  const getContractExpirationAlert = (contract: any) => {
+    if (!contract?.endDate) return null;
+    const diffDays = Math.ceil((new Date(contract.endDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+    if (diffDays >= 0 && diffDays <= 7)  return { level: 'critical', days: diffDays };
+    if (diffDays >= 0 && diffDays <= 30) return { level: 'warning', days: diffDays };
+    return null;
+  };
+
   // Calculer les statistiques de présence
   const getPresenceStats = () => {
     const activeEmployees = employees.filter(emp => emp.status === 'ACTIVE');
@@ -117,15 +132,17 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ onNavigate }) => {
     setLoading(true);
     setError(null);
     try {
-      const [employeeData, departmentData, leavesData] = await Promise.all([
+      const [employeeData, departmentData, leavesData, contractsData] = await Promise.all([
         apiClient.get('/hr/employees'),
         apiClient.get('/hr/departments'),
-        apiClient.get('/hr/leaves')
+        apiClient.get('/hr/leaves'),
+        apiClient.get('/hr/contracts')
       ]);
-      
+
       setEmployees(employeeData?.rows || employeeData || []);
       setDepartments(departmentData?.rows || departmentData || []);
       setLeaves(leavesData?.rows || leavesData || []);
+      setContracts(contractsData?.rows || contractsData || []);
     } catch (err: any) {
       setError('Erreur de chargement des données');
       console.error('Error fetching data:', err);
@@ -364,17 +381,20 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ onNavigate }) => {
           <button className="hidden sm:flex px-6 py-3 bg-white border border-slate-100 text-slate-900 rounded-2xl font-black text-[10px] uppercase tracking-widest items-center gap-2 hover:bg-slate-50 transition-all shadow-sm">
             <Download size={16} /> Export PDF
           </button>
-            <button 
-              onClick={() => {
-                resetForm();
-                setIsModalOpen(true);
-              }}
+          {departments.length > 0 ? (
+            <button
+              onClick={() => { resetForm(); setIsModalOpen(true); }}
               disabled={actionLoading}
               className="px-4 sm:px-6 py-3 bg-slate-900 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest flex items-center gap-2 hover:bg-indigo-600 transition-all shadow-xl active:scale-95 disabled:opacity-50"
             >
               {actionLoading ? <RefreshCw size={16} className="animate-spin" /> : <UserPlus size={16} />}
               <span className="hidden sm:inline">Nouvel Employé</span>
             </button>
+          ) : !loading && (
+            <div className="flex items-center gap-3 px-4 sm:px-6 py-3 bg-amber-50 text-amber-600 rounded-2xl border border-amber-100 text-[10px] font-black uppercase tracking-widest shadow-sm">
+              <AlertCircle size={16} /> <span className="hidden sm:inline">Créez d'abord un département</span>
+            </div>
+          )}
         </div>
       </div>
 
@@ -706,10 +726,42 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ onNavigate }) => {
               </div>
             </div>
 
-            <div className="space-y-1 mb-6">
+            <div className="space-y-1 mb-4">
               <h3 className="text-xl font-black text-slate-900 uppercase tracking-tighter">{emp.firstName} {emp.lastName}</h3>
               <p className="text-indigo-600 font-black uppercase text-[10px] tracking-widest">{emp.position}</p>
             </div>
+
+            {/* Contract badge */}
+            {(() => {
+              const contract = getActiveContract(emp.id);
+              if (!contract) return (
+                <div className="mb-4">
+                  <span className="px-3 py-1 bg-slate-100 text-slate-400 rounded-full text-[9px] font-black uppercase tracking-widest">
+                    Aucun contrat actif
+                  </span>
+                </div>
+              );
+              const alert = getContractExpirationAlert(contract);
+              return (
+                <div className="flex items-center gap-2 mb-4 flex-wrap">
+                  <span className="px-3 py-1 bg-indigo-50 text-indigo-600 rounded-full text-[9px] font-black uppercase tracking-widest">
+                    {contract.type}
+                  </span>
+                  {alert && (
+                    <span className={`px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest flex items-center gap-1 ${
+                      alert.level === 'critical'
+                        ? 'bg-red-100 text-red-600 animate-pulse'
+                        : 'bg-amber-100 text-amber-600'
+                    }`}>
+                      <Clock size={10} />
+                      {alert.level === 'critical'
+                        ? `Expire dans ${alert.days}j !`
+                        : `${alert.days}j restants`}
+                    </span>
+                  )}
+                </div>
+              );
+            })()}
 
             <div className="space-y-4 mb-8">
               <div className="flex items-center gap-3 text-slate-500">

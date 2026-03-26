@@ -25,10 +25,11 @@ import {
   Trash2,
   RefreshCw,
   AlertTriangle,
-  Info
+  Info,
+  ExternalLink
 } from 'lucide-react';
 import { Contract, Employee } from '../../types';
-import { apiClient } from '../../services/api';
+import { apiClient, fetchWithToken } from '../../services/api';
 import { motion, AnimatePresence } from 'framer-motion';
 import HRModal from './HRModal';
 import { useToast } from '../ToastProvider';
@@ -57,7 +58,8 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
     salary: '',
     trialPeriodEnd: '',
     currency: 'F CFA',
-    workLocation: ''
+    workLocation: '',
+    maxRenewals: ''
   });
   
   const [selectedContract, setSelectedContract] = useState<Contract | null>(null);
@@ -187,7 +189,8 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
       salary: '',
       trialPeriodEnd: '',
       currency: 'F CFA',
-      workLocation: ''
+      workLocation: '',
+      maxRenewals: ''
     });
   };
   
@@ -230,9 +233,17 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
     const updatedForm = { ...contractForm, type: newType };
     if (newType === 'CDI') {
       updatedForm.endDate = '';
+      updatedForm.maxRenewals = '';
+    }
+    if (newType === 'CDD') {
+      updatedForm.maxRenewals = '2';
     }
     if (newType === 'STAGE') {
       updatedForm.trialPeriodEnd = '';
+      updatedForm.maxRenewals = '0';
+    }
+    if (newType === 'FREELANCE') {
+      updatedForm.maxRenewals = '';
     }
     setContractForm(updatedForm);
   };
@@ -300,6 +311,11 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
 
   const stats = {
     active: Array.isArray(contracts) ? contracts.filter(c => c.status === 'ACTIVE').length : 0,
+    critical: Array.isArray(contracts) ? contracts.filter(c => {
+      if (!c.endDate || c.status !== 'ACTIVE') return false;
+      const diffDays = Math.ceil((new Date(c.endDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+      return diffDays >= 0 && diffDays <= 7;
+    }).length : 0,
     expiring: Array.isArray(contracts) ? contracts.filter(c => {
       if (!c.endDate || c.status !== 'ACTIVE') return false;
       const endDate = new Date(c.endDate);
@@ -429,6 +445,8 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
         trialPeriodEnd: contractForm.trialPeriodEnd || null,
         currency: contractForm.currency,
         workLocation: contractForm.workLocation || null,
+        maxRenewals: (contractForm.type === 'CDD' || contractForm.type === 'STAGE') && contractForm.maxRenewals !== ''
+          ? parseInt(contractForm.maxRenewals) : null,
         status: 'ACTIVE'
       };
 
@@ -810,7 +828,18 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
       setError('Un contrat CDI ne peut pas avoir de date de fin');
       return;
     }
-    
+
+    if (
+      selectedContract.maxRenewals !== undefined &&
+      selectedContract.maxRenewals !== null &&
+      (selectedContract.renewalCount ?? 0) >= selectedContract.maxRenewals
+    ) {
+      setError(
+        `Renouvellement impossible : ce contrat a atteint son nombre maximum de renouvellements (${selectedContract.renewalCount ?? 0}/${selectedContract.maxRenewals})`
+      );
+      return;
+    }
+
     if ((renewalForm.newType === 'CDD' || renewalForm.newType === 'STAGE') && !renewalForm.newEndDate) {
       setError(`Une date de fin est obligatoire pour un contrat de type ${renewalForm.newType}`);
       return;
@@ -941,6 +970,15 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
     return diffDays > 0 && diffDays <= 60;
   };
 
+  const getExpirationUrgency = (contract: Contract) => {
+    if (!contract.endDate || contract.status !== 'ACTIVE') return null;
+    const diffDays = Math.ceil((new Date(contract.endDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+    if (diffDays >= 0 && diffDays <= 7)  return { level: 'critical' as const, days: diffDays };
+    if (diffDays >= 0 && diffDays <= 30) return { level: 'warning' as const, days: diffDays };
+    if (diffDays >= 0 && diffDays <= 60) return { level: 'info' as const, days: diffDays };
+    return null;
+  };
+
   const canRenewContract = (contract: Contract) => {
     return contract.status === 'ACTIVE' && contract.endDate;
   };
@@ -961,7 +999,7 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
     
     try {
       setProcessing(true);
-      await apiClient.post(`/hr/contracts/${contract.id}/reactivate`);
+      await apiClient.post(`/hr/contracts/${contract.id}/reactivate`, {});
       
       setSuccessMessage('Contrat réactivé avec succès');
       setShowSuccessAlert(true);
@@ -976,42 +1014,37 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
 
   const handleGenerateBulkPayslips = async (e: React.FormEvent) => {
     e.preventDefault();
-    
     if (!bulkPayslipForm.month) {
       setError('Veuillez sélectionner un mois');
       return;
     }
-    
     try {
       setGeneratingPayslips(true);
       setError(null);
-      
-      const response = await apiClient.post('/hr/payslips/generate-bulk', {
-        month: bulkPayslipForm.month
-      });
-      
-      const { results } = response;
-      
-      if (results.summary.successCount === 0) {
-        setError('Aucune fiche de paie n\'a pu être générée. Vérifiez qu\'il y a des employés avec des contrats actifs.');
-        return;
+
+      const res = await fetchWithToken(`/hr/payslips/download-all-zip?month=${bulkPayslipForm.month}`);
+
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error((body as any).error || `Erreur ${res.status}`);
       }
-      
+
+      const blob = await res.blob();
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement('a');
+      a.href     = url;
+      a.download = `fiches_paie_${bulkPayslipForm.month}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
       setIsBulkPayslipModalOpen(false);
-      
-      setSuccessMessage(
-        `✅ ${results.summary.successCount} fiche(s) de paie générée(s) avec succès !\n\n` +
-        `📁 Dossier créé: ${response.folderName}\n` +
-        `📍 Emplacement: ${response.folderPath}\n\n` +
-        `Les fiches sont enregistrées sous format PNG avec les noms et postes des employés.` +
-        (results.summary.errorCount > 0 ? `\n\n⚠️ ${results.summary.errorCount} erreur(s) lors de la génération.` : '')
-      );
+      setSuccessMessage(`Fiches de paie (${bulkPayslipForm.month}) téléchargées en ZIP`);
       setShowSuccessAlert(true);
-      setTimeout(() => setShowSuccessAlert(false), 5000);
-      
+      setTimeout(() => setShowSuccessAlert(false), 4000);
     } catch (err: any) {
-      console.error('Error generating bulk payslips:', err);
-      setError(err.response?.data?.error || 'Erreur lors de la génération des fiches de paie');
+      setError(err.message || 'Erreur lors du téléchargement des fiches de paie');
     } finally {
       setGeneratingPayslips(false);
     }
@@ -1058,12 +1091,18 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
           <button className="px-6 py-3 bg-white border border-slate-100 text-slate-900 rounded-2xl font-black text-[10px] uppercase tracking-widest flex items-center gap-2 hover:bg-slate-50 transition-all shadow-sm">
             <Download size={16} /> Rapport d'échéance
           </button>
-          <button 
-            onClick={() => setIsModalOpen(true)}
-            className="px-6 py-3 bg-slate-900 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest flex items-center gap-2 hover:bg-indigo-600 transition-all shadow-xl active:scale-95"
-          >
-            <Plus size={16} /> Nouveau Contrat
-          </button>
+          {getAvailableEmployees().length > 0 ? (
+            <button
+              onClick={() => setIsModalOpen(true)}
+              className="px-6 py-3 bg-slate-900 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest flex items-center gap-2 hover:bg-indigo-600 transition-all shadow-xl active:scale-95"
+            >
+              <Plus size={16} /> Nouveau Contrat
+            </button>
+          ) : !loading && (
+            <div className="flex items-center gap-3 px-6 py-3 bg-amber-50 text-amber-600 rounded-2xl border border-amber-100 text-[10px] font-black uppercase tracking-widest shadow-sm">
+              <AlertCircle size={16} /> Aucun employé sans contrat actif
+            </div>
+          )}
         </div>
       </div>
 
@@ -1090,6 +1129,35 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
           >
             ×
           </button>
+        </div>
+      )}
+
+      {/* Critical 7-day expiration banner */}
+      {!loading && stats.critical > 0 && (
+        <div className="bg-red-600 text-white px-6 py-4 rounded-2xl flex items-start gap-4 shadow-lg shadow-red-200">
+          <AlertTriangle size={20} className="animate-pulse flex-shrink-0 mt-0.5" />
+          <div className="flex-1">
+            <p className="font-black text-[10px] uppercase tracking-widest mb-2">
+              Alerte urgente — {stats.critical} contrat(s) expirent dans 7 jours ou moins
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {contracts
+                .filter((c: Contract) => getExpirationUrgency(c)?.level === 'critical')
+                .map((c: Contract) => {
+                  const urgency = getExpirationUrgency(c)!;
+                  return (
+                    <button
+                      key={c.id}
+                      onClick={() => handleRenewClick(c)}
+                      className="text-xs bg-red-700 hover:bg-red-800 px-3 py-1.5 rounded-xl font-bold flex items-center gap-2 transition-all"
+                    >
+                      {getEmployeeName(c)} — {urgency.days === 0 ? "Expire aujourd'hui" : `${urgency.days}j restant${urgency.days > 1 ? 's' : ''}`}
+                      <RefreshCw size={11} />
+                    </button>
+                  );
+                })}
+            </div>
+          </div>
         </div>
       )}
 
@@ -1569,15 +1637,38 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
           
           <div className="space-y-2">
             <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Lieu de Travail</label>
-            <input 
-              type="text" 
+            <input
+              type="text"
               value={contractForm.workLocation}
               onChange={(e) => setContractForm({ ...contractForm, workLocation: e.target.value })}
               disabled={creating}
-              placeholder="Ex: Dakar Plateau" 
-              className="w-full px-6 py-4 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-indigo-500 transition-all font-bold text-sm disabled:opacity-50" 
+              placeholder="Ex: Dakar Plateau"
+              className="w-full px-6 py-4 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-indigo-500 transition-all font-bold text-sm disabled:opacity-50"
             />
           </div>
+
+          {(contractForm.type === 'CDD' || contractForm.type === 'STAGE') && (
+            <div className="space-y-2">
+              <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                Renouvellements Maximum
+              </label>
+              <input
+                type="number"
+                min="0"
+                max="5"
+                value={contractForm.maxRenewals}
+                onChange={(e) => setContractForm({ ...contractForm, maxRenewals: e.target.value })}
+                disabled={creating || contractForm.type === 'STAGE'}
+                placeholder={contractForm.type === 'STAGE' ? '0 — stages non renouvelables' : 'Ex: 2'}
+                className="w-full px-6 py-4 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-indigo-500 transition-all font-bold text-sm disabled:opacity-30"
+              />
+              <p className="text-xs text-slate-500">
+                {contractForm.type === 'CDD'
+                  ? '0 = aucun renouvellement possible · max 5'
+                  : 'Les stages ne sont pas renouvelables'}
+              </p>
+            </div>
+          )}
         </form>
       </HRModal>
       
@@ -1732,29 +1823,29 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
       </HRModal>
       
       {/* Bulk Payslip Generation Modal */}
-      <HRModal 
-        isOpen={isBulkPayslipModalOpen} 
-        onClose={() => setIsBulkPayslipModalOpen(false)} 
-        title="Génération en Masse des Fiches de Paie"
+      <HRModal
+        isOpen={isBulkPayslipModalOpen}
+        onClose={() => setIsBulkPayslipModalOpen(false)}
+        title="Téléchargement des Fiches de Paie"
         size="md"
         footer={
           <div className="flex justify-end gap-4">
-            <button 
-              type="button" 
-              onClick={() => setIsBulkPayslipModalOpen(false)} 
+            <button
+              type="button"
+              onClick={() => setIsBulkPayslipModalOpen(false)}
               disabled={generatingPayslips}
               className="px-8 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-slate-900 transition-all disabled:opacity-50"
             >
               Annuler
             </button>
-            <button 
-              type="submit" 
+            <button
+              type="submit"
               form="bulk-payslip-form"
               disabled={generatingPayslips || !bulkPayslipForm.month}
               className="px-4 md:px-10 py-4 bg-emerald-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-emerald-700 transition-all shadow-xl disabled:opacity-50 flex items-center gap-2"
             >
-              {generatingPayslips && <Loader2 size={16} className="animate-spin" />}
-              {generatingPayslips ? 'Génération...' : 'Générer les Fiches'}
+              {generatingPayslips ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
+              {generatingPayslips ? 'Génération...' : 'Télécharger le ZIP'}
             </button>
           </div>
         }
@@ -1763,24 +1854,24 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
           <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-6">
             <div className="flex items-center gap-3 mb-4">
               <FileText className="text-emerald-600" size={24} />
-              <h3 className="font-bold text-emerald-800">Génération Automatique</h3>
+              <h3 className="font-bold text-emerald-800">Archive ZIP — Fiches de Paie</h3>
             </div>
             <p className="text-emerald-700 text-sm mb-4">
-              Cette action va générer les fiches de paie pour tous les employés ayant un contrat actif.
+              Génère et télécharge les fiches de paie de tous les employés ayant un contrat actif, avec les taux configurés dans <strong>Gestion de la Paie</strong> et <strong>Gestion des Temps</strong>.
             </p>
             <div className="bg-white rounded-xl p-4 border border-emerald-100">
               <p className="text-sm text-emerald-800 font-medium">
-                📊 <strong>{stats.active}</strong> employé(s) avec contrat actif seront traités
+                <strong>{stats.active}</strong> employé{stats.active > 1 ? 's' : ''} avec contrat actif seront inclus
               </p>
             </div>
           </div>
-          
+
           <div className="space-y-2">
             <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">
               Mois de Paie *
             </label>
-            <input 
-              type="month" 
+            <input
+              type="month"
               value={bulkPayslipForm.month}
               onChange={(e) => setBulkPayslipForm({ month: e.target.value })}
               required
@@ -1788,21 +1879,21 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
               className="w-full px-6 py-4 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-emerald-500 transition-all font-bold text-sm disabled:opacity-50"
             />
             <p className="text-xs text-slate-500">
-              Les fiches seront générées pour le mois sélectionné. Assurez-vous que les salaires sont à jour dans les contrats.
+              Par défaut : mois courant. Assurez-vous que les salaires sont à jour dans les contrats.
             </p>
           </div>
-          
-          <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4">
+
+          <div className="bg-indigo-50 border border-indigo-100 rounded-2xl p-4 space-y-1.5">
+            <p className="text-indigo-800 text-[10px] font-black uppercase tracking-widest">Paramètres appliqués</p>
+            <p className="text-indigo-700 text-xs">• Taux charges sociales salarié — <em>PayrollSettings.employeeSocialChargeRate</em></p>
+            <p className="text-indigo-700 text-xs">• Taux d'imposition — <em>PayrollSettings.taxRate</em></p>
+            <p className="text-indigo-700 text-xs">• Jours ouvrables / mois — <em>PayrollSettings.workingDaysPerMonth</em></p>
+            <p className="text-indigo-700 text-xs">• Règles retard / absence — <em>rh.time-settings (si déductions activées)</em></p>
+          </div>
+
+          <div className="bg-amber-50 border border-amber-100 rounded-2xl p-4">
             <p className="text-amber-800 text-xs">
-              <strong>📁 Format de sortie :</strong> Les fiches de paie seront générées en images PNG haute qualité dans un dossier nommé "fiches_paiement_ANNEE-MOIS". 
-              Chaque fiche porte le nom et le poste de l'employé pour une organisation optimale.
-            </p>
-          </div>
-          
-          <div className="bg-blue-50 border border-blue-200 rounded-2xl p-4">
-            <p className="text-blue-800 text-xs">
-              <strong>💼 Style professionnel :</strong> Les fiches incluent le logo de l'entreprise, les informations complètes du tenant, 
-              et suivent une présentation similaire au DocumentPreview pour une cohérence visuelle.
+              <strong>Format :</strong> Un fichier <code>.zip</code> contenant une fiche <strong>PDF</strong> par employé (format A4), prête à imprimer ou archiver.
             </p>
           </div>
         </form>
@@ -1862,6 +1953,77 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
               </div>
             </div>
             
+            {/* Document joint au contrat */}
+            {selectedContract.documentUrl && (
+              <div className="border-t pt-6">
+                <h3 className="text-sm font-black uppercase tracking-widest text-slate-700 mb-4 flex items-center gap-2">
+                  <FileText size={16} /> Document du Contrat
+                </h3>
+                <div className="bg-slate-50 rounded-2xl border border-slate-100 overflow-hidden">
+                  {selectedContract.documentUrl.toLowerCase().includes('.pdf') ||
+                   selectedContract.documentUrl.toLowerCase().includes('/raw/') ? (
+                    <div>
+                      <div className="flex items-center justify-between p-4 bg-white border-b border-slate-100">
+                        <div className="flex items-center gap-3">
+                          <div className="text-2xl">📄</div>
+                          <p className="text-sm font-bold text-slate-700">Contrat PDF</p>
+                        </div>
+                        <a
+                          href={selectedContract.documentUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-xl text-xs font-bold hover:bg-indigo-700 transition-all"
+                        >
+                          <ExternalLink size={13} /> Ouvrir
+                        </a>
+                      </div>
+                      <iframe
+                        src={`https://docs.google.com/viewer?url=${encodeURIComponent(selectedContract.documentUrl)}&embedded=true`}
+                        title="Contrat PDF"
+                        className="w-full border-0"
+                        style={{ height: '500px' }}
+                      />
+                    </div>
+                  ) : selectedContract.documentUrl.match(/\.(jpg|jpeg|png|gif|webp)$/i) ||
+                     selectedContract.documentUrl.includes('/image/') ? (
+                    <div className="p-4 flex flex-col items-center gap-4">
+                      <img
+                        src={selectedContract.documentUrl}
+                        alt="Document contrat"
+                        className="max-w-full max-h-96 object-contain rounded-xl shadow"
+                      />
+                      <a
+                        href={selectedContract.documentUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-2 px-4 py-2 bg-slate-900 text-white rounded-xl text-xs font-bold hover:bg-indigo-600 transition-all"
+                      >
+                        <ExternalLink size={13} /> Ouvrir en plein écran
+                      </a>
+                    </div>
+                  ) : (
+                    <div className="p-6 flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className="text-2xl">📎</div>
+                        <div>
+                          <p className="font-bold text-slate-800 text-sm">Document joint</p>
+                          <p className="text-xs text-slate-500">Cliquer pour ouvrir</p>
+                        </div>
+                      </div>
+                      <a
+                        href={selectedContract.documentUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-xl text-xs font-bold hover:bg-indigo-700 transition-all"
+                      >
+                        <ExternalLink size={13} /> Ouvrir
+                      </a>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
             <div className="border-t pt-6 space-y-6">
               <h3 className="text-lg font-bold text-slate-900">Historique Complet</h3>
               
@@ -2034,6 +2196,24 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
                 Contrat actuel: <strong>{selectedContract.type}</strong><br/>
                 Date de fin actuelle: <strong>{selectedContract.endDate ? new Date(selectedContract.endDate).toLocaleDateString('fr-FR') : 'Indéterminée'}</strong>
               </p>
+              {selectedContract.maxRenewals !== undefined && selectedContract.maxRenewals !== null && (
+                <div className={`mt-3 px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 ${
+                  (selectedContract.renewalCount ?? 0) >= selectedContract.maxRenewals
+                    ? 'bg-red-100 text-red-700 border border-red-200'
+                    : (selectedContract.renewalCount ?? 0) >= selectedContract.maxRenewals - 1
+                    ? 'bg-amber-100 text-amber-700 border border-amber-200'
+                    : 'bg-white text-green-700 border border-green-200'
+                }`}>
+                  <RefreshCw size={14} />
+                  Renouvellements : {selectedContract.renewalCount ?? 0} / {selectedContract.maxRenewals}
+                  {(selectedContract.renewalCount ?? 0) >= selectedContract.maxRenewals && (
+                    <span className="text-red-600 font-black text-[10px] uppercase tracking-widest">— Limite atteinte</span>
+                  )}
+                  {(selectedContract.renewalCount ?? 0) === selectedContract.maxRenewals - 1 && (
+                    <span className="text-amber-600 font-black text-[10px] uppercase tracking-widest">— Dernier renouvellement possible</span>
+                  )}
+                </div>
+              )}
             </div>
             
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">

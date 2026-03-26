@@ -1,14 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  Building2, Plus, Search, Edit3, Trash2, X, 
-  RefreshCw, ChevronRight, Lock, Eye, Save, AlertCircle, ArrowRight,
-  ShieldAlert, Info, CheckCircle2, Users, UserCheck, ArrowLeft
+import {
+  Building2, Plus, Search, Edit3, Trash2, X,
+  RefreshCw, Lock, Eye, Save, AlertCircle,
+  ShieldAlert, Info, CheckCircle2, Users, UserCheck, ArrowLeft,
+  Loader2, TrendingUp
 } from 'lucide-react';
 import { authBridge } from '../../services/authBridge';
 import { apiClient } from '../../services/api';
 import { SubscriptionPlan } from '../../types';
 import { useToast } from '../ToastProvider';
-import HRModal from './HRModal';
 
 interface Department {
   id: string;
@@ -32,6 +32,7 @@ interface Employee {
   lastName: string;
   email: string;
   position?: string;
+  departmentId?: string;
 }
 
 const DepartmentManager: React.FC<{ plan?: SubscriptionPlan; onNavigate?: (tab: string) => void }> = ({ plan, onNavigate }) => {
@@ -83,11 +84,18 @@ const DepartmentManager: React.FC<{ plan?: SubscriptionPlan; onNavigate?: (tab: 
 
   useEffect(() => { fetchData(); }, []);
 
-  // Vérifie si un département a des employés associés
+  // Vérifie si un département a des employés associés (double source : count API + liste locale)
   const hasEmployees = (deptId: string) => {
     const dept = departments.find(d => d.id === deptId);
-    return dept ? (dept.employeeCount || 0) > 0 : false;
+    const countFromDept = dept ? (dept.employeeCount || 0) > 0 : false;
+    const countFromList = employees.some(e => e.departmentId === deptId);
+    return countFromDept || countFromList;
   };
+
+  // Employés appartenant au département sélectionné (pour le select manager en mode EDIT)
+  const deptEmployees = selectedDepartment
+    ? employees.filter(e => e.departmentId === selectedDepartment.id)
+    : [];
 
   const filteredDepartments = departments.filter(dept => {
     const matchSearch = !filters.search || 
@@ -177,41 +185,39 @@ const DepartmentManager: React.FC<{ plan?: SubscriptionPlan; onNavigate?: (tab: 
     setShowModal('CREATE');
   };
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <RefreshCw className="animate-spin mr-2" />
-        <span>Chargement des départements...</span>
-      </div>
-    );
-  }
+  const totalEmployees = departments.reduce((sum, d) => sum + (d.employeeCount || 0), 0);
+  const withManager = departments.filter(d => d.managerId).length;
+  const withoutManager = departments.length - withManager;
 
   return (
-    <div className="space-y-8 animate-in fade-in duration-500">
-      {/* Header */}
+    <div className="space-y-8 animate-in fade-in duration-500 pb-20">
+
+      {/* ── Header ── */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div className="flex items-center gap-4">
           {onNavigate && (
-            <button 
+            <button
               onClick={() => onNavigate('rh')}
-              className="w-10 h-10 bg-white border border-slate-100 rounded-xl flex items-center justify-center text-slate-400 hover:text-slate-900 transition-all shadow-sm"
+              className="w-11 h-11 bg-white border border-slate-100 rounded-2xl flex items-center justify-center text-slate-400 hover:text-indigo-600 hover:border-indigo-200 transition-all shadow-sm"
             >
               <ArrowLeft size={18} />
             </button>
           )}
           <div>
-            <h1 className="text-3xl font-black text-slate-900 tracking-tighter uppercase flex items-center gap-3">
-              <Building2 className="text-indigo-600" />
-              Départements
+            <h1 className="text-2xl md:text-3xl font-black text-slate-900 tracking-tighter uppercase flex items-center gap-3">
+              <Building2 className="text-indigo-600" size={30} /> Départements
             </h1>
-            <p className="text-slate-500 font-medium uppercase text-[10px] tracking-[0.3em]">
-              Organisation des équipes et structures
+            <p className="text-slate-500 font-medium uppercase text-[10px] tracking-[0.3em] mt-1">
+              Organisation des équipes & structures
             </p>
           </div>
         </div>
         <div className="flex items-center gap-3">
+          <button onClick={fetchData} className="p-3 bg-white border border-slate-100 text-slate-400 hover:text-indigo-600 rounded-2xl transition-all shadow-sm">
+            <RefreshCw size={18} className={loading ? 'animate-spin' : ''} />
+          </button>
           {canModify && (
-            <button 
+            <button
               onClick={handleCreate}
               className="px-6 py-3 bg-slate-900 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest flex items-center gap-2 hover:bg-indigo-600 transition-all shadow-xl active:scale-95"
             >
@@ -221,406 +227,449 @@ const DepartmentManager: React.FC<{ plan?: SubscriptionPlan; onNavigate?: (tab: 
         </div>
       </div>
 
-      {/* Stats */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
-        <div className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm">
-          <div className="flex items-center justify-between mb-4">
-            <div className="w-12 h-12 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center">
-              <Building2 />
-            </div>
-          </div>
-          <p className="text-slate-400 font-black uppercase text-[10px] tracking-widest mb-1">Total Départements</p>
-          <p className="text-3xl font-black text-slate-900 tracking-tighter">{departments.length}</p>
+      {/* ── Statistiques ── */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-6">
+        {/* Total */}
+        <div className="bg-slate-900 text-white p-6 md:p-8 rounded-[2.5rem] shadow-xl relative overflow-hidden">
+          <div className="absolute right-0 top-0 p-6 opacity-10"><Building2 size={80} /></div>
+          <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Total Départements</p>
+          <h3 className="text-4xl font-black">{loading ? '—' : departments.length}</h3>
+          <p className="text-sm font-bold text-slate-400 mt-1">Structures actives</p>
         </div>
-        
-        <div className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm">
-          <div className="flex items-center justify-between mb-4">
-            <div className="w-12 h-12 bg-emerald-50 text-emerald-600 rounded-2xl flex items-center justify-center">
-              <UserCheck />
-            </div>
+
+        {/* Avec Manager */}
+        <div className="bg-white p-6 md:p-8 rounded-[2.5rem] border border-slate-100 shadow-sm relative overflow-hidden group">
+          <div className="absolute right-0 top-0 p-6 opacity-5 group-hover:rotate-12 transition-transform"><UserCheck size={60} /></div>
+          <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Avec Manager</p>
+          <h3 className="text-3xl font-black text-slate-900">{loading ? '—' : withManager}</h3>
+          <div className="w-full h-1.5 bg-slate-50 rounded-full mt-4 overflow-hidden shadow-inner">
+            <div className="h-full bg-emerald-500 transition-all duration-700" style={{ width: departments.length > 0 ? `${(withManager / departments.length) * 100}%` : '0%' }} />
           </div>
-          <p className="text-slate-400 font-black uppercase text-[10px] tracking-widest mb-1">Avec Manager</p>
-          <p className="text-3xl font-black text-slate-900 tracking-tighter">
-            {departments.filter(d => d.managerId).length}
-          </p>
         </div>
-        
-        <div className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm">
-          <div className="flex items-center justify-between mb-4">
-            <div className="w-12 h-12 bg-orange-50 text-orange-600 rounded-2xl flex items-center justify-center">
-              <Users />
-            </div>
+
+        {/* Sans Manager */}
+        <div className="bg-white p-6 md:p-8 rounded-[2.5rem] border border-slate-100 shadow-sm relative overflow-hidden group">
+          <div className="absolute right-0 top-0 p-6 opacity-5 group-hover:-rotate-12 transition-transform"><AlertCircle size={60} /></div>
+          <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Sans Manager</p>
+          <h3 className={`text-3xl font-black ${withoutManager > 0 ? 'text-amber-500' : 'text-slate-900'}`}>{loading ? '—' : withoutManager}</h3>
+          <div className="w-full h-1.5 bg-slate-50 rounded-full mt-4 overflow-hidden shadow-inner">
+            <div className="h-full bg-amber-400 transition-all duration-700" style={{ width: departments.length > 0 ? `${(withoutManager / departments.length) * 100}%` : '0%' }} />
           </div>
-          <p className="text-slate-400 font-black uppercase text-[10px] tracking-widest mb-1">Total Employés</p>
-          <p className="text-3xl font-black text-slate-900 tracking-tighter">
-            {departments.reduce((sum, d) => sum + (d.employeeCount || 0), 0)}
-          </p>
+        </div>
+
+        {/* Total Employés */}
+        <div className="bg-indigo-50 p-6 md:p-8 rounded-[2.5rem] border border-indigo-100 relative overflow-hidden">
+          <div className="absolute right-0 bottom-0 p-4 opacity-20"><Users size={80} className="text-indigo-600" /></div>
+          <div className="flex items-center gap-2 text-indigo-600 mb-2">
+            <TrendingUp size={18} />
+            <span className="text-[10px] font-black uppercase tracking-widest">Total Employés</span>
+          </div>
+          <p className="text-3xl font-black text-indigo-800">{loading ? '—' : totalEmployees}</p>
+          <p className="text-[9px] text-indigo-500 font-bold mt-1 uppercase">Répartis dans {departments.length} dép.</p>
         </div>
       </div>
 
-      {/* Filters */}
-      <div className="flex flex-col md:flex-row gap-4 items-center justify-between">
-        <div className="flex items-center gap-4 flex-1">
-          <div className="relative flex-1 max-w-md">
-            <Search size={20} className="absolute left-4 top-1/2 transform -translate-y-1/2 text-slate-400" />
-            <input
-              type="text"
-              placeholder="Rechercher un département..."
-              value={filters.search}
-              onChange={(e) => setFilters({...filters, search: e.target.value})}
-              className="w-full pl-12 pr-4 py-3 bg-white border border-slate-200 rounded-2xl font-medium text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
-            />
-          </div>
-          
+      {/* ── Barre de recherche & filtres ── */}
+      <div className="bg-white p-4 rounded-[2.5rem] border border-slate-100 shadow-sm flex flex-col sm:flex-row items-center gap-4">
+        <div className="relative flex-1 w-full">
+          <Search className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+          <input
+            type="text"
+            placeholder="Rechercher un département..."
+            value={filters.search}
+            onChange={(e) => setFilters({ ...filters, search: e.target.value })}
+            className="w-full bg-slate-50 border-none rounded-2xl pl-14 pr-6 py-4 text-sm font-bold outline-none focus:ring-4 focus:ring-indigo-500/10 transition-all shadow-inner"
+          />
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
           <select
             value={filters.hasManager}
-            onChange={(e) => setFilters({...filters, hasManager: e.target.value})}
-            className="px-4 py-3 bg-white border border-slate-200 rounded-2xl font-medium text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            onChange={(e) => setFilters({ ...filters, hasManager: e.target.value })}
+            className="px-4 py-3 bg-slate-50 border-none rounded-2xl font-black text-xs uppercase tracking-widest outline-none focus:ring-4 focus:ring-indigo-500/10 cursor-pointer appearance-none"
           >
             <option value="ALL">Tous</option>
             <option value="WITH_MANAGER">Avec manager</option>
             <option value="WITHOUT_MANAGER">Sans manager</option>
           </select>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => setViewMode(viewMode === 'CARD' ? 'LIST' : 'CARD')}
-            className="px-4 py-2 bg-slate-100 hover:bg-slate-200 rounded-xl font-medium text-sm transition-all"
-          >
-            {viewMode === 'CARD' ? 'Liste' : 'Cartes'}
-          </button>
+          <button onClick={() => setViewMode('CARD')} className={`px-4 py-3 rounded-2xl text-xs font-black uppercase tracking-widest transition-all ${viewMode === 'CARD' ? 'bg-indigo-600 text-white' : 'bg-slate-50 text-slate-600'}`}>Carte</button>
+          <button onClick={() => setViewMode('LIST')} className={`px-4 py-3 rounded-2xl text-xs font-black uppercase tracking-widest transition-all ${viewMode === 'LIST' ? 'bg-indigo-600 text-white' : 'bg-slate-50 text-slate-600'}`}>Liste</button>
         </div>
       </div>
 
-      {/* Error Alert */}
+      {/* ── Erreur ── */}
       {error && (
-        <div className="bg-red-50 border border-red-200 rounded-2xl p-4 flex items-center gap-3">
-          <AlertCircle className="text-red-500 flex-shrink-0" />
-          <span className="text-red-700 font-medium">{error}</span>
-          <button onClick={() => setError(null)} className="ml-auto text-red-500 hover:text-red-700">
-            <X size={16} />
-          </button>
+        <div className="p-4 bg-rose-50 border border-rose-100 rounded-2xl text-rose-600 text-[10px] font-black uppercase flex items-center gap-3">
+          <AlertCircle size={16} /> {error}
+          <button onClick={() => setError(null)} className="ml-auto"><X size={14} /></button>
         </div>
       )}
 
-      {/* Departments Content */}
-      {filteredDepartments.length === 0 ? (
-        <div className="py-20 bg-white rounded-[3rem] border border-dashed border-slate-200 text-center">
-          <div className="w-16 h-16 bg-slate-100 text-slate-400 rounded-2xl flex items-center justify-center mx-auto mb-4">
-            <Building2 size={32} />
-          </div>
-          <p className="text-slate-400 text-xs font-bold uppercase tracking-widest">Aucun département trouvé</p>
-          <p className="text-slate-300 text-xs font-medium mt-2">
-            {departments.length === 0 ? 'Créez votre premier département pour organiser vos équipes' : 'Aucun département ne correspond aux critères de recherche'}
-          </p>
+      {/* ── Contenu ── */}
+      {loading ? (
+        /* Skeleton */
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {[...Array(6)].map((_, i) => (
+            <div key={i} className="h-56 bg-white rounded-[2.5rem] animate-pulse border border-slate-100" />
+          ))}
         </div>
-      ) : (
+      ) : filteredDepartments.length === 0 ? (
+        <div className="py-24 bg-white rounded-[3rem] border border-dashed border-slate-200 text-center">
+          <div className="w-20 h-20 bg-slate-50 text-slate-300 rounded-[2rem] flex items-center justify-center mx-auto mb-6 shadow-inner">
+            <Building2 size={40} />
+          </div>
+          <p className="text-slate-400 text-xs font-black uppercase tracking-widest">Aucun département trouvé</p>
+          <p className="text-slate-300 text-xs font-medium mt-2">
+            {departments.length === 0 ? 'Créez votre premier département pour organiser vos équipes' : 'Aucun département ne correspond aux critères'}
+          </p>
+          {departments.length === 0 && canModify && (
+            <button onClick={handleCreate} className="mt-6 px-6 py-3 bg-slate-900 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-indigo-600 transition-all shadow-xl flex items-center gap-2 mx-auto">
+              <Plus size={14} /> Créer un département
+            </button>
+          )}
+        </div>
+      ) : viewMode === 'CARD' ? (
         <>
-          {/* Departments Grid */}
-          <div className={viewMode === 'CARD' ? 
-            "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6" : 
-            "space-y-4"
-          }>
-        {displayedDepartments.map((department) => (
-          <div key={department.id} className={viewMode === 'CARD' ?
-            "bg-white p-8 rounded-[3rem] border border-slate-100 shadow-sm hover:shadow-2xl hover:-translate-y-2 transition-all duration-500 relative overflow-hidden" :
-            "bg-white p-6 rounded-2xl border border-slate-100 shadow-sm hover:shadow-md transition-all flex items-center justify-between"
-          }>
-            <div className={viewMode === 'CARD' ? '' : 'flex-1'}>
-              <div className={viewMode === 'CARD' ? 'mb-6' : 'flex items-center gap-4'}>
-                <div className={`${viewMode === 'CARD' ? 'w-16 h-16 mb-4' : 'w-12 h-12'} bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center flex-shrink-0`}>
-                  <Building2 size={viewMode === 'CARD' ? 32 : 24} />
-                </div>
-                <div className={viewMode === 'CARD' ? '' : 'flex-1'}>
-                  <h3 className={`${viewMode === 'CARD' ? 'text-xl mb-2' : 'text-lg mb-1'} font-black text-slate-900 uppercase tracking-tighter`}>
-                    {department.name}
-                  </h3>
-                  {department.description && (
-                    <p className={`text-slate-500 font-medium ${viewMode === 'CARD' ? 'text-sm leading-relaxed mb-4' : 'text-xs'}`}>
-                      {department.description}
-                    </p>
-                  )}
-                </div>
-              </div>
-
-              {viewMode === 'CARD' && (
-                <div className="space-y-3 mb-6">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-black text-slate-400 uppercase tracking-widest">Manager</span>
-                    <span className="text-sm font-medium text-slate-600">
-                      {department.manager ? 
-                        `${department.manager.firstName} ${department.manager.lastName}` : 
-                        'Non assigné'
-                      }
-                    </span>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {displayedDepartments.map((department) => (
+              <div key={department.id} className="bg-white rounded-[2.5rem] border border-slate-100 p-8 shadow-sm hover:shadow-2xl transition-all group relative flex flex-col h-full border-b-4 border-b-transparent hover:border-b-indigo-500">
+                {/* Icône + actions */}
+                <div className="flex justify-between items-start mb-6">
+                  <div className="w-14 h-14 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center group-hover:scale-110 transition-transform shadow-inner">
+                    <Building2 size={26} />
                   </div>
+                  <div className="flex items-center gap-1">
+                    {canModify && (
+                      <>
+                        <button onClick={() => handleEdit(department)} className="p-2 text-slate-400 hover:text-amber-600 hover:bg-amber-50 rounded-xl transition-all" title="Modifier">
+                          <Edit3 size={15} />
+                        </button>
+                        <button
+                          onClick={() => !hasEmployees(department.id) && setShowDeleteConfirm(department)}
+                          disabled={hasEmployees(department.id)}
+                          className={`p-2 rounded-xl transition-all ${hasEmployees(department.id) ? 'text-slate-200 cursor-not-allowed' : 'text-slate-400 hover:text-rose-500 hover:bg-rose-50'}`}
+                          title={hasEmployees(department.id) ? 'Impossible : des employés sont associés' : 'Supprimer'}
+                        >
+                          {hasEmployees(department.id) ? <Lock size={15} /> : <Trash2 size={15} />}
+                        </button>
+                      </>
+                    )}
+                    <button onClick={() => setShowDetailsDepartment(department)} className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition-all" title="Détails">
+                      <Eye size={15} />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Nom + desc */}
+                <div className="flex-1">
+                  <h3 className="text-lg font-black text-slate-900 uppercase tracking-tight mb-1 truncate">{department.name}</h3>
+                  <p className="text-xs text-slate-400 font-medium leading-relaxed line-clamp-2 mb-5">
+                    {department.description || 'Aucune description renseignée.'}
+                  </p>
+                </div>
+
+                {/* Stats internes */}
+                <div className="pt-4 border-t border-slate-50 space-y-2">
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-black text-slate-400 uppercase tracking-widest">Employés</span>
-                    <span className="text-sm font-medium text-slate-600">
+                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5"><Users size={12} /> Employés</span>
+                    <span className={`px-2.5 py-0.5 rounded-lg text-[10px] font-black ${(department.employeeCount || 0) > 0 ? 'bg-indigo-50 text-indigo-600' : 'bg-slate-50 text-slate-400'}`}>
                       {department.employeeCount || 0}
                     </span>
                   </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5"><UserCheck size={12} /> Manager</span>
+                    <span className={`px-2.5 py-0.5 rounded-lg text-[10px] font-black truncate max-w-[140px] ${department.manager ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-500'}`}>
+                      {department.manager ? `${department.manager.firstName} ${department.manager.lastName}` : 'Non assigné'}
+                    </span>
+                  </div>
                 </div>
-              )}
+              </div>
+            ))}
+          </div>
+
+          {filteredDepartments.length > pageSize && (
+            <div className="flex justify-center mt-4">
+              <button onClick={() => setPageSize(pageSize + 6)} className="px-6 py-3 bg-slate-100 text-slate-700 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-slate-200 transition-all">
+                Voir plus ({filteredDepartments.length - pageSize} restants)
+              </button>
+            </div>
+          )}
+        </>
+      ) : (
+        /* ── Vue Liste ── */
+        <div className="bg-white rounded-[1.5rem] border border-slate-100 shadow-sm overflow-x-auto">
+          <table className="w-full text-left">
+            <thead>
+              <tr className="bg-slate-50 text-slate-400 text-[9px] font-black uppercase tracking-widest border-b border-slate-100">
+                <th className="px-6 py-4">Département</th>
+                <th className="px-6 py-4">Description</th>
+                <th className="px-6 py-4 text-center">Employés</th>
+                <th className="px-6 py-4">Manager</th>
+                <th className="px-6 py-4 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-50">
+              {filteredDepartments.map((department) => (
+                <tr key={department.id} className="group hover:bg-slate-50/50 transition-all">
+                  <td className="px-6 py-4">
+                    <div className="flex items-center gap-3">
+                      <div className="w-9 h-9 bg-indigo-50 text-indigo-600 rounded-xl flex items-center justify-center shrink-0">
+                        <Building2 size={16} />
+                      </div>
+                      <span className="font-black text-slate-900 text-sm uppercase tracking-tight">{department.name}</span>
+                    </div>
+                  </td>
+                  <td className="px-6 py-4 text-slate-400 text-xs max-w-[200px] truncate">{department.description || '—'}</td>
+                  <td className="px-6 py-4 text-center">
+                    <span className={`px-2.5 py-1 rounded-lg text-[10px] font-black ${(department.employeeCount || 0) > 0 ? 'bg-indigo-50 text-indigo-600' : 'bg-slate-50 text-slate-400'}`}>
+                      {department.employeeCount || 0}
+                    </span>
+                  </td>
+                  <td className="px-6 py-4">
+                    {department.manager ? (
+                      <span className="text-xs font-bold text-slate-700">{department.manager.firstName} {department.manager.lastName}</span>
+                    ) : (
+                      <span className="px-2.5 py-1 bg-amber-50 text-amber-500 rounded-lg text-[10px] font-black">Non assigné</span>
+                    )}
+                  </td>
+                  <td className="px-6 py-4">
+                    <div className="flex items-center justify-end gap-1">
+                      <button onClick={() => setShowDetailsDepartment(department)} className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition-all"><Eye size={15} /></button>
+                      {canModify && (
+                        <>
+                          <button onClick={() => handleEdit(department)} className="p-2 text-slate-400 hover:text-amber-600 hover:bg-amber-50 rounded-xl transition-all"><Edit3 size={15} /></button>
+                          <button
+                            onClick={() => !hasEmployees(department.id) && setShowDeleteConfirm(department)}
+                            disabled={hasEmployees(department.id)}
+                            className={`p-2 rounded-xl transition-all ${hasEmployees(department.id) ? 'text-slate-200 cursor-not-allowed' : 'text-slate-400 hover:text-rose-500 hover:bg-rose-50'}`}
+                          >
+                            {hasEmployees(department.id) ? <Lock size={15} /> : <Trash2 size={15} />}
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* ══════════════════════════════════════
+          MODAL CRÉATION / MODIFICATION
+      ══════════════════════════════════════ */}
+      {!!showModal && (
+        <div className="fixed inset-0 z-[1000] flex items-center justify-center p-6 bg-slate-950/90 backdrop-blur-md animate-in fade-in duration-300">
+          <div className="bg-white w-full max-w-lg rounded-[3.5rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-500">
+            {/* En-tête */}
+            <div className={`px-10 py-8 text-white flex justify-between items-center ${showModal === 'CREATE' ? 'bg-slate-900' : 'bg-amber-500'}`}>
+              <h3 className="text-xl font-black uppercase tracking-tight flex items-center gap-3">
+                {showModal === 'CREATE' ? <Plus size={22} /> : <Edit3 size={22} />}
+                {showModal === 'CREATE' ? 'Nouveau Département' : 'Modifier le Département'}
+              </h3>
+              <button onClick={() => setShowModal(null)} className="p-3 hover:bg-white/10 rounded-2xl transition-all"><X size={22} /></button>
             </div>
 
-            <div className={`flex items-center gap-2 ${viewMode === 'CARD' ? 'pt-6 border-t border-slate-50' : ''}`}>
-              {canModify && (
-                <>
-                  <button
-                    onClick={() => handleEdit(department)}
-                    className="p-2 bg-slate-50 hover:bg-indigo-50 hover:text-indigo-600 rounded-xl transition-all"
+            {/* Formulaire */}
+            <form onSubmit={handleSubmit} className="p-10 space-y-6">
+              <div className="space-y-2">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-2">
+                  Nom du département <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={formData.name}
+                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                  className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 text-sm font-black outline-none focus:ring-4 focus:ring-indigo-500/10 shadow-inner"
+                  placeholder="Ex: Ressources Humaines"
+                  required
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-2">Description</label>
+                <textarea
+                  value={formData.description}
+                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                  className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 text-sm font-medium outline-none focus:ring-4 focus:ring-indigo-500/10 shadow-inner resize-none min-h-[90px]"
+                  placeholder="Description du département..."
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-2">Manager <span className="text-slate-300">(optionnel)</span></label>
+                {showModal === 'EDIT' && deptEmployees.length === 0 ? (
+                  <div className="flex items-center gap-3 px-6 py-4 bg-amber-50 border border-amber-100 rounded-2xl">
+                    <AlertCircle size={15} className="text-amber-500 shrink-0" />
+                    <p className="text-xs font-bold text-amber-700">Aucun employé dans ce département. Affectez d'abord des employés pour désigner un manager.</p>
+                  </div>
+                ) : (
+                  <select
+                    value={formData.managerId}
+                    onChange={(e) => setFormData({ ...formData, managerId: e.target.value })}
+                    className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 text-sm font-black outline-none focus:ring-4 focus:ring-indigo-500/10 appearance-none cursor-pointer shadow-inner"
                   >
-                    <Edit3 size={16} />
-                  </button>
-                  <button
-                    onClick={() => setShowDeleteConfirm(department)}
-                    disabled={hasEmployees(department.id)}
-                    className={`p-2 rounded-xl transition-all ${
-                      hasEmployees(department.id) 
-                        ? 'bg-gray-100 text-gray-400 cursor-not-allowed' 
-                        : 'bg-slate-50 hover:bg-red-50 hover:text-red-600'
-                    }`}
-                    title={hasEmployees(department.id) ? 'Impossible de supprimer : des employés sont associés' : 'Supprimer'}
-                  >
-                    {hasEmployees(department.id) ? <Lock size={16} /> : <Trash2 size={16} />}
-                  </button>
-                </>
-              )}
+                    <option value="">— Aucun manager —</option>
+                    {(showModal === 'EDIT' ? deptEmployees : employees).map((emp) => (
+                      <option key={emp.id} value={emp.id}>
+                        {emp.firstName} {emp.lastName}{emp.position ? ` — ${emp.position}` : ''}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
+
+              <div className="flex gap-4 pt-2">
+                <button type="button" onClick={() => setShowModal(null)} className="flex-1 py-4 border-2 border-slate-100 text-slate-400 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-slate-50 transition-all">
+                  Annuler
+                </button>
+                <button
+                  type="submit"
+                  disabled={actionLoading}
+                  className={`flex-1 py-4 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-xl transition-all flex items-center justify-center gap-2 disabled:opacity-50 ${showModal === 'CREATE' ? 'bg-indigo-600 hover:bg-slate-900' : 'bg-amber-500 hover:bg-amber-600'}`}
+                >
+                  {actionLoading ? <Loader2 className="animate-spin" size={16} /> : <><Save size={16} /> Enregistrer</>}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ══════════════════════════════════════
+          MODAL SUPPRESSION
+      ══════════════════════════════════════ */}
+      {!!showDeleteConfirm && (
+        <div className="fixed inset-0 z-[1100] flex items-center justify-center p-6 bg-slate-950/90 backdrop-blur-md animate-in fade-in duration-300">
+          <div className="bg-white w-full max-w-md rounded-[3rem] shadow-2xl overflow-hidden p-10 text-center animate-in zoom-in-95 duration-500">
+            <div className="w-20 h-20 bg-rose-50 text-rose-500 rounded-[2rem] flex items-center justify-center mx-auto mb-6 shadow-inner">
+              <ShieldAlert size={40} />
+            </div>
+            <h3 className="text-xl font-black text-slate-900 uppercase tracking-tight mb-2">Confirmer la suppression ?</h3>
+            <p className="text-xs text-slate-400 font-medium uppercase tracking-widest leading-relaxed mb-8">
+              Supprimer le département <span className="text-rose-600 font-black">"{showDeleteConfirm.name}"</span> ?<br />
+              Cette action est <span className="font-black">irréversible</span>.
+            </p>
+            <div className="flex flex-col gap-3">
               <button
-                onClick={() => setShowDetailsDepartment(department)}
-                className="p-2 bg-slate-50 hover:bg-indigo-50 hover:text-indigo-600 rounded-xl transition-all"
+                onClick={handleConfirmDelete}
+                disabled={actionLoading}
+                className="w-full py-4 bg-rose-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-rose-700 transition-all flex items-center justify-center gap-3 shadow-xl shadow-rose-200 disabled:opacity-50"
               >
-                <Eye size={16} />
+                {actionLoading ? <Loader2 className="animate-spin" size={16} /> : <Trash2 size={16} />}
+                Oui, supprimer
+              </button>
+              <button onClick={() => setShowDeleteConfirm(null)} className="py-2 text-[10px] font-black text-slate-400 uppercase tracking-widest hover:text-slate-900 transition-colors">
+                Annuler l'action
               </button>
             </div>
           </div>
-        ))}
-      </div>
-
-      {/* Load More for Card View */}
-      {viewMode === 'CARD' && filteredDepartments.length > pageSize && (
-        <div className="text-center">
-          <button
-            onClick={() => setPageSize(pageSize + 6)}
-            className="px-8 py-3 bg-slate-100 hover:bg-slate-200 rounded-2xl font-medium text-sm transition-all"
-          >
-            Voir plus ({filteredDepartments.length - pageSize} restants)
-          </button>
         </div>
       )}
-          </>
-        )}
 
-      {/* Create/Edit Modal */}
-      <HRModal
-        isOpen={!!showModal}
-        onClose={() => setShowModal(null)}
-        title={showModal === 'CREATE' ? 'Nouveau Département' : 'Modifier le Département'}
-        size="md"
-        footer={
-          <div className="flex gap-3">
-            <button
-              type="button"
-              onClick={() => setShowModal(null)}
-              className="flex-1 px-6 py-3 border border-slate-200 rounded-2xl font-medium hover:bg-slate-50 transition-all"
-            >
-              Annuler
-            </button>
-            <button
-              onClick={handleSubmit}
-              disabled={actionLoading}
-              className="flex-1 px-6 py-3 bg-slate-900 text-white rounded-2xl font-black text-sm uppercase tracking-widest hover:bg-indigo-600 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
-            >
-              {actionLoading ? (
-                <>
-                  <RefreshCw size={16} className="animate-spin" />
-                  Enregistrement...
-                </>
-              ) : (
-                <>
-                  <Save size={16} />
-                  Enregistrer
-                </>
-              )}
-            </button>
-          </div>
-        }
-      >
-        <form onSubmit={handleSubmit} className="space-y-6">
-          <div>
-            <label className="block text-sm font-black text-slate-700 uppercase tracking-widest mb-2">
-              Nom du département <span className="text-red-500">*</span>
-            </label>
-            <input
-              type="text"
-              value={formData.name}
-              onChange={(e) => setFormData({...formData, name: e.target.value})}
-              className="w-full px-4 py-3 border border-slate-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
-              placeholder="Ex: Ressources Humaines"
-              required
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-black text-slate-700 uppercase tracking-widest mb-2">
-              Description
-            </label>
-            <textarea
-              value={formData.description}
-              onChange={(e) => setFormData({...formData, description: e.target.value})}
-              className="w-full px-4 py-3 border border-slate-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all resize-none"
-              rows={3}
-              placeholder="Description du département..."
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-black text-slate-700 uppercase tracking-widest mb-2">
-              Manager
-            </label>
-            <select
-              value={formData.managerId}
-              onChange={(e) => setFormData({...formData, managerId: e.target.value})}
-              className="w-full px-4 py-3 border border-slate-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
-            >
-              <option value="">Sélectionner un manager (optionnel)</option>
-              {employees.map((emp) => (
-                <option key={emp.id} value={emp.id}>
-                  {emp.firstName} {emp.lastName} {emp.position ? `- ${emp.position}` : ''}
-                </option>
-              ))}
-            </select>
-          </div>
-        </form>
-      </HRModal>
-
-      {/* Delete Confirmation Modal */}
-      <HRModal
-        isOpen={!!showDeleteConfirm}
-        onClose={() => setShowDeleteConfirm(null)}
-        title="Confirmer la suppression"
-        size="sm"
-        footer={
-          <div className="flex gap-3">
-            <button
-              onClick={() => setShowDeleteConfirm(null)}
-              className="flex-1 px-6 py-3 border border-slate-200 rounded-2xl font-medium hover:bg-slate-50 transition-all"
-            >
-              Annuler
-            </button>
-            <button
-              onClick={handleConfirmDelete}
-              disabled={actionLoading}
-              className="flex-1 px-6 py-3 bg-red-600 text-white rounded-2xl font-black text-sm uppercase tracking-widest hover:bg-red-700 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
-            >
-              {actionLoading ? (
-                <>
-                  <RefreshCw size={16} className="animate-spin" />
-                  Suppression...
-                </>
-              ) : (
-                <>
-                  <Trash2 size={16} />
-                  Supprimer
-                </>
-              )}
-            </button>
-          </div>
-        }
-      >
-        <div className="text-center">
-          <div className="w-16 h-16 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto mb-4">
-            <AlertCircle size={32} />
-          </div>
-          <p className="text-slate-500">
-            Êtes-vous sûr de vouloir supprimer le département "{showDeleteConfirm?.name}" ?
-            Cette action est irréversible.
-          </p>
-        </div>
-      </HRModal>
-
-      {/* Details Modal */}
-      <HRModal
-        isOpen={!!showDetailsDepartment}
-        onClose={() => setShowDetailsDepartment(null)}
-        title="Détails du Département"
-        size="lg"
-        footer={
-          <div className="flex justify-end">
-            <button
-              onClick={() => setShowDetailsDepartment(null)}
-              className="px-6 py-3 bg-slate-900 text-white rounded-2xl font-black text-sm uppercase tracking-widest hover:bg-indigo-600 transition-all"
-            >
-              Fermer
-            </button>
-          </div>
-        }
-      >
-        {showDetailsDepartment && (
-          <div className="space-y-6">
-            <div className="grid grid-cols-2 gap-6">
-              <div>
-                <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-1">
-                  Nom
-                </label>
-                <p className="text-lg font-bold text-slate-900">{showDetailsDepartment.name}</p>
-              </div>
-              <div>
-                <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-1">
-                  Employés
-                </label>
-                <p className="text-lg font-bold text-slate-900">{showDetailsDepartment.employeeCount || 0}</p>
-              </div>
-            </div>
-
-            {showDetailsDepartment.description && (
-              <div>
-                <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-1">
-                  Description
-                </label>
-                <p className="text-slate-700">{showDetailsDepartment.description}</p>
-              </div>
-            )}
-
-            <div>
-              <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-1">
-                Manager
-              </label>
-              {showDetailsDepartment.manager ? (
-                <div className="bg-slate-50 p-4 rounded-2xl">
-                  <p className="font-bold text-slate-900">
-                    {showDetailsDepartment.manager.firstName} {showDetailsDepartment.manager.lastName}
-                  </p>
-                  <p className="text-sm text-slate-500">{showDetailsDepartment.manager.email}</p>
+      {/* ══════════════════════════════════════
+          MODAL DÉTAILS
+      ══════════════════════════════════════ */}
+      {!!showDetailsDepartment && (
+        <div className="fixed inset-0 z-[1000] flex items-center justify-center p-6 bg-slate-950/95 backdrop-blur-md animate-in fade-in duration-300">
+          <div className="bg-white w-full max-w-2xl rounded-[4rem] shadow-2xl overflow-hidden flex flex-col max-h-[85vh] animate-in zoom-in-95 duration-500">
+            {/* En-tête */}
+            <div className="px-10 py-8 bg-slate-900 text-white flex justify-between items-center shrink-0">
+              <div className="flex items-center gap-5">
+                <div className="w-16 h-16 bg-indigo-600 rounded-2xl flex items-center justify-center shadow-2xl shadow-indigo-500/20">
+                  <Building2 size={32} />
                 </div>
-              ) : (
-                <p className="text-slate-500 italic">Aucun manager assigné</p>
-              )}
+                <div>
+                  <h3 className="text-2xl font-black uppercase tracking-tighter leading-none">{showDetailsDepartment.name}</h3>
+                  <div className="flex items-center gap-3 mt-2">
+                    <span className="px-2.5 py-0.5 bg-indigo-500/20 text-indigo-300 rounded-lg text-[9px] font-black uppercase tracking-widest">
+                      {showDetailsDepartment.employeeCount || 0} employé{(showDetailsDepartment.employeeCount || 0) > 1 ? 's' : ''}
+                    </span>
+                    <span className={`px-2.5 py-0.5 rounded-lg text-[9px] font-black uppercase tracking-widest ${showDetailsDepartment.manager ? 'bg-emerald-500/20 text-emerald-300' : 'bg-amber-500/20 text-amber-300'}`}>
+                      {showDetailsDepartment.manager ? 'Manager assigné' : 'Sans manager'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+              <button onClick={() => setShowDetailsDepartment(null)} className="p-3 bg-white/5 hover:bg-white/10 rounded-2xl transition-all"><X size={24} /></button>
             </div>
 
-            <div className="grid grid-cols-2 gap-6">
-              <div>
-                <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-1">
-                  Créé le
-                </label>
-                <p className="text-sm text-slate-600">
-                  {new Date(showDetailsDepartment.createdAt).toLocaleDateString()}
+            {/* Corps */}
+            <div className="flex-1 overflow-y-auto p-10 space-y-6 bg-slate-50/30">
+              {/* Description */}
+              <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm space-y-2">
+                <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 flex items-center gap-2"><Info size={12} /> Description</p>
+                <p className="text-sm font-medium text-slate-700 leading-relaxed">
+                  {showDetailsDepartment.description || 'Aucune description renseignée pour ce département.'}
                 </p>
               </div>
-              <div>
-                <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-1">
-                  Modifié le
-                </label>
-                <p className="text-sm text-slate-600">
-                  {new Date(showDetailsDepartment.updatedAt).toLocaleDateString()}
-                </p>
+
+              {/* Manager */}
+              <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm space-y-3">
+                <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 flex items-center gap-2"><UserCheck size={12} /> Manager</p>
+                {showDetailsDepartment.manager ? (
+                  <div className="flex items-center gap-4 p-4 bg-emerald-50 rounded-2xl border border-emerald-100">
+                    <div className="w-10 h-10 bg-emerald-100 text-emerald-600 rounded-xl flex items-center justify-center font-black text-sm">
+                      {showDetailsDepartment.manager.firstName[0]}{showDetailsDepartment.manager.lastName[0]}
+                    </div>
+                    <div>
+                      <p className="font-black text-slate-900 text-sm">{showDetailsDepartment.manager.firstName} {showDetailsDepartment.manager.lastName}</p>
+                      <p className="text-xs text-slate-500">{showDetailsDepartment.manager.email}</p>
+                    </div>
+                    <CheckCircle2 size={18} className="text-emerald-500 ml-auto" />
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-3 p-4 bg-amber-50 rounded-2xl border border-amber-100">
+                    <AlertCircle size={18} className="text-amber-500" />
+                    <p className="text-sm font-bold text-amber-700">Aucun manager assigné à ce département</p>
+                  </div>
+                )}
+              </div>
+
+              {/* Métadonnées */}
+              <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
+                <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-4 flex items-center gap-2"><Info size={12} /> Informations Système</p>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <p className="text-[8px] font-black text-slate-400 uppercase">Créé le</p>
+                    <p className="text-sm font-bold text-slate-800 mt-1">{new Date(showDetailsDepartment.createdAt).toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' })}</p>
+                  </div>
+                  <div>
+                    <p className="text-[8px] font-black text-slate-400 uppercase">Modifié le</p>
+                    <p className="text-sm font-bold text-slate-800 mt-1">{new Date(showDetailsDepartment.updatedAt).toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' })}</p>
+                  </div>
+                  <div>
+                    <p className="text-[8px] font-black text-slate-400 uppercase">Identifiant</p>
+                    <p className="text-[10px] font-mono font-bold text-slate-400 mt-1">{showDetailsDepartment.id.slice(0, 16)}…</p>
+                  </div>
+                  <div>
+                    <p className="text-[8px] font-black text-slate-400 uppercase">Employés</p>
+                    <p className="text-sm font-bold text-indigo-600 mt-1">{showDetailsDepartment.employeeCount || 0} assigné{(showDetailsDepartment.employeeCount || 0) > 1 ? 's' : ''}</p>
+                  </div>
+                </div>
               </div>
             </div>
+
+            {/* Footer */}
+            <div className="px-10 py-6 bg-white border-t border-slate-50 flex gap-3 shrink-0">
+              {canModify && (
+                <button
+                  onClick={() => { setShowDetailsDepartment(null); handleEdit(showDetailsDepartment); }}
+                  className="flex-1 py-3 bg-amber-500 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-amber-600 transition-all flex items-center justify-center gap-2"
+                >
+                  <Edit3 size={14} /> Modifier
+                </button>
+              )}
+              <button
+                onClick={() => setShowDetailsDepartment(null)}
+                className="flex-1 py-3 bg-slate-900 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-indigo-600 transition-all"
+              >
+                Fermer
+              </button>
+            </div>
           </div>
-        )}
-      </HRModal>
+        </div>
+      )}
     </div>
   );
 };
