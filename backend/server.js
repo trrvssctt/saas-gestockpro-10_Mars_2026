@@ -6,6 +6,7 @@ dotenv.config();
 import path from 'path';
 import cors from 'cors';
 import { connectDB } from './config/database.js';
+import { ContactMessage } from './models/ContactMessage.js';
 import apiRoutes from './routes/api.js';
 import { errorHandler } from './middlewares/errorHandler.js';
 
@@ -32,7 +33,7 @@ app.use(cors({
     return callback(new Error('CORS policy: origin not allowed'), false);
   },
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'x-tenant-id']
+  allowedHeaders: ['Content-Type', 'Authorization', 'x-tenant-id', 'x-session-token']
 }));
 
 // Use raw body for payment webhooks (Stripe requires raw body to verify signature)
@@ -94,5 +95,50 @@ app.use(errorHandler);
 
 app.listen(PORT, async () => {
   await connectDB();
+  
+  // Seeding de données de test pour les messages de contact
+  try {
+    const messageCount = await ContactMessage.count();
+    if (messageCount === 0) {
+      await ContactMessage.bulkCreate([
+        {
+          fullName: 'Moussa Diop',
+          email: 'moussa.diop@example.com',
+          phone: '+221 77 123 45 67',
+          message: 'Bonjour, je suis intéressé par votre solution ERP pour ma petite entreprise de Dakar. Pouvez-vous me donner plus d\'informations sur le plan Starter AI ?',
+          status: 'non_lus',
+          ipAddress: '127.0.0.1',
+          userAgent: 'Mozilla/5.0 (Test Browser)',
+          source: 'landing_page'
+        },
+        {
+          fullName: 'Awa Ndiaye',
+          email: 'awa.ndiaye@fashion.sn',
+          phone: '+221 78 987 65 43',
+          message: 'Je cherche un logiciel de gestion pour ma boutique de mode. Vos fonctionnalités de gestion d\'inventaire m\'intéressent particulièrement.',
+          status: 'non_lus',
+          ipAddress: '127.0.0.1',
+          userAgent: 'Mozilla/5.0 (Test Browser)',
+          source: 'landing_page'
+        },
+        {
+          fullName: 'Jean-Marc Koffi',
+          email: 'jm.koffi@agrobusiness.ci',
+          phone: '+225 05 12 34 56',
+          message: 'Responsable d\'une PME en Côte d\'Ivoire, j\'aimerais une démonstration de votre plateforme, notamment pour la facturation et la trésorerie.',
+          status: 'lus',
+          ipAddress: '127.0.0.1',
+          userAgent: 'Mozilla/5.0 (Test Browser)',
+          source: 'landing_page',
+          repliedAt: new Date(),
+          repliedBy: 'Admin Test'
+        }
+      ]);
+      console.log('✅ Messages de contact de test créés');
+    }
+  } catch (error) {
+    console.warn('⚠️ Erreur seeding messages contact:', error.message);
+  }
+  
   console.log(`🚀 GeStockPro API running on port ${PORT} (FRONTEND_URL=${FRONTEND_URL})`);
 });
