@@ -15,6 +15,8 @@ import { CandidateController } from '../controllers/CandidateController.js';
 import { TrainingController } from '../controllers/TrainingController.js';
 import { PerformanceReviewController } from '../controllers/PerformanceReviewController.js';
 import { DeclarationController } from '../controllers/DeclarationController.js';
+import { HRRuleController } from '../controllers/HRRuleController.js';
+import { NotificationController } from '../controllers/NotificationController.js';
 import multer from 'multer';
 
 // Configuration multer pour l'upload de fichiers
@@ -81,6 +83,7 @@ router.post('/payslips/generate-bulk', checkPermission(['ADMIN','HR_MANAGER']), 
 router.delete('/payslips/:payslipId', checkPermission(['ADMIN','HR_MANAGER']), PayslipController.deletePayslip);
 router.get('/employees/:employeeId/payslips', checkPermission(['ADMIN','ACCOUNTANT','HR_MANAGER','EMPLOYEE']), PayslipController.getEmployeePayslips);
 router.get('/payslips/download', checkPermission(['ADMIN','ACCOUNTANT','HR_MANAGER','EMPLOYEE']), PayslipController.downloadPayslip);
+router.get('/payslips/download-all-zip', checkPermission(['ADMIN','ACCOUNTANT','HR_MANAGER']), PayslipController.downloadAllAsZip);
 
 // ========== PAYROLL SETTINGS ==========
 router.get('/payroll-settings', checkPermission(['ADMIN','ACCOUNTANT','HR_MANAGER']), PayrollSettingsController.get);
@@ -111,7 +114,19 @@ router.patch('/payroll-items/:id/toggle-status', checkPermission(['ADMIN','ACCOU
 router.post('/payroll-items/initialize-defaults', checkPermission(['ADMIN','HR_MANAGER']), PayrollItemController.initializeDefaultItems);
 
 // ========== ATTENDANCE ==========
-router.get('/attendance', checkPermission(['ADMIN','STOCK_MANAGER','EMPLOYEE','HR_MANAGER']), AttendanceController.list);
+// Routes self-service : tous les rôles non-admin peuvent pointer
+const POINTAGE_ROLES = ['EMPLOYEE','ADMIN','HR_MANAGER','STOCK_MANAGER','ACCOUNTANT','SALES'];
+// Routes spécifiques employee (AVANT les routes génériques /:id)
+router.get('/attendance/my/today',           checkPermission(POINTAGE_ROLES), AttendanceController.myToday);
+router.get('/attendance/my/overtime-summary',checkPermission(POINTAGE_ROLES), AttendanceController.myOvertimeSummary);
+router.get('/attendance/my',                 checkPermission(POINTAGE_ROLES), AttendanceController.myHistory);
+router.post('/attendance/clock-in',          checkPermission(POINTAGE_ROLES), AttendanceController.clockIn);
+router.post('/attendance/clock-out',         checkPermission(POINTAGE_ROLES), AttendanceController.clockOut);
+router.post('/attendance/auto-clockout',     checkPermission(POINTAGE_ROLES), AttendanceController.autoClockout);
+// Bilan heures supp/absences (vue admin/RH)
+router.get('/attendance/overtime-summary',   checkPermission(['ADMIN','HR_MANAGER']), AttendanceController.overtimeSummaryAdmin);
+// Routes admin/RH génériques
+router.get('/attendance',  checkPermission(['ADMIN','STOCK_MANAGER','EMPLOYEE','HR_MANAGER']), AttendanceController.list);
 router.post('/attendance', checkPermission(['ADMIN','STOCK_MANAGER','EMPLOYEE','HR_MANAGER']), AttendanceController.create);
 router.put('/attendance/:id', checkPermission(['ADMIN','STOCK_MANAGER','HR_MANAGER']), AttendanceController.update);
 
@@ -171,6 +186,16 @@ router.post('/performance-reviews/:id/approve', checkPermission(['ADMIN','HR_MAN
 router.post('/performance-reviews/:id/finalize', checkPermission(['ADMIN','HR_MANAGER']), PerformanceReviewController.finalize);
 router.delete('/performance-reviews/:id', checkPermission(['ADMIN','HR_MANAGER']), PerformanceReviewController.remove);
 
+// ========== MOTEUR DE RÈGLES RH ==========
+router.get('/rules', checkPermission(['ADMIN','HR_MANAGER','ACCOUNTANT']), HRRuleController.list);
+router.post('/rules', checkPermission(['ADMIN','HR_MANAGER']), HRRuleController.create);
+router.put('/rules/:id', checkPermission(['ADMIN','HR_MANAGER']), HRRuleController.update);
+router.delete('/rules/:id', checkPermission(['ADMIN','HR_MANAGER']), HRRuleController.remove);
+router.patch('/rules/:id/toggle', checkPermission(['ADMIN','HR_MANAGER']), HRRuleController.toggle);
+
+// ========== SOLDE DE CONGÉS ==========
+router.get('/leaves/balance/:employeeId', checkPermission(['ADMIN','HR_MANAGER','EMPLOYEE','ACCOUNTANT']), LeaveController.getLeaveBalance);
+
 // ========== DECLARATIONS SOCIALES & FISCALES ==========
 router.get('/declarations/settings', checkPermission(['ADMIN','ACCOUNTANT','HR_MANAGER']), DeclarationController.getDeclarationSettings);
 router.put('/declarations/settings', checkPermission(['ADMIN','ACCOUNTANT','HR_MANAGER']), DeclarationController.updateDeclarationSettings);
@@ -183,5 +208,15 @@ router.delete('/declarations/:id', checkPermission(['ADMIN','ACCOUNTANT','HR_MAN
 router.post('/declarations/:id/submit', checkPermission(['ADMIN','ACCOUNTANT','HR_MANAGER']), DeclarationController.submitDeclaration);
 router.post('/declarations/:id/calculate', checkPermission(['ADMIN','ACCOUNTANT','HR_MANAGER']), DeclarationController.calculateDeclarationAmounts);
 router.post('/declarations/generate-monthly', checkPermission(['ADMIN','ACCOUNTANT','HR_MANAGER']), DeclarationController.generateMonthlyDeclarations);
+
+// --- NOTIFICATIONS TENANT ---
+// Ordre important : routes spécifiques avant /:id
+router.get('/notifications/unread-count', checkPermission(['ADMIN','HR_MANAGER','STOCK_MANAGER','ACCOUNTANT','SALES','EMPLOYEE']), NotificationController.unreadCount);
+router.get('/notifications/users',        checkPermission(['ADMIN','HR_MANAGER']), NotificationController.getUsers);
+router.post('/notifications/read-all',    checkPermission(['ADMIN','HR_MANAGER','STOCK_MANAGER','ACCOUNTANT','SALES','EMPLOYEE']), NotificationController.markAllRead);
+router.get('/notifications',              checkPermission(['ADMIN','HR_MANAGER','STOCK_MANAGER','ACCOUNTANT','SALES','EMPLOYEE']), NotificationController.getAll);
+router.post('/notifications',             checkPermission(['ADMIN','HR_MANAGER']), NotificationController.create);
+router.post('/notifications/:id/read',    checkPermission(['ADMIN','HR_MANAGER','STOCK_MANAGER','ACCOUNTANT','SALES','EMPLOYEE']), NotificationController.markRead);
+router.delete('/notifications/:id',       checkPermission(['ADMIN','HR_MANAGER']), NotificationController.delete);
 
 export default router;

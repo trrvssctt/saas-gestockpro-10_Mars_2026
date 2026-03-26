@@ -1,5 +1,5 @@
 
-import { Router } from 'express';
+import express, { Router } from 'express';
 import { SubscriptionController } from '../controllers/SubscriptionController.js';
 import { checkRole } from '../middlewares/rbac.js';
 import { tenantIsolation } from '../middlewares/tenant.js';
@@ -8,6 +8,16 @@ const router = Router();
 
 // Route publique pour l'inscription (choix initial)
 router.get('/plans', SubscriptionController.listPlans);
+
+/**
+ * @route POST /api/billing/stripe/webhook
+ * @desc  Webhook Stripe — doit recevoir le body brut (raw Buffer), AVANT tenantIsolation
+ */
+router.post(
+  '/stripe/webhook',
+  express.raw({ type: 'application/json' }),
+  SubscriptionController.stripeWebhook
+);
 
 // Routes sécurisées par Tenant
 router.use(tenantIsolation);
@@ -29,6 +39,12 @@ router.post('/upgrade', checkRole(['ADMIN']), SubscriptionController.upgradePlan
  * @desc  Enregistre un paiement d'abonnement (pending) pour validation admin
  */
 router.post('/pay', checkRole(['ADMIN']), SubscriptionController.recordPayment);
+
+/**
+ * @route POST /api/billing/stripe/checkout
+ * @desc  Crée une Stripe Checkout Session et retourne l'URL de redirection
+ */
+router.post('/stripe/checkout', checkRole(['ADMIN']), SubscriptionController.stripeCheckout);
 
 /**
  * @route GET /api/billing/invoice/:paymentId

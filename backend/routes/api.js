@@ -22,8 +22,10 @@ import servicesRoutes from './services.routes.js';
 import { TenantController } from '../controllers/TenantController.js';
 import { SubscriptionController } from '../controllers/SubscriptionController.js';
 import { PaymentController } from '../controllers/PaymentController.js';
+import { AnnouncementController } from '../controllers/AnnouncementController.js';
 import hrRoutes from './hr.routes.js';
 import contactRoutes, { adminRouter as contactAdminRoutes } from './contact.routes.js';
+import supportRoutes from './support.routes.js';
 
 const router = Router();
 
@@ -39,6 +41,9 @@ router.use('/contact', contactRoutes);
 // --- PROTECTION JWT ---
 router.use(authenticateJWT);
 
+// Annonces/Notifications (visibles par tous les utilisateurs connectés)
+router.get('/announcements', AnnouncementController.list);
+
 router.use('/admin', adminRoutes);
 router.use('/stock', tenantIsolation, stockRoutes);
 router.use('/categories', tenantIsolation, categoriesRoutes);
@@ -53,6 +58,14 @@ router.use('/resilience', tenantIsolation, resilienceRoutes);
 router.use('/recovery', tenantIsolation, recoveryRoutes);
 router.use('/services', tenantIsolation, servicesRoutes);
 router.use('/hr', tenantIsolation, hrRoutes);
+
+// Support tickets (tenant-scoped)
+router.use('/support', tenantIsolation, supportRoutes);
+
+// Subscription upgrade (tenant ADMIN → PENDING, validated by SuperAdmin)
+router.post('/subscription/upgrade', tenantIsolation, checkPermission(['ADMIN']), SubscriptionController.upgradePlan);
+router.get('/subscription', tenantIsolation, checkPermission(['ADMIN']), SubscriptionController.getMySubscription);
+router.post('/subscription/payment', tenantIsolation, checkPermission(['ADMIN']), SubscriptionController.recordPayment);
 
 // Routes admin pour la gestion des messages de contact (après JWT)
 router.use('/admin/contact', contactAdminRoutes);

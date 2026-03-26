@@ -34,4 +34,16 @@ router.post('/forecast-sync', checkPermission(['ADMIN']), AIController.updateFor
  */
 router.post('/bridge', AIController.bridgeWebhook);
 
+/**
+ * @route POST /api/ai/export-pdf
+ * @desc  Convertit un HTML document en PDF téléchargeable via Puppeteer
+ */
+router.post('/export-pdf', checkPermission(['ADMIN', 'SALES', 'ACCOUNTANT', 'STOCK_MANAGER']), AIController.exportPdf);
+
+/**
+ * @route POST /api/ai/export-zip
+ * @desc  Reçoit un tableau de documents HTML et retourne un ZIP téléchargeable
+ */
+router.post('/export-zip', checkPermission(['ADMIN', 'SALES', 'ACCOUNTANT', 'STOCK_MANAGER']), AIController.exportZip);
+
 export default router;
