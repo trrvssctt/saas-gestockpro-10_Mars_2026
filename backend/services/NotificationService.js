@@ -7,10 +7,7 @@ export class NotificationService {
    */
   static async send(type, recipient, data) {
     const webhookUrl = process.env.N8N_NOTIF_WEBHOOK;
-    if (!webhookUrl) {
-      console.warn('[NOTIF] Webhook n8n non configuré, notification annulée.');
-      return;
-    }
+    if (!webhookUrl) return;
 
     try {
       await axios.post(webhookUrl, {

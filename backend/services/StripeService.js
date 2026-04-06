@@ -1,8 +1,9 @@
 let stripe = null;
 try {
-  if (process.env.STRIPE_SECRET) {
+  const stripeKey = process.env.STRIPE_SECRET_KEY || process.env.STRIPE_SECRET;
+  if (stripeKey) {
     const Stripe = (await import('stripe')).default;
-    stripe = new Stripe(process.env.STRIPE_SECRET, { apiVersion: '2023-10-16' });
+    stripe = new Stripe(stripeKey, { apiVersion: '2023-10-16' });
   }
 } catch (e) {
   stripe = null;
@@ -60,6 +61,48 @@ export const StripeService = {
       },
       success_url: `${frontendUrl}/stripe/success?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${frontendUrl}/stripe/cancel`,
+    });
+
+    return { url: session.url, sessionId: session.id };
+  },
+
+  /**
+   * Crée une Stripe Checkout Session pour une nouvelle inscription (sans compte existant).
+   * @param {object} opts
+   * @param {string} opts.planId
+   * @param {string} opts.planName
+   * @param {'1M'|'3M'|'1Y'} opts.period
+   * @param {number} opts.amount
+   * @param {string} opts.intentId - ID du RegistrationIntent
+   */
+  async createRegistrationCheckoutSession({ planId, planName, period, amount, intentId }) {
+    if (!stripe) throw new Error('Stripe non configuré. Veuillez renseigner STRIPE_SECRET_KEY.');
+
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+
+    const session = await stripe.checkout.sessions.create({
+      mode: 'payment',
+      payment_method_types: ['card'],
+      line_items: [
+        {
+          price_data: {
+            currency: 'xof',
+            unit_amount: Math.round(amount),
+            product_data: {
+              name: `GeStockPro — ${planName}`,
+              description: `Abonnement ${PERIOD_LABELS[period] || period}`,
+            },
+          },
+          quantity: 1,
+        },
+      ],
+      metadata: {
+        registrationIntentId: intentId,
+        planId,
+        period,
+      },
+      success_url: `${frontendUrl}/stripe/success?session_id={CHECKOUT_SESSION_ID}&registration=true`,
+      cancel_url: `${frontendUrl}/stripe/cancel?registration=true`,
     });
 
     return { url: session.url, sessionId: session.id };

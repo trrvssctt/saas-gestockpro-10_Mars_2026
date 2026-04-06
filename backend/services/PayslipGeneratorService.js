@@ -10,7 +10,6 @@ export class PayslipGeneratorService {
 
   static async generatePayslipFile(employee, contract, tenantInfo, salaryCalculation, month, year, format = 'png') {
     try {
-      console.log(`Generating payslip for ${employee.firstName} ${employee.lastName} in format: ${format}`);
       
       // Clean names for file system compatibility
       const cleanName = (str) => str.replace(/[^a-zA-Z0-9\-_]/g, '_').replace(/_+/g, '_');
@@ -51,7 +50,6 @@ export class PayslipGeneratorService {
       // Handle HTML format (no conversion needed)
       if (format === 'html') {
         await fs.writeFile(filePath, html, 'utf8');
-        console.log(`HTML payslip saved: ${filePath}`);
         return { 
           success: true, 
           fileName, 
@@ -65,7 +63,6 @@ export class PayslipGeneratorService {
       // Handle PDF and PNG formats (require Puppeteer)
       try {
         await this.renderWithPuppeteer(html, filePath, format);
-        console.log(`${format.toUpperCase()} payslip generated successfully: ${filePath}`);
         
         // Verify file was created and has content
         try {
@@ -108,7 +105,6 @@ export class PayslipGeneratorService {
   static async renderWithPuppeteer(htmlContent, outputPath, format = 'png') {
     let browser;
     try {
-      console.log(`Attempting to generate ${format} file: ${outputPath}`);
       
       // Dynamic import with better error handling
       let puppeteer;
@@ -176,7 +172,6 @@ export class PayslipGeneratorService {
             left: '0mm' 
           },
         });
-        console.log(`PDF generated successfully: ${outputPath}`);
       } else {
         // PNG/JPG generation
         const element = await page.$('#payslip-render');
@@ -186,7 +181,6 @@ export class PayslipGeneratorService {
             type: 'png',
             omitBackground: false
           });
-          console.log(`PNG generated successfully from element: ${outputPath}`);
         } else {
           // Fallback to full page screenshot
           await page.screenshot({ 
@@ -195,7 +189,6 @@ export class PayslipGeneratorService {
             fullPage: true,
             omitBackground: false 
           });
-          console.log(`PNG generated successfully (full page): ${outputPath}`);
         }
       }
     } catch (error) {
