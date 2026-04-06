@@ -1,8 +1,6 @@
 
+import 'dotenv/config'; // DOIT être le premier import — charge .env avant tout autre module
 import express from 'express';
-import dotenv from 'dotenv';
-// Load environment variables from .env early
-dotenv.config();
 import path from 'path';
 import cors from 'cors';
 import { connectDB } from './config/database.js';
