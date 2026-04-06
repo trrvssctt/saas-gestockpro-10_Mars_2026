@@ -9,6 +9,8 @@ const router = Router();
 // --- ROUTES PUBLIQUES ---
 router.post('/login', AuthController.login);
 router.post('/register', AuthController.register);
+router.post('/register-stripe-init', AuthController.registerStripeInit);
+router.get('/register-check/:sessionId', AuthController.registerCheck);
 router.post('/superadmin/login', AuthController.superAdminLogin);
 router.post('/mfa/verify', AuthController.verifyMFA); // Nouveau flux MFA
 

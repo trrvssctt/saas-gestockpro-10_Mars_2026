@@ -16,6 +16,7 @@ router.use((req, res, next) => checkRole(['SUPER_ADMIN', 'ADMIN'])(req, res, nex
 
 // Dashboard
 router.get('/dashboard', AdminController.getGlobalDashboard);
+router.get('/payments/recent', AdminController.getRecentPayments);
 
 // Logs / Audit
 router.get('/logs', AdminController.getLogs);
@@ -24,6 +25,7 @@ router.get('/logs', AdminController.getLogs);
 router.get('/tenants', AdminController.listTenants);
 router.get('/tenants/:id/billing', AdminController.getTenantBillingDetails);
 router.get('/tenants/:id/users', AdminController.listUsersForTenant);
+router.put('/tenants/:tenantId/users/:userId/reset-password', AdminController.resetUserPassword);
 router.post('/tenants/:id/toggle-lock', AdminController.toggleTenantLock);
 router.post('/tenants/:id/subscription/validate', AdminController.validateSubscription);
 router.post('/tenants/:id/subscription/reject', AdminController.rejectSubscription);

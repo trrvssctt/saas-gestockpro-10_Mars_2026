@@ -1,5 +1,5 @@
 
-import { Router } from 'express';
+import express, { Router } from 'express';
 import { authenticateJWT } from '../middlewares/auth.js';
 import { tenantIsolation } from '../middlewares/tenant.js';
 import { checkPermission } from '../middlewares/rbac.js';
@@ -24,13 +24,24 @@ import { SubscriptionController } from '../controllers/SubscriptionController.js
 import { PaymentController } from '../controllers/PaymentController.js';
 import { AnnouncementController } from '../controllers/AnnouncementController.js';
 import hrRoutes from './hr.routes.js';
+import uploadRoutes from './upload.routes.js';
 import contactRoutes, { adminRouter as contactAdminRoutes } from './contact.routes.js';
 import supportRoutes from './support.routes.js';
+import supplierRoutes from './suppliers.routes.js';
+import deliveryRoutes from './deliveries.routes.js';
 
 const router = Router();
 
 // --- ROUTES PUBLIQUES ---
 router.post('/payments/callback', PaymentController.handleWebhook); // Route callback globale
+
+// Webhook Stripe — doit être PUBLIC (pas de JWT) et recevoir le body brut
+router.post(
+  '/billing/stripe/webhook',
+  express.raw({ type: 'application/json' }),
+  SubscriptionController.stripeWebhook
+);
+
 router.use('/auth', authRoutes);
 router.get('/plans', SubscriptionController.listPlans); 
 // Expose bridge as public to allow server-side forwarding from clients without requiring JWT
@@ -58,9 +69,12 @@ router.use('/resilience', tenantIsolation, resilienceRoutes);
 router.use('/recovery', tenantIsolation, recoveryRoutes);
 router.use('/services', tenantIsolation, servicesRoutes);
 router.use('/hr', tenantIsolation, hrRoutes);
+router.use('/upload', tenantIsolation, uploadRoutes);
 
 // Support tickets (tenant-scoped)
 router.use('/support', tenantIsolation, supportRoutes);
+router.use('/suppliers', tenantIsolation, supplierRoutes);
+router.use('/deliveries', tenantIsolation, deliveryRoutes);
 
 // Subscription upgrade (tenant ADMIN → PENDING, validated by SuperAdmin)
 router.post('/subscription/upgrade', tenantIsolation, checkPermission(['ADMIN']), SubscriptionController.upgradePlan);
@@ -69,17 +83,6 @@ router.post('/subscription/payment', tenantIsolation, checkPermission(['ADMIN'])
 
 // Routes admin pour la gestion des messages de contact (après JWT)
 router.use('/admin/contact', contactAdminRoutes);
-
-// Routes temporaires pour les alertes de billing (à implémenter dans admin.routes.js)
-router.get('/admin/billing/overdue', checkPermission(['ADMIN']), (req, res) => {
-  // TODO: Implémenter la logique pour récupérer les comptes en retard de paiement
-  res.json([]);
-});
-
-router.get('/admin/billing/upcoming', checkPermission(['ADMIN']), (req, res) => {
-  // TODO: Implémenter la logique pour récupérer les facturations à venir
-  res.json([]);
-});
 
 router.get('/settings', tenantIsolation, checkPermission(['ADMIN', 'SALES', 'STOCK_MANAGER', 'ACCOUNTANT']), TenantController.getSettings);
 router.put('/settings', tenantIsolation, checkPermission(['ADMIN']), TenantController.updateSettings);

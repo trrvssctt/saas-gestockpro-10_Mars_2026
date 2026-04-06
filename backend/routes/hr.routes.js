@@ -17,6 +17,7 @@ import { PerformanceReviewController } from '../controllers/PerformanceReviewCon
 import { DeclarationController } from '../controllers/DeclarationController.js';
 import { HRRuleController } from '../controllers/HRRuleController.js';
 import { NotificationController } from '../controllers/NotificationController.js';
+import { OvertimeController } from '../controllers/OvertimeController.js';
 import multer from 'multer';
 
 // Configuration multer pour l'upload de fichiers
@@ -125,10 +126,25 @@ router.post('/attendance/clock-out',         checkPermission(POINTAGE_ROLES), At
 router.post('/attendance/auto-clockout',     checkPermission(POINTAGE_ROLES), AttendanceController.autoClockout);
 // Bilan heures supp/absences (vue admin/RH)
 router.get('/attendance/overtime-summary',   checkPermission(['ADMIN','HR_MANAGER']), AttendanceController.overtimeSummaryAdmin);
+// Pointage admin pour un employé spécifique
+router.post('/attendance/admin/clock-in',    checkPermission(['ADMIN','HR_MANAGER']), AttendanceController.adminClockIn);
+router.post('/attendance/admin/clock-out',   checkPermission(['ADMIN','HR_MANAGER']), AttendanceController.adminClockOut);
+// Tous les pointages du jour (admin)
+router.get('/attendance/today',              checkPermission(['ADMIN','HR_MANAGER']), AttendanceController.today);
 // Routes admin/RH génériques
 router.get('/attendance',  checkPermission(['ADMIN','STOCK_MANAGER','EMPLOYEE','HR_MANAGER']), AttendanceController.list);
 router.post('/attendance', checkPermission(['ADMIN','STOCK_MANAGER','EMPLOYEE','HR_MANAGER']), AttendanceController.create);
 router.put('/attendance/:id', checkPermission(['ADMIN','STOCK_MANAGER','HR_MANAGER']), AttendanceController.update);
+
+// ========== OVERTIME REQUESTS (HEURES SUPPLÉMENTAIRES) ==========
+const OVERTIME_ROLES = ['EMPLOYEE','ADMIN','HR_MANAGER','STOCK_MANAGER','ACCOUNTANT','SALES'];
+router.get('/overtime/my',              checkPermission(OVERTIME_ROLES),              OvertimeController.myList);
+router.post('/overtime',                checkPermission(OVERTIME_ROLES),              OvertimeController.create);
+router.get('/overtime',                 checkPermission(['ADMIN','HR_MANAGER']),       OvertimeController.list);
+router.get('/overtime/summary',         checkPermission(['ADMIN','HR_MANAGER']),       OvertimeController.summary);
+router.post('/overtime/:id/approve',    checkPermission(['ADMIN','HR_MANAGER']),       OvertimeController.approve);
+router.post('/overtime/:id/reject',     checkPermission(['ADMIN','HR_MANAGER']),       OvertimeController.reject);
+router.post('/overtime/:id/complete',   checkPermission(['ADMIN','HR_MANAGER']),       OvertimeController.complete);
 
 // ========== LEAVES (CONGÉS) ==========
 router.get('/leaves', checkPermission(['ADMIN','HR_MANAGER','EMPLOYEE','STOCK_MANAGER','SALES','ACCOUNTANT']), LeaveController.list);
