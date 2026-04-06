@@ -133,15 +133,12 @@ export class ContractController {
       const tenantId = req.user.tenantId;
       const { employeeId } = req.body;
       
-      console.log(`ContractController.create - Checking for existing contract for employee ${employeeId} in tenant ${tenantId}`);
-      
       // Check if employee exists and belongs to the same tenant
       const employee = await Employee.findOne({ 
         where: { id: employeeId, tenantId } 
       });
       
       if (!employee) {
-        console.log(`ContractController.create - Employee ${employeeId} not found in tenant ${tenantId}`);
         return res.status(400).json({ error: 'Employé non trouvé ou n\'appartient pas à votre organisation.' });
       }
       
@@ -155,15 +152,12 @@ export class ContractController {
       });
       
       if (existingContract) {
-        console.log(`ContractController.create - Employee ${employeeId} already has active contract ${existingContract.id}`);
         return res.status(400).json({ error: 'L\'employé a déjà un contrat actif. Résiliez le contrat existant avant d\'en créer un nouveau.' });
       }
 
       const payload = { ...req.body, tenantId };
-      console.log('ContractController.create - Creating contract with payload:', JSON.stringify(payload, null, 2));
       
       const item = await Contract.create(payload);
-      console.log(`ContractController.create - Created contract ${item.id} for employee ${employeeId}`);
       
       return res.status(201).json(item);
     } catch (error) {
@@ -289,8 +283,6 @@ export class ContractController {
           attributes: ['id', 'firstName', 'lastName', 'email', 'position', 'departmentId']
         }]
       });
-
-      console.log(`ContractController.update - Contract ${id} modified by user ${req.user.id}: ${modificationReason}`);
       
       return res.status(200).json({
         contract: updatedContract,
@@ -364,8 +356,6 @@ export class ContractController {
       };
 
       await contract.update(terminationData);
-      
-      console.log(`ContractController.terminate - Contract ${id} terminated by user ${req.user.id}. Employee: ${contract.employee?.firstName} ${contract.employee?.lastName}`);
 
       return res.status(200).json({
         contract,
@@ -441,16 +431,6 @@ export class ContractController {
       const { id } = req.params;
       const { newEndDate, newSalary, newType, renewalReason, effectiveDate } = req.body;
       const tenantId = req.user.tenantId;
-
-      console.log(`ContractController.renew - Received data:`, {
-        contractId: id,
-        newEndDate,
-        newSalary,
-        newType,
-        renewalReason,
-        effectiveDate,
-        tenantId
-      });
 
       // Validation des données requises
       if (!renewalReason || !effectiveDate) {
@@ -656,8 +636,6 @@ export class ContractController {
         }),
         { maxRetries: 2 }
       );
-
-      console.log(`ContractController.renew - Successfully renewed contract ${id} -> new contract ${result.newContract.id}`);
 
       return res.status(200).json({
         message: 'Contrat renouvelé avec succès',

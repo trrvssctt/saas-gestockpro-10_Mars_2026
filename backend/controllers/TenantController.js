@@ -2,6 +2,7 @@
 import { Tenant } from '../models/Tenant.js';
 import { AuditLog } from '../models/AuditLog.js';
 import crypto from 'crypto';
+import { getStorageInfo } from '../services/S3Service.js';
 
 // Defaults for tenant theming
 const DEFAULT_PRIMARY_COLOR = '#0f172a';
@@ -28,7 +29,9 @@ export class TenantController {
       } catch (e) {
         // no-op
       }
-      return res.status(200).json(tenant);
+      // Ajouter les infos de stockage S3
+      const storageInfo = await getStorageInfo(req.user.tenantId, tenant.planId || 'BASIC');
+      return res.status(200).json({ ...tenant.toJSON(), storage: storageInfo });
     } catch (error) {
       return res.status(500).json({ error: 'InternalError', message: error.message });
     }

@@ -24,8 +24,6 @@ export class PayslipController {
         return res.status(400).json({ error: 'Le mois est requis (format YYYY-MM)' });
       }
 
-      console.log(`Génération en masse des fiches de paie pour le mois ${month} - Tenant: ${tenantId}`);
-
       // Récupérer les informations du tenant (entreprise)
       const tenant = await Tenant.findOne({
         where: { id: tenantId }
@@ -63,8 +61,6 @@ export class PayslipController {
         fs.mkdirSync(payslipFolder, { recursive: true });
       }
 
-      console.log(`Dossier créé: ${payslipFolder}`);
-
       // Récupérer tous les employés actifs avec leur contrat actif
       const employeesWithContracts = await Employee.findAll({
         where: { 
@@ -86,8 +82,6 @@ export class PayslipController {
       if (employeesWithContracts.length === 0) {
         return res.status(404).json({ error: 'Aucun employé avec contrat actif trouvé' });
       }
-
-      console.log(`Trouvé ${employeesWithContracts.length} employé(s) avec contrat actif`);
 
       const results = {
         success: [],
@@ -149,8 +143,6 @@ export class PayslipController {
           const filename = `${employee.firstName}_${employee.lastName}_${sanitizedPosition}.png`;
           const filePath = path.join(payslipFolder, filename);
           
-          console.log(`Génération de l'image PNG pour: ${employee.firstName} ${employee.lastName}`);
-          
           // Générer l'image PNG à partir du HTML
           await nodeHtmlToImage({
             output: filePath,
@@ -184,9 +176,6 @@ export class PayslipController {
           results.summary.errorCount++;
         }
       }
-
-      console.log(`Génération terminée: ${results.summary.successCount} succès, ${results.summary.errorCount} erreurs`);
-      console.log(`Fichiers sauvegardés dans: ${payslipFolder}`);
 
       // Écrire le manifeste de génération (pour la règle une-fois-par-mois)
       if (results.summary.successCount > 0) {
@@ -1691,8 +1680,6 @@ td.deduction{color:#dc2626;}
       const { employeeId, month, format = 'html' } = req.query;
       const tenantId = req.user.tenantId;
 
-      console.log('Download payslip request:', { employeeId, month, format, tenantId });
-
       // Validation des paramètres
       if (!employeeId || !month) {
         return res.status(400).json({ 
@@ -1773,8 +1760,6 @@ td.deduction{color:#dc2626;}
         });
       }
 
-      console.log('Generating payslip with PayslipGeneratorService...');
-
       // Générer le fichier avec PayslipGeneratorService
       const result = await PayslipGeneratorService.generatePayslipFile(
         employee,
@@ -1785,8 +1770,6 @@ td.deduction{color:#dc2626;}
         parseInt(year),
         format.toLowerCase()
       );
-
-      console.log('PayslipGeneratorService result:', result);
 
       // Vérifier que le fichier existe
       if (!result.success || !result.fullPath) {
@@ -1950,8 +1933,6 @@ td.deduction{color:#dc2626;}
       const { payslipId } = req.params;
       const tenantId = req.user.tenantId;
 
-      console.log('Deleting payslip with ID:', payslipId);
-
       // Parse payslipId qui est au format "employeeId-YYYY-MM"
       const parts = payslipId.split('-');
       if (parts.length < 3) {
@@ -2012,10 +1993,8 @@ td.deduction{color:#dc2626;}
           if (await fsPromises.access(filePath).then(() => true).catch(() => false)) {
             await fsPromises.unlink(filePath);
             filesToDelete.push(fileName);
-            console.log('Fichier supprimé:', filePath);
           }
         } catch (fileError) {
-          console.log('Fichier non trouvé ou erreur:', filePath, fileError.message);
         }
       }
       
@@ -2028,10 +2007,8 @@ td.deduction{color:#dc2626;}
         if (await fsPromises.access(oldFilePath).then(() => true).catch(() => false)) {
           await fsPromises.unlink(oldFilePath);
           filesToDelete.push(oldFileName);
-          console.log('Ancien fichier supprimé:', oldFilePath);
         }
       } catch (fileError) {
-        console.log('Ancien fichier non trouvé:', oldFilePath);
       }
 
       return res.status(200).json({ 

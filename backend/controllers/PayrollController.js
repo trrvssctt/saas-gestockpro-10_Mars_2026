@@ -509,8 +509,6 @@ export class PayrollController {
         return res.status(400).json({ error: 'Mois et année requis' });
       }
 
-      console.log(`Génération paie mensuelle pour ${month}/${year}, tenant: ${tenantId}`);
-
       // 1. Récupérer tous les employés actifs avec contrats actifs
       const employeesWithActiveContracts = await Employee.findAll({
         where: { 
@@ -544,8 +542,6 @@ export class PayrollController {
           totalAmount: 0
         });
       }
-
-      console.log(`Trouvé ${employeesWithActiveContracts.length} employé(s) avec contrat actif`);
 
       const processedEmployees = [];
       const skippedEmployees = [];
@@ -632,8 +628,6 @@ export class PayrollController {
           });
         }
       }
-
-      console.log(`Traitement terminé: ${processedEmployees.length} succès, ${skippedEmployees.length} échecs`);
 
       return res.status(200).json({
         success: true,
@@ -798,8 +792,6 @@ export class PayrollController {
         year, 
         format
       );
-      
-      console.log(`Fichier de paie généré: ${result.fileName}`);
       
       return result;
     } catch (error) {

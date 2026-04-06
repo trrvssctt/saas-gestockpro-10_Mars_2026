@@ -4,7 +4,11 @@ import { Op } from 'sequelize';
 export class AttendanceController {
   static async list(req, res) {
     try {
-      const items = await Attendance.findAll({ where: { tenantId: req.user.tenantId } });
+      const { date, employeeId } = req.query;
+      const where = { tenantId: req.user.tenantId };
+      if (date) where.date = date;
+      if (employeeId) where.employeeId = employeeId;
+      const items = await Attendance.findAll({ where, order: [['date', 'DESC']] });
       return res.status(200).json(items);
     } catch (error) {
       console.error('[AttendanceController]', error);
@@ -395,6 +399,96 @@ export class AttendanceController {
       });
 
       return res.status(200).json(item);
+    } catch (error) {
+      console.error('[AttendanceController]', error);
+      return res.status(500).json({ error: 'ServerError', message: error.message });
+    }
+  }
+
+  /** POST /hr/attendance/admin/clock-in — l'admin/RH pointe l'arrivée d'un employé */
+  static async adminClockIn(req, res) {
+    try {
+      const tenantId = req.user.tenantId;
+      const { employeeId, date: reqDate, clockIn: reqClockIn } = req.body;
+      if (!employeeId) return res.status(400).json({ error: 'employeeId requis' });
+
+      const today = reqDate || new Date().toISOString().split('T')[0];
+      const clockInTs = reqClockIn ? new Date(`${today}T${reqClockIn}`) : new Date();
+
+      const settings = await PayrollSettings.findOne({ where: { tenantId } });
+      const startTime = settings?.workStartTime || '08:00';
+      const expectedTs = new Date(`${today}T${startTime}`);
+      const lateMinutes = Math.max(0, Math.floor((clockInTs - expectedTs) / 60000));
+      const status = lateMinutes > 0 ? 'LATE' : 'PRESENT';
+
+      const existing = await Attendance.findOne({ where: { tenantId, employeeId, date: today } });
+      let record;
+      if (existing) {
+        await existing.update({
+          clockIn: clockInTs.toISOString(),
+          status,
+          source: 'admin',
+          meta: { ...(existing.meta || {}), lateMinutes, expectedStart: startTime, adminSet: true }
+        });
+        record = existing;
+      } else {
+        record = await Attendance.create({
+          tenantId, employeeId,
+          date: today,
+          clockIn: clockInTs.toISOString(),
+          status,
+          source: 'admin',
+          meta: { lateMinutes, expectedStart: startTime, adminSet: true }
+        });
+      }
+      return res.status(200).json(record);
+    } catch (error) {
+      console.error('[AttendanceController]', error);
+      return res.status(500).json({ error: 'ServerError', message: error.message });
+    }
+  }
+
+  /** POST /hr/attendance/admin/clock-out — l'admin/RH pointe le départ d'un employé */
+  static async adminClockOut(req, res) {
+    try {
+      const tenantId = req.user.tenantId;
+      const { employeeId, date: reqDate, clockOut: reqClockOut } = req.body;
+      if (!employeeId) return res.status(400).json({ error: 'employeeId requis' });
+
+      const today = reqDate || new Date().toISOString().split('T')[0];
+      const clockOutTs = reqClockOut ? new Date(`${today}T${reqClockOut}`) : new Date();
+
+      const record = await Attendance.findOne({ where: { tenantId, employeeId, date: today } });
+      if (!record) return res.status(404).json({ error: 'Aucun pointage d\'arrivée trouvé pour aujourd\'hui' });
+
+      const settings = await PayrollSettings.findOne({ where: { tenantId } });
+      const endTime = settings?.workEndTime || '17:00';
+      const expectedEnd = new Date(`${today}T${endTime}`);
+      const overtimeMinutes = Math.max(0, Math.floor((clockOutTs - expectedEnd) / 60000));
+
+      await record.update({
+        clockOut: clockOutTs.toISOString(),
+        overtimeMinutes,
+        source: 'admin',
+        meta: { ...(record.meta || {}), workEndTime: endTime, adminSet: true }
+      });
+      return res.status(200).json(record);
+    } catch (error) {
+      console.error('[AttendanceController]', error);
+      return res.status(500).json({ error: 'ServerError', message: error.message });
+    }
+  }
+
+  /** GET /hr/attendance/today — tous les pointages du jour (admin) */
+  static async today(req, res) {
+    try {
+      const tenantId = req.user.tenantId;
+      const today = new Date().toISOString().split('T')[0];
+      const items = await Attendance.findAll({
+        where: { tenantId, date: today },
+        order: [['clockIn', 'ASC']]
+      });
+      return res.status(200).json(items);
     } catch (error) {
       console.error('[AttendanceController]', error);
       return res.status(500).json({ error: 'ServerError', message: error.message });

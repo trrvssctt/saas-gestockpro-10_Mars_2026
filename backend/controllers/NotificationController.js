@@ -1,5 +1,5 @@
 
-import { Notification, NotificationRead, User, Employee } from '../models/index.js';
+import { Notification, NotificationRead, User } from '../models/index.js';
 import { Op } from 'sequelize';
 
 export class NotificationController {

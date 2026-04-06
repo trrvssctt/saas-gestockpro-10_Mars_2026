@@ -1,17 +1,15 @@
 import { Leave, Employee, Department } from '../models/index.js';
 import { Op } from 'sequelize';
 import multer from 'multer';
-import FormData from 'form-data';
-import fetch from 'node-fetch';
+import { uploadToS3 } from '../services/S3Service.js';
 
-// Configuration multer pour l'upload de fichiers
+// Configuration multer pour l'upload de fichiers (mémoire → S3)
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
-    fileSize: 10 * 1024 * 1024, // 10MB max
+    fileSize: 10 * 1024 * 1024, // 10 Mo max
   },
   fileFilter: (req, file, cb) => {
-    // Accepter PDF, JPG, PNG pour les justificatifs médicaux
     const allowedTypes = ['application/pdf', 'image/jpeg', 'image/jpg', 'image/png'];
     if (allowedTypes.includes(file.mimetype)) {
       cb(null, true);
@@ -20,63 +18,6 @@ const upload = multer({
     }
   }
 });
-
-// Fonction helper pour uploader vers Cloudinary
-const uploadToCloudinary = async (fileBuffer, fileName, mimeType) => {
-  try {
-    console.log('🔄 Upload vers Cloudinary:', { fileName, mimeType, size: fileBuffer.length });
-    
-    // Mode test : créer directement une URL de test valide
-    console.log('📁 Mode test activé - Génération URL de test');
-    const testUrl = `https://res.cloudinary.com/dq7avew9h/raw/upload/v${Date.now()}/leave_documents/test_${fileName.replace(/[^a-zA-Z0-9.-]/g, '_')}`;
-    
-    return {
-      url: testUrl,
-      publicId: `leave_documents/test_${Date.now()}`
-    };
-    
-    /* Configuration Cloudinary pour production (décommenté quand configuré)
-    const formData = new FormData();
-    formData.append('file', fileBuffer, {
-      filename: fileName,
-      contentType: mimeType,
-    });
-    
-    formData.append('upload_preset', process.env.CLOUDINARY_UPLOAD_PRESET || 'ml_default');
-    formData.append('resource_type', 'auto');
-    formData.append('folder', 'leave_documents');
-    
-    const cloudName = process.env.CLOUDINARY_CLOUD_NAME || 'dq7avew9h';
-    
-    const response = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/upload`, {
-      method: 'POST',
-      body: formData
-    });
-
-    const result = await response.json();
-    console.log('✅ Upload Cloudinary réussi:', result.secure_url);
-    
-    if (!response.ok) {
-      throw new Error(result.error?.message || 'Erreur upload Cloudinary');
-    }
-
-    return {
-      url: result.secure_url,
-      publicId: result.public_id
-    };
-    */
-  } catch (error) {
-    console.error('❌ Erreur upload Cloudinary:', error);
-    // Fallback: créer une URL de test
-    const fallbackUrl = `https://res.cloudinary.com/dq7avew9h/raw/upload/test/leave_documents/fallback_${Date.now()}_${fileName.replace(/[^a-zA-Z0-9.-]/g, '_')}`;
-    console.log('🔄 Fallback URL créée:', fallbackUrl);
-    
-    return {
-      url: fallbackUrl,
-      publicId: `leave_documents/fallback_${Date.now()}`
-    };
-  }
-};
 
 export class LeaveController {
   static async list(req, res) {
@@ -162,11 +103,6 @@ export class LeaveController {
 
   static async create(req, res) {
     try {
-      console.log('LeaveController.create - Body:', req.body);
-      console.log('LeaveController.create - File:', req.file);
-      console.log('LeaveController.create - Headers:', req.headers);
-      console.log('LeaveController.create - Body keys:', Object.keys(req.body));
-      console.log('LeaveController.create - Body values:', Object.values(req.body));
       
       // Multer place les champs dans req.body, même avec les fichiers
       const { employeeId, type, startDate, endDate, reason } = req.body;
@@ -338,15 +274,16 @@ export class LeaveController {
       // Gérer l'upload du document pour les congés maladie
       if (type === 'SICK' && req.file) {
         try {
-          const uploadResult = await uploadToCloudinary(
-            req.file.buffer, 
-            req.file.originalname, 
-            req.file.mimetype
+          const uploadResult = await uploadToS3(
+            req.file.buffer,
+            req.file.originalname,
+            req.file.mimetype,
+            req.user.tenantId,
+            'leaves'
           );
-          
+
           payload.documentUrl = uploadResult.url;
           payload.documentName = req.file.originalname;
-          console.log('✅ Document uploadé avec succès:', uploadResult.url);
         } catch (uploadError) {
           console.error('⚠️ Erreur upload document:', uploadError);
           return res.status(400).json({ 
@@ -386,13 +323,6 @@ export class LeaveController {
   static async update(req, res) {
     try {
       const { id } = req.params;
-      console.log('👤 req.user:', req.user);
-      console.log('📦 req.body:', req.body);
-      console.log('🔑 Content-Type:', req.headers['content-type']);
-      console.log('📝 LeaveController.update - ID:', id);
-      console.log('📝 LeaveController.update - Body:', req.body);
-      console.log('📝 LeaveController.update - File:', req.file ? { name: req.file.originalname, size: req.file.size } : 'Aucun fichier');
-      console.log('📝 LeaveController.update - Content-Type:', req.headers['content-type']);
       
       // Vérifier que le congé existe et appartient au tenant
       const existingLeave = await Leave.findOne({
@@ -400,11 +330,8 @@ export class LeaveController {
       });
       
       if (!existingLeave) {
-        console.log('❌ Congé non trouvé:', id);
         return res.status(404).json({ error: 'Congé non trouvé' });
       }
-      
-      console.log('✅ Congé existant trouvé:', existingLeave.id);
       
       // Si les dates changent, vérifier les conflits (sauf avec lui-même)
       if (req.body.startDate && req.body.endDate) {
@@ -478,8 +405,6 @@ export class LeaveController {
         }
       });
       
-      console.log('📝 Données de mise à jour validées:', updateData);
-      
       // Recalculer les jours SEULEMENT si les deux dates sont présentes
       if (updateData.startDate && updateData.endDate) {
         try {
@@ -493,7 +418,6 @@ export class LeaveController {
           const diffTime = Math.abs(end - start);
           const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
           updateData.daysCount = diffDays;
-          console.log('📊 Jours recalculés:', diffDays);
         } catch (dateError) {
           console.error('❌ Erreur calcul dates:', dateError);
           return res.status(400).json({ error: 'Erreur lors du calcul des jours' });
@@ -502,17 +426,17 @@ export class LeaveController {
       
       // Gérer l'upload du document si un fichier est fourni
       if (req.file) {
-        console.log('📎 Traitement du fichier uploadé');
         try {
-          const uploadResult = await uploadToCloudinary(
-            req.file.buffer, 
-            req.file.originalname, 
-            req.file.mimetype
+          const uploadResult = await uploadToS3(
+            req.file.buffer,
+            req.file.originalname,
+            req.file.mimetype,
+            req.user.tenantId,
+            'leaves'
           );
-          
+
           updateData.documentUrl = uploadResult.url;
           updateData.documentName = req.file.originalname;
-          console.log('✅ Document uploadé avec succès:', uploadResult.url);
         } catch (uploadError) {
           console.error('❌ Erreur upload document:', uploadError);
           return res.status(400).json({ 
@@ -523,22 +447,16 @@ export class LeaveController {
       
       // Vérifier qu'il y a au moins quelque chose à mettre à jour
       if (Object.keys(updateData).length === 0) {
-        console.log('⚠️ Aucune donnée à mettre à jour');
         return res.status(400).json({ error: 'Aucune donnée fournie pour la mise à jour' });
       }
-      
-      console.log('💾 Mise à jour en base avec:', updateData);
       
       const [updated] = await Leave.update(updateData, { 
         where: { id, tenantId: req.user.tenantId } 
       });
       
       if (!updated) {
-        console.log('❌ Aucune mise à jour effectuée');
         return res.status(404).json({ error: 'Congé non trouvé pour mise à jour' });
       }
-      
-      console.log('✅ Mise à jour réussie, récupération des données');
       
       // Récupérer les données mises à jour avec les relations
       const leave = await Leave.findOne({
@@ -558,8 +476,6 @@ export class LeaveController {
           }
         ]
       });
-      
-      console.log('✅ Données récupérées, envoi réponse');
       return res.status(200).json(leave);
     } catch (error) {
       console.error('❌ LeaveController.update error:', error);

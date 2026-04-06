@@ -54,8 +54,6 @@ export class EmployeeController {
         ];
       }
 
-      console.log('EmployeeController.list - where clause:', JSON.stringify(where, null, 2));
-
       const limit = Math.min(parseInt(String(perPage), 10) || 25, 200);
       const offset = (Math.max(parseInt(String(page), 10) || 1, 1) - 1) * limit;
 
@@ -90,8 +88,6 @@ export class EmployeeController {
           }
         ]
       });
-
-      console.log(`EmployeeController.list - Found ${rows.length} employees for tenant ${tenantId}`);
 
       // compute simple facets (counts by department, position, status) scoped to tenant and q (if provided)
       const facetWhere = { tenantId };
@@ -213,8 +209,6 @@ export class EmployeeController {
     try {
       const tenantId = req.user.tenantId;
 
-      console.log('🔍 getOrgChart called with tenantId:', tenantId);
-
       // Récupérer tous les employés actifs avec leurs départements et contrats
       const employees = await Employee.findAll({
         where: { 
@@ -244,8 +238,6 @@ export class EmployeeController {
         ],
         order: [['lastName', 'ASC']]
       });
-
-      console.log(`✅ Found ${employees.length} active employees for tenant ${tenantId}`);
 
       // Construire la hiérarchie ou la structure plate
       const buildHierarchy = (parentId = null) => {
@@ -438,8 +430,6 @@ export class EmployeeController {
         // Calcul d'un taux de performance simplifié basé sur les contrats actifs vs total
         performanceRate: totalEmployees > 0 ? Math.round((activeContracts / totalEmployees) * 100) : 0
       };
-
-      console.log(`EmployeeController.getHRStats - Stats for tenant ${tenantId}:`, stats);
 
       return res.status(200).json(stats);
 

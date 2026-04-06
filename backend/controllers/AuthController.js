@@ -1,12 +1,13 @@
 
 
 import { AuthService } from '../services/AuthService.js';
-import { User, Tenant, Subscription, Administrator, AuditLog } from '../models/index.js';
+import { User, Tenant, Subscription, Administrator, AuditLog, Payment, RegistrationIntent } from '../models/index.js';
 import { Plan } from '../models/Plan.js';
 import { sequelize } from '../config/database.js';
 import { Op } from 'sequelize';
 import bcrypt from 'bcrypt';
 import crypto from 'crypto';
+import { StripeService } from '../services/StripeService.js';
 
 
 
@@ -125,8 +126,6 @@ export class AuthController {
     try {
       const emailInput = (req.body.email || '').toLowerCase().trim();
       const passwordInput = (req.body.password || '').trim();
-      
-      console.log(`[KERNEL AUTH] Tentative: ${emailInput}`);
 
       const admin = await Administrator.findOne({ 
         where: sequelize.where(
@@ -137,7 +136,6 @@ export class AuthController {
       });
 
       if (!admin) {
-        console.warn(`[AUTH FAIL] Utilisateur inconnu: ${emailInput}`);
         return res.status(401).json({ error: 'Accès refusé', message: 'Identifiants Maîtres invalides.' });
       }
 
@@ -150,7 +148,6 @@ export class AuthController {
       const isValid = await bcrypt.compare(passwordInput, storedHash);
       
       if (!isValid) {
-        console.warn(`[AUTH FAIL] Mot de passe erroné pour: ${emailInput}`);
         return res.status(401).json({ error: 'Accès refusé', message: 'Identifiants Maîtres invalides.' });
       }
 
@@ -162,7 +159,6 @@ export class AuthController {
       });
 
       await admin.update({ lastLogin: new Date() });
-      console.log(`[AUTH SUCCESS] Kernel ouvert pour: ${admin.name}`);
 
       return res.status(200).json({
         token,
@@ -202,6 +198,13 @@ static async login(req, res) {
 
       // If the tenant has been administratively deactivated, block access for everyone
       if (!tenant.isActive) {
+        if (tenant.paymentStatus === 'PENDING') {
+          // Paiement Wave soumis, en attente de validation SuperAdmin
+          return res.status(403).json({
+            error: 'WaveValidationPending',
+            message: 'Votre compte est en cours de validation. Notre équipe vérifie votre paiement Wave et activera votre espace sous 24h. Vous recevrez une confirmation.'
+          });
+        }
         return res.status(403).json({ error: 'AccessBlocked', message: 'Instance désactivée. Contactez le support.' });
       }
 
@@ -241,7 +244,6 @@ static async login(req, res) {
         await user.update({ lastLogin: new Date() });
       } catch (uErr) {
         // non-blocking: log but continue
-        console.warn('[AUTH] Failed to update lastLogin for user', user.id, uErr && uErr.message);
       }
 
       // 4. Création de la session avec informations de connexion
@@ -307,6 +309,58 @@ static async login(req, res) {
 
       const name = companyName || company_name || (admin && admin.companyName) || 'Nouvelle Entreprise';
 
+      // ── Validation des champs obligatoires ──────────────────────────
+      if (!admin?.email || !admin?.password || !admin?.name) {
+        await transaction.rollback();
+        return res.status(400).json({ error: 'MissingFields', message: 'Nom, email et mot de passe de l\'administrateur sont obligatoires.' });
+      }
+
+      const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+      if (!EMAIL_REGEX.test(admin.email)) {
+        await transaction.rollback();
+        return res.status(400).json({ error: 'InvalidEmail', message: 'Format d\'adresse email invalide.' });
+      }
+
+      if (admin.password.length < 8) {
+        await transaction.rollback();
+        return res.status(400).json({ error: 'WeakPassword', message: 'Le mot de passe doit contenir au moins 8 caractères.' });
+      }
+
+      // ── Vérification des doublons ────────────────────────────────────
+      const normalizedEmail = admin.email.toLowerCase().trim();
+
+      const existingUser = await User.findOne({ where: sequelize.where(sequelize.fn('lower', sequelize.col('email')), normalizedEmail) });
+      if (existingUser) {
+        await transaction.rollback();
+        return res.status(409).json({ error: 'EmailAlreadyExists', message: 'Un compte existe déjà avec cette adresse email. Connectez-vous ou utilisez une autre adresse.' });
+      }
+
+      if (siret && siret.trim()) {
+        const siretClean = siret.trim();
+        const existingTenantBySiret = await Tenant.findOne({ where: { siret: siretClean } });
+        if (existingTenantBySiret) {
+          await transaction.rollback();
+          return res.status(409).json({ error: 'SiretAlreadyExists', message: 'Une entreprise avec ce numéro SIRET est déjà enregistrée.' });
+        }
+      }
+
+      if (phone && phone.trim()) {
+        const phoneClean = phone.trim().replace(/\s+/g, '');
+        const existingTenantByPhone = await Tenant.findOne({ where: sequelize.where(sequelize.fn('replace', sequelize.fn('replace', sequelize.col('phone'), ' ', ''), '-', ''), phoneClean.replace(/-/g, '')) });
+        if (existingTenantByPhone) {
+          await transaction.rollback();
+          return res.status(409).json({ error: 'PhoneAlreadyExists', message: 'Ce numéro de téléphone est déjà utilisé par une autre entreprise.' });
+        }
+      }
+
+      if (admin.email && admin.email.trim()) {
+        const existingTenantByEmail = await Tenant.findOne({ where: sequelize.where(sequelize.fn('lower', sequelize.col('email')), normalizedEmail) });
+        if (existingTenantByEmail) {
+          await transaction.rollback();
+          return res.status(409).json({ error: 'CompanyEmailAlreadyExists', message: 'Une entreprise est déjà enregistrée avec cette adresse email.' });
+        }
+      }
+
       const tenant = await Tenant.create({
         name,
         siret,
@@ -315,7 +369,8 @@ static async login(req, res) {
         email: (admin && admin.email) || null,
         domain: `${name.toLowerCase().replace(/\s+/g, '-')}-${Date.now().toString().slice(-4)}.gestock.pro`,
         paymentStatus: planId === 'FREE_TRIAL' ? 'TRIAL' : 'PENDING',
-        isActive: true,
+        // Les plans payants Wave démarrent inactifs — activation par le SuperAdmin après vérification du paiement
+        isActive: planId === 'FREE_TRIAL' ? true : false,
         currency: 'F CFA',
         primaryColor: primaryColor || primary_color || undefined,
         buttonColor: buttonColor || button_color || undefined,
@@ -339,6 +394,21 @@ static async login(req, res) {
         status: planId === 'FREE_TRIAL' ? 'TRIAL' : 'PENDING',
         nextBillingDate: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000)
       }, { transaction });
+
+      // Si un paiement mobile money est fourni, l'enregistrer en PENDING
+      const { paymentInfo } = req.body;
+      if (paymentInfo && planId !== 'FREE_TRIAL') {
+        await Payment.create({
+          tenantId: tenant.id,
+          saleId: null,
+          amount: Number(paymentInfo.amount) || 0,
+          method: paymentInfo.method || 'WAVE',
+          reference: paymentInfo.reference || `REG-${Date.now()}`,
+          transactionId: paymentInfo.reference || null,
+          status: 'PENDING',
+          paymentDate: new Date(),
+        }, { transaction });
+      }
 
       await transaction.commit();
       const token = AuthService.generateToken(user);
@@ -371,8 +441,282 @@ static async login(req, res) {
       });
     } catch (error) {
       if (transaction) await transaction.rollback();
-      // Keep server logs, but return sanitized client message
+      // Doublon détecté par la contrainte unique DB (race condition)
+      if (error.name === 'SequelizeUniqueConstraintError') {
+        const field = error.fields ? Object.keys(error.fields)[0] : '';
+        if (field.includes('email')) {
+          return res.status(409).json({ error: 'EmailAlreadyExists', message: 'Un compte existe déjà avec cette adresse email.' });
+        }
+        if (field.includes('siret')) {
+          return res.status(409).json({ error: 'SiretAlreadyExists', message: 'Une entreprise avec ce numéro SIRET est déjà enregistrée.' });
+        }
+        if (field.includes('phone')) {
+          return res.status(409).json({ error: 'PhoneAlreadyExists', message: 'Ce numéro de téléphone est déjà utilisé par une autre entreprise.' });
+        }
+        return res.status(409).json({ error: 'DuplicateEntry', message: 'Ces informations sont déjà utilisées par un compte existant.' });
+      }
       return AuthController.sendSafeError(res, 500, error, 'RegisterError');
+    }
+  }
+
+  /**
+   * Vérifie si un paiement Stripe d'inscription est complété et retourne un token si oui.
+   * Utilisé par le frontend pour auto-connecter l'utilisateur après redirection Stripe.
+   * GET /auth/register-check/:sessionId (public)
+   */
+  static async registerCheck(req, res) {
+    try {
+      const { sessionId } = req.params;
+      const intent = await RegistrationIntent.findOne({ where: { stripeSessionId: sessionId } });
+
+      if (!intent) return res.status(200).json({ status: 'not_found' });
+      if (intent.status === 'FAILED') return res.status(200).json({ status: 'failed' });
+      if (intent.status === 'EXPIRED' || intent.expiresAt < new Date()) return res.status(200).json({ status: 'expired' });
+      if (intent.status === 'PENDING') {
+        // Fallback local dev: webhook inaccessible → vérifier Stripe directement
+        if (StripeService.isAvailable()) {
+          try {
+            const session = await StripeService.retrieveSession(sessionId);
+            if (session.payment_status === 'paid') {
+              let regData;
+              try { regData = JSON.parse(intent.registrationData); } catch { return res.status(200).json({ status: 'failed' }); }
+
+              const { companyName, siret, phone, address, planId: rPlanId, period: rPeriod, admin, primaryColor, buttonColor } = regData;
+
+              const t = await sequelize.transaction();
+              try {
+                const tenant = await Tenant.create({
+                  name: companyName,
+                  siret,
+                  phone: phone ?? null,
+                  address: address ?? null,
+                  email: admin.email,
+                  domain: `${companyName.toLowerCase().replace(/\s+/g, '-')}-${Date.now().toString().slice(-4)}.gestock.pro`,
+                  planId: rPlanId,
+                  paymentStatus: 'UP_TO_DATE',
+                  isActive: true,
+                  currency: 'F CFA',
+                  primaryColor: primaryColor || undefined,
+                  buttonColor: buttonColor || undefined,
+                }, { transaction: t });
+
+                const user = await User.create({
+                  email: admin.email,
+                  password: admin.password,
+                  name: admin.name || 'Propriétaire',
+                  role: 'ADMIN',
+                  roles: ['ADMIN'],
+                  tenantId: tenant.id,
+                }, { transaction: t });
+
+                const PERIOD_MONTHS = { '1M': 1, '3M': 3, '1Y': 12 };
+                const months = PERIOD_MONTHS[rPeriod] || 1;
+                const nextBilling = new Date();
+                nextBilling.setMonth(nextBilling.getMonth() + months);
+
+                const subscription = await Subscription.create({
+                  tenantId: tenant.id,
+                  planId: rPlanId,
+                  status: 'ACTIVE',
+                  nextBillingDate: nextBilling,
+                  autoRenew: true,
+                }, { transaction: t });
+
+                await Payment.create({
+                  tenantId: tenant.id,
+                  saleId: null,
+                  amount: session.amount_total || 0,
+                  method: 'STRIPE',
+                  reference: session.id,
+                  transactionId: session.payment_intent || session.id,
+                  status: 'COMPLETED',
+                  paymentDate: new Date(),
+                }, { transaction: t });
+
+                await intent.update({ status: 'COMPLETED' }, { transaction: t });
+
+                await AuditLog.create({
+                  tenantId: tenant.id,
+                  userId: user.id,
+                  userName: user.name,
+                  action: 'TENANT_REGISTERED_VIA_STRIPE_FALLBACK',
+                  resource: `plan:${rPlanId} period:${rPeriod}`,
+                  severity: 'HIGH',
+                  sha256Signature: crypto.createHash('sha256').update(`${tenant.id}:${session.id}:${Date.now()}`).digest('hex'),
+                }, { transaction: t });
+
+                await t.commit();
+
+                const token = AuthService.generateToken(user);
+                return res.status(200).json({
+                  status: 'completed',
+                  token,
+                  user: {
+                    id: user.id,
+                    name: user.name,
+                    email: user.email,
+                    role: user.role,
+                    roles: user.roles || [user.role],
+                    tenantId: tenant.id,
+                    tenant: {
+                      id: tenant.id, name: tenant.name, domain: tenant.domain,
+                      primaryColor: tenant.primaryColor, buttonColor: tenant.buttonColor,
+                      isActive: tenant.isActive, paymentStatus: tenant.paymentStatus
+                    },
+                    subscription: {
+                      planId: subscription.planId, status: subscription.status, nextBillingDate: subscription.nextBillingDate
+                    }
+                  }
+                });
+              } catch (dbErr) {
+                await t.rollback();
+                console.error('[registerCheck/fallback] DB error:', dbErr.message);
+                // Si l'utilisateur existe déjà (race condition webhook + fallback), tomber dans le chemin COMPLETED
+                if (dbErr.name === 'SequelizeUniqueConstraintError') {
+                  await intent.update({ status: 'COMPLETED' }).catch(() => {});
+                  // laisser le code COMPLETED ci-dessous retrouver le user
+                } else {
+                  return res.status(200).json({ status: 'pending' });
+                }
+              }
+            }
+          } catch (stripeErr) {
+            console.warn('[registerCheck] Stripe API error:', stripeErr.message);
+          }
+        }
+        return res.status(200).json({ status: 'pending' });
+      }
+
+      // COMPLETED — trouver le user créé par le webhook
+      let regData;
+      try { regData = JSON.parse(intent.registrationData); } catch { return res.status(200).json({ status: 'failed' }); }
+
+      const user = await User.findOne({ where: { email: regData.admin.email } }).catch(() => null);
+
+      if (!user) return res.status(200).json({ status: 'pending' }); // webhook encore en cours
+
+      const [tenant, subscription] = await Promise.all([
+        Tenant.findByPk(user.tenantId, {
+          attributes: ['id', 'name', 'domain', 'primaryColor', 'buttonColor', 'theme', 'fontFamily', 'baseFontSize', 'isActive', 'paymentStatus']
+        }).catch(() => null),
+        Subscription.findOne({ where: { tenantId: user.tenantId } }).catch(() => null)
+      ]);
+
+      const token = AuthService.generateToken(user);
+
+      return res.status(200).json({
+        status: 'completed',
+        token,
+        user: {
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          role: user.role,
+          roles: user.roles || [user.role],
+          tenantId: user.tenantId,
+          tenant: tenant ? {
+            id: tenant.id, name: tenant.name, domain: tenant.domain,
+            primaryColor: tenant.primaryColor, buttonColor: tenant.buttonColor,
+            theme: tenant.theme, fontFamily: tenant.fontFamily, baseFontSize: tenant.baseFontSize,
+            isActive: tenant.isActive, paymentStatus: tenant.paymentStatus
+          } : null,
+          subscription: subscription ? {
+            planId: subscription.planId, status: subscription.status, nextBillingDate: subscription.nextBillingDate
+          } : null
+        }
+      });
+    } catch (error) {
+      return AuthController.sendSafeError(res, 500, error, 'RegisterCheckError');
+    }
+  }
+
+  /**
+   * Initialise une session Stripe Checkout pour une nouvelle inscription.
+   * Le compte n'est PAS créé ici — il le sera dans le webhook Stripe après paiement confirmé.
+   * POST /auth/register-stripe-init (public)
+   */
+  static async registerStripeInit(req, res) {
+    try {
+      if (!StripeService.isAvailable()) {
+        return res.status(503).json({ error: 'StripeUnavailable', message: 'Stripe n\'est pas configuré sur ce serveur.' });
+      }
+
+      const { companyName, siret, phone, address, planId, period, amount, admin, primaryColor, buttonColor } = req.body;
+
+      if (!companyName || !admin?.email || !admin?.password || !admin?.name || !planId || !amount) {
+        return res.status(400).json({ error: 'MissingParams', message: 'Champs requis manquants (companyName, admin, planId, amount).' });
+      }
+
+      const EMAIL_REGEX_STRIPE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+      if (!EMAIL_REGEX_STRIPE.test(admin.email)) {
+        return res.status(400).json({ error: 'InvalidEmail', message: 'Format d\'adresse email invalide.' });
+      }
+      if (admin.password.length < 8) {
+        return res.status(400).json({ error: 'WeakPassword', message: 'Le mot de passe doit contenir au moins 8 caractères.' });
+      }
+
+      // ── Vérification doublons avant de créer l'intent Stripe ─────────
+      const normalizedEmailS = admin.email.toLowerCase().trim();
+
+      const existingUserS = await User.findOne({ where: sequelize.where(sequelize.fn('lower', sequelize.col('email')), normalizedEmailS) });
+      if (existingUserS) {
+        return res.status(409).json({ error: 'EmailAlreadyExists', message: 'Un compte existe déjà avec cette adresse email. Connectez-vous ou utilisez une autre adresse.' });
+      }
+
+      if (siret && siret.trim()) {
+        const existingBySiret = await Tenant.findOne({ where: { siret: siret.trim() } });
+        if (existingBySiret) {
+          return res.status(409).json({ error: 'SiretAlreadyExists', message: 'Une entreprise avec ce numéro SIRET est déjà enregistrée.' });
+        }
+      }
+
+      if (phone && phone.trim()) {
+        const phoneCleanS = phone.trim().replace(/\s+/g, '').replace(/-/g, '');
+        const existingByPhone = await Tenant.findOne({ where: sequelize.where(sequelize.fn('replace', sequelize.fn('replace', sequelize.col('phone'), ' ', ''), '-', ''), phoneCleanS) });
+        if (existingByPhone) {
+          return res.status(409).json({ error: 'PhoneAlreadyExists', message: 'Ce numéro de téléphone est déjà utilisé par une autre entreprise.' });
+        }
+      }
+
+      const existingTenantEmailS = await Tenant.findOne({ where: sequelize.where(sequelize.fn('lower', sequelize.col('email')), normalizedEmailS) });
+      if (existingTenantEmailS) {
+        return res.status(409).json({ error: 'CompanyEmailAlreadyExists', message: 'Une entreprise est déjà enregistrée avec cette adresse email.' });
+      }
+
+      // Vérifier aussi dans les intents PENDING non expirés (éviter la double soumission Stripe)
+      const pendingIntent = await RegistrationIntent.findOne({
+        where: sequelize.where(
+          sequelize.fn('lower', sequelize.cast(sequelize.fn('jsonb_extract_path_text', sequelize.cast(sequelize.col('registration_data'), 'jsonb'), 'admin', 'email'), 'text')),
+          normalizedEmailS
+        )
+      }).catch(() => null);
+      if (pendingIntent && pendingIntent.status === 'PENDING' && pendingIntent.expiresAt > new Date()) {
+        return res.status(409).json({ error: 'RegistrationInProgress', message: 'Une inscription est déjà en cours avec cet email. Vérifiez votre email ou attendez l\'expiration (2h).' });
+      }
+
+      const plan = await Plan.findByPk(planId);
+      if (!plan) return res.status(400).json({ error: 'InvalidPlan', message: 'Plan introuvable.' });
+
+      // Stocker les données en base pour le webhook
+      const intent = await RegistrationIntent.create({
+        registrationData: JSON.stringify({ companyName, siret, phone, address, planId, period: period || '1M', admin, primaryColor, buttonColor }),
+        status: 'PENDING',
+        expiresAt: new Date(Date.now() + 2 * 60 * 60 * 1000), // 2h
+      });
+
+      const { url, sessionId } = await StripeService.createRegistrationCheckoutSession({
+        planId,
+        planName: plan.name,
+        period: period || '1M',
+        amount: Number(amount),
+        intentId: intent.id,
+      });
+
+      await intent.update({ stripeSessionId: sessionId });
+
+      return res.status(200).json({ url, sessionId });
+    } catch (error) {
+      return AuthController.sendSafeError(res, 500, error, 'RegisterStripeInitError');
     }
   }
 

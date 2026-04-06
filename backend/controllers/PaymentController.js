@@ -4,7 +4,7 @@ import { StripeService } from '../services/StripeService.js';
 
 export class PaymentController {
   static async handleWebhook(req, res) {
-    let provider, status, tenantId, amount, transactionId, planId;
+    let provider, status, tenantId, amount, transactionId, planId, period;
 
     try {
       // Détection webhook Stripe
@@ -29,6 +29,8 @@ export class PaymentController {
           try { payload = JSON.parse(payload.toString()); } catch (e) { }
         }
         ({ provider, status, tenantId, amount, transactionId, planId } = payload || {});
+        // Extraire la période pour calculer correctement nextBillingDate
+        period = payload?.period || payload?.billingPeriod || '1M';
       }
 
       const tenant = await Tenant.findByPk(tenantId);
@@ -45,39 +47,48 @@ export class PaymentController {
           status: status || 'PENDING',
           paymentDate: new Date()
         });
-        console.log(`ℹ️ Subscription Payment event ${transactionId || 'N/A'} recorded for ${tenant.name} (status=${status})`);
       } catch (e) {
         console.error('[PAYMENT CREATE ERROR]', e);
       }
 
+      const PERIOD_MONTHS = { '1M': 1, '3M': 3, '1Y': 12 };
+      const billingMonths = PERIOD_MONTHS[period] || 1;
+
       if (status === 'SUCCESS') {
-        // 1. Mise à jour de l'activation
-        await tenant.update({ 
-          isActive: true, 
+        // Base calculation on current subscriptionEndsAt if it's in the future (renewal before expiry)
+        const currentEnd = tenant.subscriptionEndsAt ? new Date(tenant.subscriptionEndsAt) : null;
+        const baseDate = currentEnd && currentEnd > new Date() ? currentEnd : new Date();
+        const nextBilling = new Date(baseDate);
+        nextBilling.setMonth(nextBilling.getMonth() + billingMonths);
+
+        await tenant.update({
+          isActive: true,
           paymentStatus: 'UP_TO_DATE',
-          lastPaymentDate: new Date()
+          lastPaymentDate: new Date(),
+          ...(planId ? { planId } : {}),
+          subscriptionEndsAt: nextBilling,
         });
 
         const sub = await Subscription.findOne({ where: { tenantId } });
         if (sub) {
-          const nextBilling = new Date();
-          nextBilling.setMonth(nextBilling.getMonth() + 1);
-          await sub.update({ 
-            status: 'ACTIVE', 
+          await sub.update({
+            status: 'ACTIVE',
             planId: planId || sub.planId,
-            nextBillingDate: nextBilling 
+            nextBillingDate: nextBilling,
+            currentPeriod: period || '1M',
           });
         }
-
-        console.log(`✅ Initial Subscription Payment ${transactionId} confirmed for ${tenant.name}`);
       } else {
-        // If PENDING, mark tenant/subscription as awaiting validation
+        // PENDING : stocker la période et le plan demandé pour que validateSubscription les retrouve
         try {
-          await tenant.update({ paymentStatus: 'PENDING' });
+          await tenant.update({
+            paymentStatus: 'PENDING',
+            ...(planId ? { pendingPlanId: planId } : {}),
+            ...(period ? { pendingPeriod: period } : {}),
+          });
           const sub = await Subscription.findOne({ where: { tenantId } });
           if (sub) await sub.update({ status: 'PENDING' });
         } catch (e) {
-          console.warn('[PENDING STATUS UPDATE FAILED]', e.message || e);
         }
       }
 

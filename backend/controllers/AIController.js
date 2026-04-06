@@ -128,7 +128,6 @@ export class AIController {
         const isMissing = pgErr?.original?.code === '42P01'
           || /does not exist/i.test(String(pgErr?.message));
         if (isMissing) {
-          console.warn('[AI HISTORY] n8n_chat_histories table not found, returning empty history.');
           return res.status(200).json([]);
         }
         throw pgErr;
@@ -301,8 +300,6 @@ export class AIController {
           ? (envProd ?? envWebhook ?? prodUrl)
           : (envWebhook ?? testUrl ?? envProd ?? prodUrl));
 
-    console.info('[Bridge] target webhook:', primaryTarget, '| planId:', planId, '| isProd:', isProd);
-
     // ── Payload normalisé ──────────────────────────────────────────────────
     const payload = { chatInput, sessionId, message, id, planId };
 
@@ -346,14 +343,12 @@ export class AIController {
         for (const fb of fallbacks) {
           tried.push(fb);
           try {
-            console.info('[Bridge] trying fallback:', fb);
             const retry = await axios.post(fb, payload, {
               headers: { 'Content-Type': 'application/json' },
               timeout: 30_000,
             });
             return res.status(200).json({ fromFallback: true, fallbackUrl: fb, data: retry.data });
           } catch (retryErr) {
-            console.warn('[Bridge] fallback failed:', fb, retryErr?.message);
           }
         }
       }

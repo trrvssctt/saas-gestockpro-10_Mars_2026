@@ -2,7 +2,6 @@
 import { Sale, SaleItem, Payment, StockItem, ProductMovement, Customer, AuditLog, Service, Invoice, InvoiceItem } from '../models/index.js';
 import { InvoiceService } from '../services/InvoiceService.js';
 import { sequelize } from '../config/database.js';
-import { Op } from 'sequelize';
 
 
 
@@ -43,18 +42,34 @@ export class SaleController {
 
   static async create(req, res) {
     try {
-      const { customerId, items, amountPaid, paymentMethod } = req.body;
+      const { customerId, walkinName, walkinPhone, items, amountPaid, paymentMethod, paymentReference, paymentProofImage, chequeNumber, bankName, chequeDate, chequeOrder } = req.body;
       const result = await InvoiceService.validateAndGenerate(req.user.tenantId, customerId, items, req.user.id, req.user.name);
-      
+
+      // Sauvegarder les infos du client de passage sur la vente
+      if (!customerId && (walkinName || walkinPhone)) {
+        await result.sale.update({ walkinName: walkinName || null, walkinPhone: walkinPhone || null });
+      }
+
+      const isCheque = paymentMethod === 'CHEQUE';
+
       if (amountPaid > 0) {
         await Payment.create({
           tenantId: req.user.tenantId,
           saleId: result.sale.id,
           amount: amountPaid,
           method: paymentMethod || 'CASH',
-          reference: 'ACOMPTE_INITIAL'
+          reference: paymentReference || (isCheque ? null : 'ACOMPTE_INITIAL'),
+          proofImage: paymentProofImage || null,
+          chequeNumber: chequeNumber || null,
+          bankName: bankName || null,
+          chequeDate: chequeDate || null,
+          chequeOrder: chequeOrder || null,
+          status: isCheque ? 'PENDING' : 'PAID'
         });
-        await result.sale.update({ amountPaid: amountPaid });
+        // Pour le chèque : amountPaid non crédité avant encaissement
+        if (!isCheque) {
+          await result.sale.update({ amountPaid });
+        }
       }
       return res.status(201).json(result);
     } catch (error) {
@@ -183,24 +198,78 @@ export class SaleController {
   static async addPayment(req, res) {
     try {
       const { id } = req.params;
-      const { amount, method, reference } = req.body;
+      const { amount, method, reference, proofImage, chequeNumber, bankName, chequeDate, chequeOrder } = req.body;
       const sale = await Sale.findByPk(id);
       if (!sale) return res.status(404).json({ error: 'Sale not found' });
+
+      const isCheque = method === 'CHEQUE';
 
       await Payment.create({
         tenantId: req.user.tenantId,
         saleId: id,
         amount,
         method,
-        reference
+        reference: reference || null,
+        proofImage: proofImage || null,
+        chequeNumber: chequeNumber || null,
+        bankName: bankName || null,
+        chequeDate: chequeDate || null,
+        chequeOrder: chequeOrder || null,
+        // Chèque commence en PENDING, les autres sont directement PAID
+        status: isCheque ? 'PENDING' : 'PAID'
       });
 
-      const newPaid = parseFloat(sale.amountPaid) + parseFloat(amount);
-      const newStatus = newPaid >= parseFloat(sale.totalTtc) ? 'TERMINE' : 'EN_COURS';
-      
-      await sale.update({ amountPaid: newPaid, status: newStatus });
+      // Pour le chèque, amountPaid n'est mis à jour qu'à l'encaissement (PAID)
+      if (!isCheque) {
+        const newPaid = parseFloat(sale.amountPaid) + parseFloat(amount);
+        const newStatus = newPaid >= parseFloat(sale.totalTtc) ? 'TERMINE' : 'EN_COURS';
+        await sale.update({ amountPaid: newPaid, status: newStatus });
+      }
 
       return res.status(200).json({ message: 'Paiement enregistré.' });
+    } catch (error) {
+      return res.status(500).json({ error: error.message });
+    }
+  }
+
+  static async updatePaymentStatus(req, res) {
+    try {
+      const { paymentId } = req.params;
+      const { status } = req.body;
+
+      const VALID_STATUSES = ['PENDING', 'REGISTERED', 'DEPOSITED', 'PROCESSING', 'PAID', 'REJECTED', 'FAILED'];
+      if (!VALID_STATUSES.includes(status)) {
+        return res.status(400).json({ error: 'Statut invalide' });
+      }
+
+      const payment = await Payment.findByPk(paymentId);
+      if (!payment) return res.status(404).json({ error: 'Paiement introuvable' });
+      if (payment.method !== 'CHEQUE') {
+        return res.status(400).json({ error: 'Seuls les paiements par chèque peuvent être mis à jour via ce endpoint' });
+      }
+
+      const prevStatus = payment.status;
+      await payment.update({ status });
+
+      if (payment.saleId) {
+        const sale = await Sale.findByPk(payment.saleId);
+        if (sale) {
+          // Chèque vient d'être encaissé (PAID) → créditer la vente
+          if (status === 'PAID' && prevStatus !== 'PAID') {
+            const newPaid = parseFloat(sale.amountPaid) + parseFloat(payment.amount);
+            const newStatus = newPaid >= parseFloat(sale.totalTtc) ? 'TERMINE' : 'EN_COURS';
+            await sale.update({ amountPaid: newPaid, status: newStatus });
+          }
+          // Chèque rejeté alors qu'il était déjà PAID → décréditer
+          if (['REJECTED', 'FAILED'].includes(status) && prevStatus === 'PAID') {
+            const newPaid = Math.max(0, parseFloat(sale.amountPaid) - parseFloat(payment.amount));
+            const newSaleStatus = newPaid >= parseFloat(sale.totalTtc) ? 'TERMINE' : 'EN_COURS';
+            await sale.update({ amountPaid: newPaid, status: newSaleStatus });
+          }
+        }
+      }
+
+      return res.status(200).json({ message: 'Statut mis à jour.' });
     } catch (error) {
       return res.status(500).json({ error: error.message });
     }

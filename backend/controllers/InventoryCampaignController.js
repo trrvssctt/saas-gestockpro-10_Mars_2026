@@ -1,4 +1,4 @@
-import { StockItem, AuditLog, Tenant, ProductMovement } from '../models/index.js';
+import { StockItem, ProductMovement } from '../models/index.js';
 import { sequelize } from '../config/database.js';
 import { DataTypes, Model } from 'sequelize';
 
