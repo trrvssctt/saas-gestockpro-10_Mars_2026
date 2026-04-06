@@ -10,6 +10,8 @@ import StockMovements from './components/StockMovements';
 import CategoryManager from './components/CategoryManager';
 import SubcategoryManager from './components/SubcategoryManager';
 import Customers from './components/Customers';
+import Suppliers from './components/Suppliers';
+import Deliveries from './components/Deliveries';
 import Sales from './components/Sales';
 import Recovery from './components/Recovery';
 import Payments from './components/Payments';
@@ -35,10 +37,12 @@ import ModulePlaceholder from './components/rh/ModulePlaceholder';
 import Attendance from './components/rh/Attendance';
 import TimeDeductionSettings from './components/rh/TimeDeductionSettings';
 import EmployeePointage from './components/rh/EmployeePointage';
+import OvertimeRequests from './components/rh/OvertimeRequests';
 import Login from './components/Login';
 import RegistrationSuccess from './components/RegistrationSuccess';
 import Checkout from './components/Checkout';
 import OnboardingWizard from './components/OnboardingWizard';
+import DashboardTour, { shouldShowTour } from './components/DashboardTour';
 import AIAnalysis from './components/AIAnalysis';
 import { StripeSuccessPage, StripeCancelPage, StripeErrorPage } from './components/StripeRedirect';
 import Support from './components/Support';
@@ -116,9 +120,14 @@ const App: React.FC = () => {
   const [showCheckout, setShowCheckout] = useState<{ planId: string, user: User, planObj?: SubscriptionPlan } | null>(null);
   const [showOnboarding, setShowOnboarding] = useState<{ companyName: string, user: User, mustPay: boolean, planId: string, planObj?: SubscriptionPlan } | null>(null);
   const [activationPending, setActivationPending] = useState(false);
-  const [initialLoginOptions, setInitialLoginOptions] = useState<{ mode?: string; planId?: string; regStep?: number } | null>(null);
+  const [initialLoginOptions, setInitialLoginOptions] = useState<{ mode?: string; planId?: string; regStep?: number; period?: string; wavePending?: boolean } | null>(null);
   // Upgrade de plan depuis Subscription.tsx → Checkout.tsx
   const [upgradeContext, setUpgradeContext] = useState<{ planObj: SubscriptionPlan } | null>(null);
+
+  // Tour de démarrage — affiché à la première connexion
+  const [showTour, setShowTour] = useState(false);
+  const [inventoryRefreshKey, setInventoryRefreshKey] = useState(0);
+  const [customersRefreshKey, setCustomersRefreshKey] = useState(0);
 
   // Rappel pointage pour les employés
   const [pointageReminder, setPointageReminder] = useState(false);
@@ -269,6 +278,9 @@ const App: React.FC = () => {
     setIsLoggedIn(true);
     await syncTenantSettings(user);
     setActiveTab(user.role === UserRole.SUPER_ADMIN ? 'superadmin' : 'dashboard');
+    if (user.role !== UserRole.SUPER_ADMIN && shouldShowTour(user.id)) {
+      setTimeout(() => setShowTour(true), 1200);
+    }
   };
 
   const resetToLogin = () => {
@@ -290,15 +302,9 @@ const App: React.FC = () => {
   };
 
   const handleContextualNavigate = (tab: string, meta?: any) => {
-    console.log('handleContextualNavigate appelé avec:', tab, 'meta:', meta);
-    console.log('currentUser:', currentUser);
-    console.log('authBridge.canAccess result:', currentUser ? authBridge.canAccess(currentUser, tab) : 'no user');
     if (currentUser && authBridge.canAccess(currentUser, tab)) {
       setNavigationMetadata(meta);
       setActiveTab(tab);
-      console.log('Navigation réussie vers:', tab);
-    } else {
-      console.log('Navigation bloquée vers:', tab);
     }
   };
 
@@ -342,7 +348,7 @@ const App: React.FC = () => {
     const plan = showRegSuccess.planObj || SUBSCRIPTION_PLANS.find(p => p.id === showRegSuccess.planId);
     return <RegistrationSuccess mustPay={showRegSuccess.mustPay} onContinue={() => {
       setShowOnboarding({
-        companyName: showRegSuccess?.user.name.replace('Admin ', '') || 'Ma Société',
+        companyName: (showRegSuccess?.user as any)?.tenant?.name || showRegSuccess?.user.name.replace('Admin ', '') || 'Ma Société',
         user: showRegSuccess!.user,
         mustPay: showRegSuccess!.mustPay,
         planId: showRegSuccess!.planId,
@@ -355,16 +361,12 @@ const App: React.FC = () => {
   if (showOnboarding) return <OnboardingWizard
     companyName={showOnboarding.companyName}
     user={showOnboarding.user}
+    planId={showOnboarding.planId}
     onExit={() => {
-      // L'utilisateur quitte l'onboarding volontairement ou suite à une erreur/déconnexion.
-      // La progression est déjà sauvegardée en localStorage par le wizard lui-même.
-      // On NE connecte PAS l'utilisateur : on revient à la LandingPage.
-      // À la prochaine connexion, initAuth détectera onboardingCompleted===false
-      // et restaurera automatiquement le wizard à l'étape sauvegardée.
       setShowOnboarding(null);
       setShowLanding(true);
     }}
-    onComplete={async (_data) => {
+    onComplete={async (data) => {
       if (showOnboarding?.mustPay) {
         setShowCheckout({
           planId: showOnboarding.planId,
@@ -372,11 +374,18 @@ const App: React.FC = () => {
           planObj: showOnboarding.planObj
         });
         setShowOnboarding(null);
+      } else if ((showOnboarding?.user as any)?.tenant?.isActive === false) {
+        // Compte Wave en attente de validation SuperAdmin → retour au Login avec notice
+        setShowOnboarding(null);
+        setInitialLoginOptions({ mode: 'LOGIN', wavePending: true });
       } else {
         setCurrentUser(showOnboarding.user);
         setIsLoggedIn(true);
-        setActiveTab('dashboard');
+        setActiveTab(data?.goToHR ? 'rh' : 'dashboard');
         setShowOnboarding(null);
+        if (shouldShowTour(showOnboarding.user.id)) {
+          setTimeout(() => setShowTour(true), 1500);
+        }
       }
     }}
   />;
@@ -436,7 +445,27 @@ const App: React.FC = () => {
     if (isLoggedIn) setActiveTab(tab);
   };
   if (!stripeHandled && stripePathname === '/stripe/success') {
-    return <StripeSuccessPage onContinue={() => leaveStripePage('subscription')} />;
+    return <StripeSuccessPage
+      onContinue={() => leaveStripePage('subscription')}
+      onAutoLogin={({ token, user: stripeUser }) => {
+        // Sauvegarder la session
+        authBridge.saveSession(stripeUser, token, undefined);
+        // Effacer l'URL Stripe
+        window.history.replaceState({}, '', '/');
+        setStripeHandled(true);
+        // Résoudre le planId
+        const planId = stripeUser?.subscription?.planId || stripeUser?.planId || 'BASIC';
+        (stripeUser as any).planId = planId;
+        // Aller directement à l'OnboardingWizard
+        setShowOnboarding({
+          companyName: stripeUser?.tenant?.name || stripeUser?.name || 'Ma Société',
+          user: stripeUser,
+          mustPay: false,
+          planId,
+          planObj: undefined
+        });
+      }}
+    />;
   }
   if (!stripeHandled && stripePathname === '/stripe/cancel') {
     return <StripeCancelPage onBack={() => leaveStripePage('subscription')} />;
@@ -447,7 +476,7 @@ const App: React.FC = () => {
 
   // Direct access to Super-Admin login via /superadmin
   if (!isLoggedIn) {
-    if (typeof window !== 'undefined' && window.location.pathname === '/superadmin') {
+    if (typeof window !== 'undefined' && window.location.pathname === '/neka_super_admin_pagie') {
       return <SuperAdminLogin onLoginSuccess={handleLoginSuccess} />;
     }
     if (showLanding) {
@@ -460,7 +489,7 @@ const App: React.FC = () => {
         }
       }} />;
     }
-    return <Login onLoginSuccess={handleLoginSuccess} onBackToLanding={() => { setShowLanding(true); setInitialLoginOptions(null); }} initialMode={initialLoginOptions?.mode} initialPlanId={initialLoginOptions?.planId} initialRegStep={initialLoginOptions?.regStep} initialPeriod={initialLoginOptions?.period} />;
+    return <Login onLoginSuccess={handleLoginSuccess} onBackToLanding={() => { setShowLanding(true); setInitialLoginOptions(null); }} initialMode={initialLoginOptions?.mode} initialPlanId={initialLoginOptions?.planId} initialRegStep={initialLoginOptions?.regStep} initialPeriod={initialLoginOptions?.period} initialWavePending={initialLoginOptions?.wavePending} />;
   }
 
   const renderContent = () => {
@@ -526,6 +555,7 @@ const App: React.FC = () => {
         case 'rh.payroll.advances': return <PayrollManagement onNavigate={handleContextualNavigate} initialTab="advances" />;
         case 'rh.payroll.declarations': return <PayrollManagement onNavigate={handleContextualNavigate} initialTab="declarations" />;
         case 'rh.attendance': return <Attendance onNavigate={handleContextualNavigate} />;
+        case 'rh.overtime': return <OvertimeRequests onNavigate={handleContextualNavigate} />;
         case 'rh.time-settings': return <TimeDeductionSettings onNavigate={handleContextualNavigate} />;
         default: return <HRDashboard onNavigate={handleContextualNavigate} />;
       }
@@ -537,11 +567,13 @@ const App: React.FC = () => {
       case 'ai_analysis': return <AIAnalysis user={currentUser} />;
       case 'categories': return <CategoryManager plan={currentPlan} />;
       case 'subcategories': return <SubcategoryManager plan={currentPlan} />;
-      case 'inventory': return <Inventory currency={appSettings.currency} userRole={currentUser.role} plan={currentPlan} />;
+      case 'inventory': return <Inventory currency={appSettings.currency} userRole={currentUser.role} plan={currentPlan} refreshKey={inventoryRefreshKey} />;
       case 'audit_inventory': return <InventoryCampaign settings={appSettings} />;
       case 'inventorycampaigns': return <InventoryCampaign settings={appSettings} />;
       case 'movements': return <StockMovements currency={appSettings.currency} tenantSettings={appSettings} />;
-      case 'customers': return <Customers user={currentUser} currency={appSettings.currency} plan={currentPlan} />;
+      case 'customers': return <Customers user={currentUser} currency={appSettings.currency} plan={currentPlan} refreshKey={customersRefreshKey} />;
+      case 'suppliers': return <Suppliers user={currentUser} currency={appSettings.currency} />;
+      case 'deliveries': return <Deliveries user={currentUser} currency={appSettings.currency} />;
       case 'sales': return <Sales currency={appSettings.currency} user={currentUser} tenantSettings={appSettings} plan={currentPlan} />;
       case 'services': return <Services currency={appSettings.currency} />;
       case 'recovery': return <Recovery currency={appSettings.currency} />;
@@ -578,7 +610,7 @@ const App: React.FC = () => {
         return <EmployeePointage onNavigate={handleContextualNavigate} />;
       }
       case 'governance': return <Governance tenantId={currentUser.tenantId} plan={currentPlan} />;
-      case 'subscription': return <Subscription user={currentUser} currency={appSettings.currency} onUpgrade={(plan) => setUpgradeContext({ planObj: plan })} />;
+      case 'subscription': return <Subscription user={currentUser} currency={appSettings.currency} onUpgrade={(plan) => setUpgradeContext({ planObj: plan })} onLogout={handleLogout} />;
       case 'info': return <Info user={currentUser} />;
       case 'support': return <Support user={currentUser} />;
       case 'security': return <SecurityPanel />;
@@ -592,6 +624,21 @@ const App: React.FC = () => {
     <ErrorBoundary children={
       <ToastProvider>
         <div className={`min-h-screen ${activeTab === 'superadmin' ? 'bg-slate-950' : 'bg-slate-50'}`}>
+          {/* Tour de démarrage interactif */}
+          {showTour && isLoggedIn && currentUser && (
+            <DashboardTour
+              user={currentUser}
+              planId={(currentUser as any)?.planId || 'BASIC'}
+              currentTab={activeTab}
+              onNavigate={(tab: string) => { setNavigationMetadata(null); setActiveTab(tab); }}
+              onComplete={() => setShowTour(false)}
+              onSkip={() => setShowTour(false)}
+              onDemoCreated={(type: 'inventory' | 'customers') => {
+                if (type === 'inventory') setInventoryRefreshKey((k: number) => k + 1);
+                if (type === 'customers') setCustomersRefreshKey((k: number) => k + 1);
+              }}
+            />
+          )}
           {/* Bannière rappel pointage — employé non pointé */}
           {pointageReminder && activeTab !== 'employee-pointage' && (
             <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[300] flex items-center gap-4 px-6 py-4 bg-slate-900 text-white rounded-[2rem] shadow-2xl border border-indigo-500/30 max-w-sm w-full mx-4">
