@@ -30,8 +30,7 @@ export const checkPermission = (allowedRoles) => {
     const hasAccess = allowedRoles.some(role => userRoles.includes(role));
 
     if (!hasAccess) {
-      console.warn(`[RBAC REJECT] User ${user.id} (Rôles détectés: ${userRoles.join(',')}) a tenté d'accéder à une ressource restreinte: ${allowedRoles.join(',')}`);
-      return res.status(403).json({ 
+      return res.status(403).json({
         error: 'AccessDenied', 
         message: `Droits insuffisants (Périmètre requis: ${allowedRoles.join(' ou ')})`,
         status: 403

@@ -87,11 +87,8 @@ export const cleanupExpiredSessions = async (req, res, next) => {
     // Nettoyer seulement 1 fois sur 100 requêtes pour éviter la surcharge
     if (Math.random() < 0.01) {
       AuthService.cleanupExpiredSessions()
-        .then(count => {
-          if (count > 0) {
-            console.log(`[SESSION CLEANUP] Nettoyage de ${count} sessions expirées`);
-          }
-        })
+        .then(() => {})
+
         .catch(err => {
           console.error('[SESSION CLEANUP ERROR]:', err);
         });
