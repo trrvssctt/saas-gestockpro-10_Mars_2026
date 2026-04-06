@@ -33,14 +33,7 @@ if (buildTimeBackend) {
 
 const BACKEND_URL = rawBackend.endsWith('/api') ? rawBackend : `${rawBackend.replace(/\/+$/, '')}/api`;
 
-// Debug en développement
-if (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
-  console.log('🔧 API Configuration Debug:', {
-    origin: window.location.origin,
-    rawBackend,
-    finalBackendURL: BACKEND_URL
-  });
-}
+
 
 export interface ApiError {
   error: string;
@@ -177,7 +170,6 @@ export const leaveApi = {
   } | FormData) => {
     // Si c'est déjà un FormData, l'utiliser directement
     if (data instanceof FormData) {
-      console.log('📎 API reçoit FormData directement');
       return apiClient.request('/hr/leaves', {
         method: 'POST',
         body: data,
@@ -195,7 +187,6 @@ export const leaveApi = {
       if (data.reason) formData.append('reason', data.reason);
       formData.append('document', data.document);
 
-      console.log('📎 API crée FormData depuis objet avec document');
       return apiClient.request('/hr/leaves', {
         method: 'POST',
         body: formData,
@@ -203,7 +194,6 @@ export const leaveApi = {
       });
     } else {
       // Sinon, utiliser JSON classique
-      console.log('📎 API utilise JSON classique');
       return apiClient.post('/hr/leaves', {
         employeeId: data.employeeId,
         type: data.type,
