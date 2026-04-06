@@ -43,8 +43,13 @@ Tenant.init({
   paymentStatus: { type: DataTypes.STRING(20), defaultValue: 'PENDING', field: 'payment_status' },
   lastPaymentDate: { type: DataTypes.DATE, field: 'last_payment_date' },
   lastPaymentAmount: { type: DataTypes.NUMERIC(15, 2), defaultValue: 0, field: 'last_payment_amount' },
+  planId: { type: DataTypes.STRING(50), allowNull: true, field: 'plan_id' },
+  subscriptionEndsAt: { type: DataTypes.DATE, allowNull: true, field: 'subscription_ends_at' },
   pendingPlanId: { type: DataTypes.STRING(50), allowNull: true, field: 'pending_plan_id' },
-  pendingPeriod: { type: DataTypes.STRING(10), allowNull: true, field: 'pending_period' }
+  pendingPeriod: { type: DataTypes.STRING(10), allowNull: true, field: 'pending_period' },
+
+  // Stockage S3 utilisé (en octets)
+  storageUsedBytes: { type: DataTypes.BIGINT, defaultValue: 0, field: 'storage_used_bytes' }
 }, {
   sequelize,
   modelName: 'tenant',

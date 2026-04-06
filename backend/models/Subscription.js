@@ -26,10 +26,15 @@ Subscription.init({
     type: DataTypes.DATE, 
     field: 'next_billing_date' 
   },
-  autoRenew: { 
-    type: DataTypes.BOOLEAN, 
-    defaultValue: true, 
-    field: 'auto_renew' 
+  autoRenew: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: true,
+    field: 'auto_renew'
+  },
+  currentPeriod: {
+    type: DataTypes.STRING(10),
+    defaultValue: '1M',
+    field: 'current_period'
   }
 }, {
   sequelize,

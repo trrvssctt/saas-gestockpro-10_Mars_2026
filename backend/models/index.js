@@ -41,10 +41,15 @@ import { Advance } from './Advance.js';
 import { Prime } from './Prime.js';
 import { Session } from './Session.js';
 import { SupportTicket } from './SupportTicket.js';
+import { OvertimeRequest } from './OvertimeRequest.js';
 import { Announcement } from './Announcement.js';
 import { HRRule } from './HRRule.js';
 import { Notification } from './Notification.js';
 import { NotificationRead } from './NotificationRead.js';
+import { Supplier } from './Supplier.js';
+import { Delivery } from './Delivery.js';
+import { DeliveryItem } from './DeliveryItem.js';
+import { RegistrationIntent } from './RegistrationIntent.js';
 
 /**
  * ARCHITECTURE KERNEL V3.2.3
@@ -153,6 +158,13 @@ Tenant.hasMany(Declaration, { foreignKey: 'tenant_id', as: 'declarations' });
 Attendance.belongsTo(Tenant, { foreignKey: 'tenant_id' });
 Attendance.belongsTo(Employee, { foreignKey: 'employee_id', as: 'employee' });
 
+// OvertimeRequest relations
+OvertimeRequest.belongsTo(Tenant, { foreignKey: 'tenant_id' });
+OvertimeRequest.belongsTo(Employee, { foreignKey: 'employee_id', as: 'employee' });
+OvertimeRequest.belongsTo(Employee, { foreignKey: 'reviewed_by', as: 'reviewer' });
+Employee.hasMany(OvertimeRequest, { foreignKey: 'employee_id', as: 'overtimeRequests' });
+Tenant.hasMany(OvertimeRequest, { foreignKey: 'tenant_id' });
+
 // Leave relations
 Leave.belongsTo(Tenant, { foreignKey: 'tenant_id' });
 Leave.belongsTo(Employee, { foreignKey: 'employee_id', as: 'employee' });
@@ -209,6 +221,22 @@ Prime.belongsTo(Tenant, { foreignKey: 'tenant_id' });
 Prime.belongsTo(Employee, { foreignKey: 'employee_id', as: 'employee' });
 Prime.belongsTo(User, { foreignKey: 'approved_by', as: 'approver' });
 
+// --- RELATIONS FOURNISSEURS & LIVRAISONS ---
+Tenant.hasMany(Supplier, { foreignKey: 'tenant_id' });
+Supplier.belongsTo(Tenant, { foreignKey: 'tenant_id' });
+
+Tenant.hasMany(Delivery, { foreignKey: 'tenant_id' });
+Delivery.belongsTo(Tenant, { foreignKey: 'tenant_id' });
+
+Supplier.hasMany(Delivery, { foreignKey: 'supplier_id', as: 'deliveries' });
+Delivery.belongsTo(Supplier, { foreignKey: 'supplier_id', as: 'supplier' });
+
+Delivery.hasMany(DeliveryItem, { foreignKey: 'delivery_id', as: 'items' });
+DeliveryItem.belongsTo(Delivery, { foreignKey: 'delivery_id' });
+
+DeliveryItem.belongsTo(StockItem, { foreignKey: 'stock_item_id', as: 'stock_item' });
+StockItem.hasMany(DeliveryItem, { foreignKey: 'stock_item_id', as: 'deliveryItems' });
+
 // Ventes & Facturation
 Sale.belongsTo(Customer, { foreignKey: 'customer_id' });
 Customer.hasMany(Sale, { foreignKey: 'customer_id' });
@@ -230,15 +258,17 @@ Subcategory.belongsTo(Category, { foreignKey: 'category_id' });
 Subcategory.hasMany(StockItem, { foreignKey: 'subcategory_id' });
 StockItem.belongsTo(Subcategory, { foreignKey: 'subcategory_id' });
 
-export { 
-  Tenant, User, StockItem, ProductMovement, 
-  Customer, Invoice, InvoiceItem, Subscription, 
+export {
+  Tenant, User, StockItem, ProductMovement,
+  Customer, Invoice, InvoiceItem, Subscription,
   Plan, AuditLog, Backup, Document, Category, Subcategory,
   Sale, SaleItem, Payment, Administrator, Service, ContactMessage,
   Message, PromptTemplate,
   Employee, Department, Contract, Payroll, PayrollSettings, PayrollItem, Attendance,
-  Leave, EmployeeDocument, JobOffer, Candidate, Training, 
+  Leave, EmployeeDocument, JobOffer, Candidate, Training,
   TrainingParticipant, PerformanceReview, CompanyDeclarationSettings, Declaration,
   Advance, Prime, Session, SupportTicket, Announcement, HRRule,
-  Notification, NotificationRead
+  Notification, NotificationRead, OvertimeRequest,
+  Supplier, Delivery, DeliveryItem,
+  RegistrationIntent
 };

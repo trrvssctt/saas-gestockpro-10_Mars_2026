@@ -16,6 +16,9 @@ StockItem.init({
   currentLevel: { type: DataTypes.INTEGER, defaultValue: 0, field: 'current_level' },
   minThreshold: { type: DataTypes.INTEGER, defaultValue: 5, field: 'min_threshold' },
   forecastedLevel: { type: DataTypes.INTEGER, field: 'forecasted_level' },
+  // Prix d'achat moyen pondéré (PUMP) — mis à jour à chaque livraison
+  purchasePrice: { type: DataTypes.NUMERIC(15, 2), defaultValue: 0, field: 'purchase_price' },
+  // Prix de vente unitaire (affiché aux clients)
   unitPrice: { type: DataTypes.NUMERIC(15, 2), allowNull: false, field: 'unit_price', defaultValue: 0 },
   location: { type: DataTypes.STRING(100) },
   status: { 
