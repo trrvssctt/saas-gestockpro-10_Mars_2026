@@ -23,11 +23,13 @@ import {
   Save,
   X,
   TrendingUp,
-  Scale
+  Scale,
+  LogIn,
+  LogOut
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import HRModal from './HRModal';
-import { api } from '../../services/api';
+import { api, apiClient } from '../../services/api';
 
 interface AttendanceProps {
   onNavigate?: (tab: string, meta?: any) => void;
@@ -230,6 +232,24 @@ const Attendance: React.FC<AttendanceProps> = ({ onNavigate }) => {
       showNotif('Pointage enregistré');
     } catch (err: any) {
       showNotif(err.message || 'Erreur');
+    } finally {
+      setSaving(null);
+    }
+  };
+
+  // Admin clock-in / clock-out pour un employé
+  const handleAdminClock = async (empId: string, direction: 'in' | 'out') => {
+    setSaving(empId);
+    try {
+      const endpoint = direction === 'in' ? '/hr/attendance/admin/clock-in' : '/hr/attendance/admin/clock-out';
+      const result = await apiClient.post(endpoint, { employeeId: empId, date: selectedDate });
+      setAllAttendances(prev => {
+        const existing = prev.find(a => a.id === result.id);
+        return existing ? prev.map(a => a.id === result.id ? { ...a, ...result } : a) : [...prev, result];
+      });
+      showNotif(`${direction === 'in' ? 'Arrivée' : 'Départ'} pointé pour ${employees.find(e => e.id === empId)?.firstName || 'l\'employé'}`);
+    } catch (err: any) {
+      showNotif(err.message || 'Erreur lors du pointage');
     } finally {
       setSaving(null);
     }
@@ -552,7 +572,28 @@ const Attendance: React.FC<AttendanceProps> = ({ onNavigate }) => {
                             </td>
 
                             <td className="py-4 px-6">
-                              <div className="flex items-center justify-end gap-2">
+                              <div className="flex items-center justify-end gap-2 flex-wrap">
+                                {/* Boutons pointer arrivée / départ admin (date du jour seulement) */}
+                                {selectedDate === today && (
+                                  <>
+                                    <button
+                                      onClick={() => handleAdminClock(employee.id, 'in')}
+                                      disabled={isSavingThis || !!attendance?.clockIn}
+                                      title="Pointer l'arrivée"
+                                      className="flex items-center gap-1 px-2.5 py-1.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg text-[8px] font-black uppercase tracking-widest hover:bg-emerald-100 transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+                                    >
+                                      {isSavingThis ? <RefreshCw size={9} className="animate-spin" /> : <Sunrise size={9} />} IN
+                                    </button>
+                                    <button
+                                      onClick={() => handleAdminClock(employee.id, 'out')}
+                                      disabled={isSavingThis || !attendance?.clockIn || !!attendance?.clockOut}
+                                      title="Pointer le départ"
+                                      className="flex items-center gap-1 px-2.5 py-1.5 bg-rose-50 text-rose-700 border border-rose-200 rounded-lg text-[8px] font-black uppercase tracking-widest hover:bg-rose-100 transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+                                    >
+                                      {isSavingThis ? <RefreshCw size={9} className="animate-spin" /> : <Sunset size={9} />} OUT
+                                    </button>
+                                  </>
+                                )}
                                 {/* Quick status buttons */}
                                 {(['PRESENT', 'ABSENT', 'LATE', 'HOLIDAY', 'REMOTE'] as AttendanceStatus[]).map(s => (
                                   <button

@@ -26,6 +26,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { apiClient } from '../../services/api';
+import { uploadFile } from '../../services/uploadService';
 import { useToast } from '../ToastProvider';
 import HRModal from './HRModal';
 
@@ -67,6 +68,7 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ onNavigate }) => {
   const [departments, setDepartments] = useState<Department[]>([]);
   const [leaves, setLeaves] = useState<any[]>([]);
   const [contracts, setContracts] = useState<any[]>([]);
+  const [attendancesToday, setAttendancesToday] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -86,15 +88,32 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ onNavigate }) => {
   // Fonction utilitaire pour déterminer le statut de présence d'un employé
   const getEmployeePresenceStatus = (employeeId: string) => {
     const today = new Date().toISOString().split('T')[0];
+
+    // Vérifier d'abord le pointage réel
+    const attendance = attendancesToday.find(a => a.employeeId === employeeId);
+    if (attendance) {
+      return {
+        isPresent: attendance.status !== 'ABSENT',
+        attendanceStatus: attendance.status,
+        clockIn: attendance.clockIn,
+        clockOut: attendance.clockOut,
+        leave: null
+      };
+    }
+
+    // Sinon vérifier les congés approuvés
     const activeLeave = leaves.find(leave => {
-      return leave.employeeId === employeeId && 
-             leave.status === 'APPROVED' && 
-             leave.startDate <= today && 
+      return leave.employeeId === employeeId &&
+             leave.status === 'APPROVED' &&
+             leave.startDate <= today &&
              leave.endDate >= today;
     });
-    
+
     return {
-      isPresent: !activeLeave,
+      isPresent: false,
+      attendanceStatus: activeLeave ? 'LEAVE' : 'NOT_CLOCKED',
+      clockIn: null,
+      clockOut: null,
       leave: activeLeave
     };
   };
@@ -116,9 +135,12 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ onNavigate }) => {
   // Calculer les statistiques de présence
   const getPresenceStats = () => {
     const activeEmployees = employees.filter(emp => emp.status === 'ACTIVE');
-    const presentCount = activeEmployees.filter(emp => getEmployeePresenceStatus(emp.id).isPresent).length;
+    const presentCount = activeEmployees.filter(emp => {
+      const s = getEmployeePresenceStatus(emp.id);
+      return s.isPresent || s.attendanceStatus === 'PRESENT' || s.attendanceStatus === 'LATE';
+    }).length;
     const absentCount = activeEmployees.length - presentCount;
-    
+
     return {
       total: activeEmployees.length,
       present: presentCount,
@@ -132,17 +154,20 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ onNavigate }) => {
     setLoading(true);
     setError(null);
     try {
-      const [employeeData, departmentData, leavesData, contractsData] = await Promise.all([
+      const today = new Date().toISOString().split('T')[0];
+      const [employeeData, departmentData, leavesData, contractsData, attendanceData] = await Promise.all([
         apiClient.get('/hr/employees'),
         apiClient.get('/hr/departments'),
         apiClient.get('/hr/leaves'),
-        apiClient.get('/hr/contracts')
+        apiClient.get('/hr/contracts'),
+        apiClient.get(`/hr/attendance?date=${today}`).catch(() => [])
       ]);
 
       setEmployees(employeeData?.rows || employeeData || []);
       setDepartments(departmentData?.rows || departmentData || []);
       setLeaves(leavesData?.rows || leavesData || []);
       setContracts(contractsData?.rows || contractsData || []);
+      setAttendancesToday(attendanceData?.rows || attendanceData || []);
     } catch (err: any) {
       setError('Erreur de chargement des données');
       console.error('Error fetching data:', err);
@@ -167,11 +192,11 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ onNavigate }) => {
     // Filtre de présence
     let matchesPresence = true;
     if (filterPresence !== 'All') {
-      const presenceStatus = getEmployeePresenceStatus(emp.id);
+      const ps = getEmployeePresenceStatus(emp.id);
       if (filterPresence === 'Present') {
-        matchesPresence = presenceStatus.isPresent;
+        matchesPresence = ps.attendanceStatus === 'PRESENT' || ps.attendanceStatus === 'LATE';
       } else if (filterPresence === 'Absent') {
-        matchesPresence = !presenceStatus.isPresent;
+        matchesPresence = ps.attendanceStatus === 'ABSENT' || ps.attendanceStatus === 'NOT_CLOCKED' || ps.attendanceStatus === 'LEAVE';
       }
     }
     
@@ -194,25 +219,11 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ onNavigate }) => {
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-
     setIsUploading(true);
-    
-    const cloudinaryData = new FormData();
-    cloudinaryData.append('file', file);
-    cloudinaryData.append('upload_preset', 'ml_default'); 
-    cloudinaryData.append('cloud_name', 'dq7avew9h');
-
     try {
-      const response = await fetch(`https://api.cloudinary.com/v1_1/dq7avew9h/image/upload`, {
-        method: 'POST',
-        body: cloudinaryData
-      });
-      
-      const data = await response.json();
-      if (data.secure_url) {
-        setFormData(prev => ({ ...prev, photoUrl: data.secure_url }));
-        showToast('Photo téléchargée avec succès', 'success');
-      }
+      const result = await uploadFile(file, 'employees');
+      setFormData(prev => ({ ...prev, photoUrl: result.url }));
+      showToast('Photo téléchargée avec succès', 'success');
     } catch (err) {
       console.error("Upload Error:", err);
       showToast("Échec de l'envoi de la photo.", 'error');
@@ -674,22 +685,49 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ onNavigate }) => {
           >
             {/* Indicateur de présence/absence */}
             <div className="absolute top-4 left-6 z-10">
-              {presenceStatus.isPresent ? (
-                <div className="flex items-center gap-2 px-3 py-1.5 bg-emerald-50 text-emerald-600 rounded-full shadow-sm">
-                  <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></div>
-                  <span className="text-[9px] font-black uppercase tracking-widest">Présent</span>
-                </div>
-              ) : (
-                <div className="flex items-center gap-2 px-3 py-1.5 bg-red-50 text-red-600 rounded-full shadow-sm">
-                  <div className="w-2 h-2 bg-red-500 rounded-full"></div>
-                  <span className="text-[9px] font-black uppercase tracking-widest">
-                    {presenceStatus.leave?.type === 'SICK' ? 'Maladie' : 
-                     presenceStatus.leave?.type === 'PAID' ? 'Congé' :
-                     presenceStatus.leave?.type === 'MATERNITY' ? 'Maternité' :
-                     presenceStatus.leave?.type === 'UNPAID' ? 'Sans solde' : 'Absent'}
-                  </span>
-                </div>
-              )}
+              {(() => {
+                const s = presenceStatus;
+                if (s.attendanceStatus === 'PRESENT')
+                  return (
+                    <div className="flex items-center gap-2 px-3 py-1.5 bg-emerald-50 text-emerald-600 rounded-full shadow-sm">
+                      <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></div>
+                      <span className="text-[9px] font-black uppercase tracking-widest">Présent {s.clockIn ? new Date(s.clockIn).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : ''}</span>
+                    </div>
+                  );
+                if (s.attendanceStatus === 'LATE')
+                  return (
+                    <div className="flex items-center gap-2 px-3 py-1.5 bg-amber-50 text-amber-600 rounded-full shadow-sm">
+                      <div className="w-2 h-2 bg-amber-500 rounded-full animate-pulse"></div>
+                      <span className="text-[9px] font-black uppercase tracking-widest">En retard</span>
+                    </div>
+                  );
+                if (s.attendanceStatus === 'LEAVE')
+                  return (
+                    <div className="flex items-center gap-2 px-3 py-1.5 bg-blue-50 text-blue-600 rounded-full shadow-sm">
+                      <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
+                      <span className="text-[9px] font-black uppercase tracking-widest">
+                        {s.leave?.type === 'SICK' ? 'Maladie' :
+                         s.leave?.type === 'PAID' ? 'Congé' :
+                         s.leave?.type === 'MATERNITY' ? 'Maternité' :
+                         s.leave?.type === 'UNPAID' ? 'Sans solde' : 'Congé'}
+                      </span>
+                    </div>
+                  );
+                if (s.attendanceStatus === 'ABSENT')
+                  return (
+                    <div className="flex items-center gap-2 px-3 py-1.5 bg-red-50 text-red-600 rounded-full shadow-sm">
+                      <div className="w-2 h-2 bg-red-500 rounded-full"></div>
+                      <span className="text-[9px] font-black uppercase tracking-widest">Absent</span>
+                    </div>
+                  );
+                // NOT_CLOCKED
+                return (
+                  <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-50 text-slate-400 rounded-full shadow-sm">
+                    <div className="w-2 h-2 bg-slate-300 rounded-full"></div>
+                    <span className="text-[9px] font-black uppercase tracking-widest">Non pointé</span>
+                  </div>
+                );
+              })()}
             </div>
             
             <div className="flex items-start justify-between mb-8">

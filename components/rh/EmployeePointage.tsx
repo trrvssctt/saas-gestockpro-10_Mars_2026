@@ -2,7 +2,8 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
   Clock, LogIn, LogOut, CheckCircle2, AlertCircle, Loader2,
   Calendar, Timer, Sun, Moon, Coffee, TrendingUp, History,
-  ArrowLeft, RefreshCw, Zap, TrendingDown, Scale, ChevronDown, ChevronUp
+  ArrowLeft, RefreshCw, Zap, TrendingDown, Scale, ChevronDown, ChevronUp,
+  Plus, FileText, XCircle, Send
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { apiClient } from '../../services/api';
@@ -56,6 +57,25 @@ const fmt = (d: string | null) =>
 const fmtDate = (d: string) =>
   new Date(d + 'T00:00:00').toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' });
 
+interface OvertimeRequestRecord {
+  id: string;
+  requestedDate: string;
+  startTime?: string;
+  endTime?: string;
+  requestedMinutes: number;
+  reason: string;
+  status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'COMPLETED';
+  reviewNote?: string;
+  actualMinutes: number;
+}
+
+const OT_STATUS: Record<string, { label: string; color: string }> = {
+  PENDING:   { label: 'En attente', color: 'bg-amber-50 text-amber-700 border-amber-200' },
+  APPROVED:  { label: 'Approuvée',  color: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
+  REJECTED:  { label: 'Refusée',    color: 'bg-rose-50 text-rose-700 border-rose-200' },
+  COMPLETED: { label: 'Effectuée',  color: 'bg-indigo-50 text-indigo-700 border-indigo-200' },
+};
+
 const EmployeePointage: React.FC<EmployeePointageProps> = ({ onNavigate }) => {
   const [now,              setNow]             = useState(new Date());
   const [today,            setToday]           = useState<AttendanceRecord | null>(null);
@@ -67,6 +87,12 @@ const EmployeePointage: React.FC<EmployeePointageProps> = ({ onNavigate }) => {
   const [actionLoading,    setActionLoading]   = useState(false);
   const [toast,            setToast]           = useState<{ msg: string; ok: boolean } | null>(null);
   const [showBilanDetail,  setShowBilanDetail] = useState(false);
+
+  // Demandes heures supplémentaires
+  const [otRequests,       setOtRequests]      = useState<OvertimeRequestRecord[]>([]);
+  const [showOtForm,       setShowOtForm]      = useState(false);
+  const [otLoading,        setOtLoading]       = useState(false);
+  const [otForm,           setOtForm]          = useState({ requestedDate: '', startTime: '', endTime: '', reason: '' });
 
   const session   = authBridge.getSession();
   const userName  = (session?.user as any)?.firstName || (session?.user as any)?.name || 'Employé';
@@ -105,15 +131,18 @@ const EmployeePointage: React.FC<EmployeePointageProps> = ({ onNavigate }) => {
     try {
       setLoading(true);
       setNoEmployee(false);
-      const [todayRes, histRes, summaryRes] = await Promise.all([
+      const month = new Date().toISOString().substring(0, 7);
+      const [todayRes, histRes, summaryRes, otRes] = await Promise.all([
         apiClient.get('/hr/attendance/my/today'),
         apiClient.get('/hr/attendance/my'),
         apiClient.get('/hr/attendance/my/overtime-summary').catch(() => null),
+        apiClient.get(`/hr/overtime/my?month=${month}`).catch(() => []),
       ]);
       setToday(todayRes.attendance);
       setSettings(todayRes.settings);
       setHistory(Array.isArray(histRes) ? histRes : []);
       if (summaryRes) setOvertimeSummary(summaryRes as OvertimeSummary);
+      setOtRequests(Array.isArray(otRes) ? otRes : []);
     } catch (err: any) {
       if (err.error === 'NoEmployeeLinked' || err.status === 400) {
         setNoEmployee(true);
@@ -124,6 +153,23 @@ const EmployeePointage: React.FC<EmployeePointageProps> = ({ onNavigate }) => {
       setLoading(false);
     }
   }, []);
+
+  const handleOtSubmit = async () => {
+    if (!otForm.requestedDate) { showToast('Sélectionnez une date', false); return; }
+    if (!otForm.reason.trim()) { showToast('La raison est obligatoire', false); return; }
+    setOtLoading(true);
+    try {
+      await apiClient.post('/hr/overtime', otForm);
+      showToast('Demande envoyée avec succès', true);
+      setShowOtForm(false);
+      setOtForm({ requestedDate: '', startTime: '', endTime: '', reason: '' });
+      await loadData();
+    } catch (err: any) {
+      showToast(err.message || 'Erreur lors de l\'envoi', false);
+    } finally {
+      setOtLoading(false);
+    }
+  };
 
   useEffect(() => { loadData(); }, [loadData]);
 
@@ -592,6 +638,115 @@ const EmployeePointage: React.FC<EmployeePointageProps> = ({ onNavigate }) => {
               )}
             </div>
           )}
+          {/* ── Demandes Heures Supplémentaires ── */}
+          <div className="rounded-[2rem] border border-slate-100 bg-white shadow-md overflow-hidden">
+            <div className="px-6 py-5 bg-indigo-600 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <TrendingUp size={18} className="text-indigo-200" />
+                <span className="text-xs font-black text-white uppercase tracking-widest">Demandes Heures Supplémentaires</span>
+              </div>
+              <button
+                onClick={() => setShowOtForm(v => !v)}
+                className="flex items-center gap-2 px-3 py-1.5 bg-white/20 hover:bg-white/30 text-white rounded-xl text-[9px] font-black uppercase tracking-widest transition-all"
+              >
+                <Plus size={13} /> Nouvelle demande
+              </button>
+            </div>
+
+            {/* Formulaire */}
+            {showOtForm && (
+              <div className="p-6 border-b border-slate-100 bg-indigo-50/30 space-y-4">
+                <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Nouvelle demande d'heures supplémentaires</p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="md:col-span-2 space-y-1">
+                    <label className="text-[9px] font-black uppercase tracking-widest text-slate-400">Date prévue <span className="text-red-500">*</span></label>
+                    <input type="date" value={otForm.requestedDate}
+                      onChange={e => setOtForm(f => ({ ...f, requestedDate: e.target.value }))}
+                      className="w-full px-4 py-3 bg-white border border-slate-100 rounded-2xl font-bold text-sm focus:ring-2 focus:ring-indigo-500 outline-none" />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[9px] font-black uppercase tracking-widest text-slate-400">Heure début</label>
+                    <input type="time" value={otForm.startTime}
+                      onChange={e => setOtForm(f => ({ ...f, startTime: e.target.value }))}
+                      className="w-full px-4 py-3 bg-white border border-slate-100 rounded-2xl font-bold text-sm focus:ring-2 focus:ring-indigo-500 outline-none" />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[9px] font-black uppercase tracking-widest text-slate-400">Heure fin</label>
+                    <input type="time" value={otForm.endTime}
+                      onChange={e => setOtForm(f => ({ ...f, endTime: e.target.value }))}
+                      className="w-full px-4 py-3 bg-white border border-slate-100 rounded-2xl font-bold text-sm focus:ring-2 focus:ring-indigo-500 outline-none" />
+                  </div>
+                  <div className="md:col-span-2 space-y-1">
+                    <label className="text-[9px] font-black uppercase tracking-widest text-slate-400">Raison / Justification <span className="text-red-500">*</span></label>
+                    <textarea value={otForm.reason}
+                      onChange={e => setOtForm(f => ({ ...f, reason: e.target.value }))}
+                      rows={3}
+                      placeholder="Décrivez la raison de la demande d'heures supplémentaires…"
+                      className="w-full px-4 py-3 bg-white border border-slate-100 rounded-2xl font-medium text-sm focus:ring-2 focus:ring-indigo-500 outline-none resize-none"
+                    />
+                  </div>
+                </div>
+                <div className="flex gap-3">
+                  <button onClick={handleOtSubmit} disabled={otLoading}
+                    className="flex items-center gap-2 px-6 py-3 bg-indigo-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-indigo-700 transition-all disabled:opacity-50">
+                    {otLoading ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+                    Envoyer la demande
+                  </button>
+                  <button onClick={() => setShowOtForm(false)}
+                    className="px-6 py-3 bg-slate-100 text-slate-600 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-slate-200 transition-all">
+                    Annuler
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Liste des demandes */}
+            <div className="p-4 space-y-2">
+              {otRequests.length === 0 ? (
+                <div className="text-center py-8 text-slate-400">
+                  <FileText size={28} className="mx-auto mb-2 text-slate-200" />
+                  <p className="text-xs font-medium">Aucune demande ce mois-ci</p>
+                </div>
+              ) : (
+                otRequests.map(req => {
+                  const cfg = OT_STATUS[req.status] ?? OT_STATUS.PENDING;
+                  return (
+                    <div key={req.id} className="flex items-start justify-between bg-slate-50 rounded-2xl px-4 py-3 gap-3">
+                      <div className="flex items-start gap-3 min-w-0">
+                        <div className="w-9 h-9 bg-white rounded-xl flex items-center justify-center shadow-sm flex-shrink-0">
+                          <Calendar size={14} className="text-indigo-500" />
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-xs font-black text-slate-900 uppercase tracking-tight">
+                            {new Date(req.requestedDate + 'T12:00').toLocaleDateString('fr-FR', { weekday: 'short', day: '2-digit', month: 'short' })}
+                            {req.startTime && <span className="font-medium text-slate-500 ml-2 normal-case">{req.startTime}–{req.endTime}</span>}
+                          </p>
+                          <p className="text-[9px] text-slate-500 font-medium mt-0.5 truncate">{req.reason}</p>
+                          {req.reviewNote && req.status === 'REJECTED' && (
+                            <p className="text-[9px] text-rose-500 font-medium mt-0.5 italic">Motif refus: {req.reviewNote}</p>
+                          )}
+                          {req.status === 'COMPLETED' && req.actualMinutes > 0 && (
+                            <p className="text-[9px] text-emerald-600 font-black mt-0.5">
+                              ✓ {Math.floor(req.actualMinutes/60)}h{req.actualMinutes%60>0?String(req.actualMinutes%60).padStart(2,'0'):''} effectuées
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex-shrink-0">
+                        <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-xl text-[8px] font-black uppercase tracking-widest border ${cfg.color}`}>
+                          {req.status === 'PENDING' && <Clock size={9}/>}
+                          {req.status === 'APPROVED' && <CheckCircle2 size={9}/>}
+                          {req.status === 'REJECTED' && <XCircle size={9}/>}
+                          {req.status === 'COMPLETED' && <Zap size={9}/>}
+                          {cfg.label}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
         </>
       )}
     </div>

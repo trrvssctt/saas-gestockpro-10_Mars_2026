@@ -182,6 +182,7 @@ const HRDashboard: React.FC<HRDashboardProps> = ({ onNavigate }) => {
     { id: 'rh.docs', title: 'Documents', desc: 'Gestion centralisée des documents employés (CNI, Diplômes).', icon: <FolderOpen />, color: 'bg-amber-500' },
     { id: 'rh.leaves', title: 'Congés', desc: 'Gestion des absences, congés payés et planning d\'équipe.', icon: <Calendar />, color: 'bg-emerald-500' },
     { id: 'rh.attendance', title: 'Pointage', desc: 'Suivi des présences, retards et heures d\'arrivée/départ.', icon: <Clock />, color: 'bg-amber-500' },
+    { id: 'rh.overtime', title: 'Heures Supplémentaires', desc: 'Demandes, validation et effectuation des heures supplémentaires.', icon: <TrendingUp />, color: 'bg-indigo-500' },
     { id: 'rh.time-settings', title: 'Paramètres Temps', desc: 'Règles de déduction retard/absence, horaires de référence.', icon: <Settings />, color: 'bg-slate-500' },
     //{ id: 'rh.recruitment', title: 'Recrutement', desc: 'Gestion des offres d\'emploi et suivi des candidats.', icon: <Briefcase />, color: 'bg-rose-500' },
     //{ id: 'rh.training', title: 'Formation', desc: 'Planification des sessions et suivi des compétences.', icon: <GraduationCap />, color: 'bg-cyan-500' },

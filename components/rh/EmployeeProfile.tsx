@@ -34,9 +34,11 @@ import {
   Code,
   Search,
   Filter,
-  BarChart3
+  BarChart3,
+  Loader2
 } from 'lucide-react';
 import { apiClient } from '../../services/api';
+import { uploadFile } from '../../services/uploadService';
 import { authBridge } from '../../services/authBridge';
 import { useToast } from '../ToastProvider';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -150,6 +152,7 @@ const EmployeeProfile: React.FC<EmployeeProfileProps> = ({ employeeId, onNavigat
   const [isGeneratingPayslip, setIsGeneratingPayslip] = useState(false);
   const [payslips, setPayslips] = useState<any[]>([]);
   const [downloadLoading, setDownloadLoading] = useState<string | null>(null);
+  const [dossierLoading, setDossierLoading] = useState(false);
   
   // États pour les filtres de fiches de paie
   const [payslipFilters, setPayslipFilters] = useState({
@@ -185,6 +188,13 @@ const EmployeeProfile: React.FC<EmployeeProfileProps> = ({ employeeId, onNavigat
   // État pour le salaire du mois en cours
   const [currentMonthSalary, setCurrentMonthSalary] = useState<any>(null);
   const [loadingSalary, setLoadingSalary] = useState(false);
+
+  // États pour le pointage
+  const [attendanceHistory, setAttendanceHistory] = useState<any[]>([]);
+  const [attendanceToday, setAttendanceToday] = useState<any | null>(null);
+  const [loadingAttendance, setLoadingAttendance] = useState(false);
+  const [adminClockForm, setAdminClockForm] = useState({ time: '' });
+  const [adminClockLoading, setAdminClockLoading] = useState(false);
   
   // États pour la timeline de carrière
   const resetContractForm = () => {
@@ -248,6 +258,60 @@ const EmployeeProfile: React.FC<EmployeeProfileProps> = ({ employeeId, onNavigat
       category: '',
       file: null
     });
+  };
+
+  // Charger l'historique de pointage de l'employé
+  const loadAttendance = async (empId: string) => {
+    setLoadingAttendance(true);
+    try {
+      const today = new Date().toISOString().split('T')[0];
+      const [history, todayRec] = await Promise.all([
+        apiClient.get(`/hr/attendance?employeeId=${empId}`),
+        apiClient.get(`/hr/attendance?employeeId=${empId}&date=${today}`)
+      ]);
+      const records: any[] = history?.rows || history || [];
+      const todayRecords: any[] = todayRec?.rows || todayRec || [];
+      setAttendanceHistory(records);
+      setAttendanceToday(todayRecords[0] || null);
+    } catch (err) {
+      console.error('Erreur chargement pointage:', err);
+    } finally {
+      setLoadingAttendance(false);
+    }
+  };
+
+  const handleAdminClockIn = async () => {
+    if (!employee) return;
+    setAdminClockLoading(true);
+    try {
+      const today = new Date().toISOString().split('T')[0];
+      const payload: any = { employeeId: employee.id, date: today };
+      if (adminClockForm.time) payload.clockIn = adminClockForm.time;
+      await apiClient.post('/hr/attendance/admin/clock-in', payload);
+      showToast('Arrivée pointée avec succès', 'success');
+      await loadAttendance(employee.id);
+    } catch (err: any) {
+      showToast(err.message || 'Erreur lors du pointage', 'error');
+    } finally {
+      setAdminClockLoading(false);
+    }
+  };
+
+  const handleAdminClockOut = async () => {
+    if (!employee) return;
+    setAdminClockLoading(true);
+    try {
+      const today = new Date().toISOString().split('T')[0];
+      const payload: any = { employeeId: employee.id, date: today };
+      if (adminClockForm.time) payload.clockOut = adminClockForm.time;
+      await apiClient.post('/hr/attendance/admin/clock-out', payload);
+      showToast('Départ pointé avec succès', 'success');
+      await loadAttendance(employee.id);
+    } catch (err: any) {
+      showToast(err.message || 'Erreur lors du pointage', 'error');
+    } finally {
+      setAdminClockLoading(false);
+    }
   };
 
   // Fonction pour calculer le salaire du mois en cours
@@ -503,11 +567,12 @@ const EmployeeProfile: React.FC<EmployeeProfileProps> = ({ employeeId, onNavigat
           }
         }
         
-        // Charger la timeline de carrière et les données enrichies
+        // Charger la timeline de carrière, les données enrichies et le pointage
         if (empRes?.id) {
           loadCareerTimeline(empRes.id);
           loadAdvancesAndPrimes(empRes.id);
           calculateCurrentMonthSalary(empRes.id);
+          loadAttendance(empRes.id);
         }
       } catch (err: any) {
         console.error('Error loading employee profile:', err);
@@ -559,25 +624,11 @@ const EmployeeProfile: React.FC<EmployeeProfileProps> = ({ employeeId, onNavigat
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-
     setIsUploading(true);
-    
-    const cloudinaryData = new FormData();
-    cloudinaryData.append('file', file);
-    cloudinaryData.append('upload_preset', 'ml_default'); 
-    cloudinaryData.append('cloud_name', 'dq7avew9h');
-
     try {
-      const response = await fetch(`https://api.cloudinary.com/v1_1/dq7avew9h/image/upload`, {
-        method: 'POST',
-        body: cloudinaryData
-      });
-      
-      const data = await response.json();
-      if (data.secure_url) {
-        setEditForm(prev => ({ ...prev, photoUrl: data.secure_url }));
-        showToast('Photo téléchargée avec succès', 'success');
-      }
+      const result = await uploadFile(file, 'employees');
+      setEditForm(prev => ({ ...prev, photoUrl: result.url }));
+      showToast('Photo téléchargée avec succès', 'success');
     } catch (err) {
       console.error("Upload Error:", err);
       showToast("Échec de l'envoi de la photo.", 'error');
@@ -879,28 +930,7 @@ const EmployeeProfile: React.FC<EmployeeProfileProps> = ({ employeeId, onNavigat
     setIsUploadingDoc(true);
     
     try {
-      // Tentative d'upload vers Cloudinary avec configuration corrigée
-      const cloudinaryData = new FormData();
-      cloudinaryData.append('file', docForm.file);
-      cloudinaryData.append('upload_preset', 'ml_default');
-      cloudinaryData.append('cloud_name', 'dq7avew9h');
-      cloudinaryData.append('resource_type', 'auto');
-      cloudinaryData.append('folder', 'employee_documents'); // Organisation en dossier
-      cloudinaryData.append('public_id', `doc_${Date.now()}`); // ID unique
-      // Retirer access_mode car non autorisé avec unsigned upload
-
-      const uploadResponse = await fetch(`https://api.cloudinary.com/v1_1/dq7avew9h/upload`, {
-        method: 'POST',
-        body: cloudinaryData
-      });
-      
-      const uploadData = await uploadResponse.json();
-      
-      // Vérifier si l'upload a réussi
-      if (!uploadResponse.ok || !uploadData.secure_url) {
-        console.error('Erreur Cloudinary:', uploadData);
-        throw new Error(`Erreur Cloudinary: ${uploadData.error?.message || 'Upload impossible'}`);
-      }
+      const uploadResult = await uploadFile(docForm.file, 'employee_documents');
 
       // Sauvegarder en base de données
       const payload = {
@@ -908,7 +938,7 @@ const EmployeeProfile: React.FC<EmployeeProfileProps> = ({ employeeId, onNavigat
         name: docForm.name.trim(),
         type: docForm.type,
         category: docForm.category.trim() || null,
-        fileUrl: uploadData.secure_url,
+        fileUrl: uploadResult.url,
         mimeType: docForm.file.type,
         fileSize: docForm.file.size
       };
@@ -1676,12 +1706,247 @@ const EmployeeProfile: React.FC<EmployeeProfileProps> = ({ employeeId, onNavigat
     return numAmount.toLocaleString('fr-FR') + ' ' + currency;
   };
 
+  // ──────────────────────────────────────────────────────────────────────────────
+  // Téléchargement du dossier complet (ZIP)
+  // ──────────────────────────────────────────────────────────────────────────────
+  const handleDownloadDossierComplet = async () => {
+    if (!employee) return;
+    setDossierLoading(true);
+    try {
+      const { default: JSZip } = await import('jszip');
+      const zip = new JSZip();
+
+      const empName = `${employee.firstName}_${employee.lastName}`;
+      const currency = contract?.currency || 'F CFA';
+
+      // ── 1. Fiche identitaire ──────────────────────────────────────────────
+      const dept = departments.find((d: any) => d.id === employee.departmentId)?.name || 'Non spécifié';
+      const profileHtml = `<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8"/>
+<title>Profil - ${employee.firstName} ${employee.lastName}</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f8fafc;color:#1e293b;padding:40px}
+  .card{background:#fff;border-radius:24px;padding:40px;max-width:800px;margin:0 auto;box-shadow:0 4px 24px rgba(0,0,0,.07)}
+  h1{font-size:28px;font-weight:900;color:#0f172a;margin-bottom:4px}
+  .subtitle{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:2px;color:#6366f1;margin-bottom:32px}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:24px}
+  .field label{font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:1.5px;color:#94a3b8;display:block;margin-bottom:4px}
+  .field p{font-size:15px;font-weight:700;color:#1e293b}
+  .section-title{font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:2px;color:#6366f1;border-bottom:2px solid #e0e7ff;padding-bottom:8px;margin:28px 0 16px}
+  .badge{display:inline-block;padding:4px 14px;border-radius:999px;font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:1px}
+  .badge-active{background:#dcfce7;color:#16a34a}
+  .badge-inactive{background:#fee2e2;color:#dc2626}
+  .badge-info{background:#e0e7ff;color:#4338ca}
+  .footer{margin-top:40px;padding-top:20px;border-top:1px solid #e2e8f0;text-align:center;font-size:11px;color:#94a3b8}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>${employee.firstName} ${employee.lastName}</h1>
+  <p class="subtitle">${employee.position || 'Employé'} — ${dept}</p>
+  <p class="section-title">Informations personnelles</p>
+  <div class="grid">
+    <div class="field"><label>Email</label><p>${employee.email || '—'}</p></div>
+    <div class="field"><label>Téléphone</label><p>${employee.phone || '—'}</p></div>
+    <div class="field"><label>Adresse</label><p>${employee.address || '—'}</p></div>
+    <div class="field"><label>Date d'embauche</label><p>${employee.hireDate ? new Date(employee.hireDate).toLocaleDateString('fr-FR',{year:'numeric',month:'long',day:'numeric'}) : '—'}</p></div>
+    <div class="field"><label>Numéro employé</label><p>${employee.employeeNumber || '—'}</p></div>
+    <div class="field"><label>Statut</label><p><span class="badge ${employee.status === 'ACTIVE' ? 'badge-active' : 'badge-inactive'}">${employee.status || '—'}</span></p></div>
+  </div>
+  <p class="section-title">Contrat actif</p>
+  ${contract ? `
+  <div class="grid">
+    <div class="field"><label>Type</label><p><span class="badge badge-info">${contract.type}</span></p></div>
+    <div class="field"><label>Salaire de base</label><p>${formatAmount(contract.salary, currency)}</p></div>
+    <div class="field"><label>Date de début</label><p>${contract.startDate ? new Date(contract.startDate).toLocaleDateString('fr-FR') : '—'}</p></div>
+    <div class="field"><label>Date de fin</label><p>${contract.endDate ? new Date(contract.endDate).toLocaleDateString('fr-FR') : 'Indéterminé'}</p></div>
+  </div>` : '<p style="color:#94a3b8;font-weight:700">Aucun contrat actif</p>'}
+  <p class="section-title">Bulletins de paie (${payslips.length})</p>
+  ${payslips.length > 0 ? `<table style="width:100%;border-collapse:collapse">
+    <thead><tr style="background:#0f172a;color:#fff">
+      <th style="padding:12px 16px;text-align:left;font-size:10px;letter-spacing:1px;border-radius:8px 0 0 0">Mois</th>
+      <th style="padding:12px 16px;text-align:right;font-size:10px;letter-spacing:1px">Net à payer</th>
+      <th style="padding:12px 16px;text-align:center;font-size:10px;letter-spacing:1px;border-radius:0 8px 0 0">Statut</th>
+    </tr></thead>
+    <tbody>${payslips.map(s => `<tr style="border-bottom:1px solid #e2e8f0">
+      <td style="padding:12px 16px;font-weight:700">${new Date(s.month+'-01').toLocaleDateString('fr-FR',{month:'long',year:'numeric'})}</td>
+      <td style="padding:12px 16px;text-align:right;font-weight:900">${formatAmount(s.netSalary, currency)}</td>
+      <td style="padding:12px 16px;text-align:center"><span class="badge ${s.status==='VALIDATED'?'badge-active':'badge-info'}">${s.status||'—'}</span></td>
+    </tr>`).join('')}
+    </tbody>
+  </table>` : '<p style="color:#94a3b8;font-weight:700">Aucun bulletin disponible</p>'}
+  <div class="footer">Généré le ${new Date().toLocaleDateString('fr-FR',{weekday:'long',year:'numeric',month:'long',day:'numeric'})} — GeStockPro ERP</div>
+</div>
+</body></html>`;
+      zip.file(`01_Profil_${empName}.html`, profileHtml);
+
+      // ── 2. Contrat actif ─────────────────────────────────────────────────
+      if (contract) {
+        const contractHtml = `<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8"/>
+<title>Contrat - ${employee.firstName} ${employee.lastName}</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f8fafc;color:#1e293b;padding:40px}
+  .card{background:#0f172a;border-radius:24px;padding:40px;max-width:800px;margin:0 auto}
+  h1{font-size:26px;font-weight:900;color:#fff;margin-bottom:4px}
+  .subtitle{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:2px;color:#6366f1;margin-bottom:32px}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:28px}
+  .field label{font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:1.5px;color:rgba(255,255,255,.4);display:block;margin-bottom:4px}
+  .field p{font-size:15px;font-weight:700;color:#fff}
+  .section-title{font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:2px;color:rgba(255,255,255,.4);border-bottom:1px solid rgba(255,255,255,.1);padding-bottom:8px;margin:24px 0 16px}
+  .badge{display:inline-block;padding:5px 16px;border-radius:999px;font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:1px}
+  .badge-active{background:#dcfce7;color:#16a34a}
+  .salary{font-size:36px;font-weight:900;color:#fff;margin:8px 0}
+  .footer{margin-top:40px;padding-top:20px;border-top:1px solid rgba(255,255,255,.1);text-align:center;font-size:11px;color:rgba(255,255,255,.3)}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>Contrat de travail</h1>
+  <p class="subtitle">${employee.firstName} ${employee.lastName} — <span class="badge badge-active">${contract.status}</span></p>
+  <p class="section-title">Informations du contrat</p>
+  <div class="grid">
+    <div class="field"><label>Type de contrat</label><p>${contract.type}</p></div>
+    <div class="field"><label>Date de début</label><p>${contract.startDate ? new Date(contract.startDate).toLocaleDateString('fr-FR',{year:'numeric',month:'long',day:'numeric'}) : '—'}</p></div>
+    <div class="field"><label>Date de fin</label><p>${contract.endDate ? new Date(contract.endDate).toLocaleDateString('fr-FR',{year:'numeric',month:'long',day:'numeric'}) : 'Durée indéterminée'}</p></div>
+    ${contract.trialPeriodEnd ? `<div class="field"><label>Fin période d'essai</label><p>${new Date(contract.trialPeriodEnd).toLocaleDateString('fr-FR',{year:'numeric',month:'long',day:'numeric'})}</p></div>` : ''}
+  </div>
+  <p class="section-title">Rémunération</p>
+  <p class="salary">${formatAmount(contract.salary, currency)}</p>
+  <p style="color:rgba(255,255,255,.4);font-size:12px;font-weight:700">${currency} / mois brut</p>
+  ${contract.reason ? `<p class="section-title">Motif / Notes</p><p style="color:rgba(255,255,255,.7);font-size:14px;line-height:1.6">${contract.reason}</p>` : ''}
+  <div class="footer">Document généré le ${new Date().toLocaleDateString('fr-FR',{weekday:'long',year:'numeric',month:'long',day:'numeric'})} — GeStockPro ERP</div>
+</div>
+</body></html>`;
+        zip.file(`02_Contrat_${empName}.html`, contractHtml);
+      }
+
+      // ── 3. Bulletins de paie ─────────────────────────────────────────────
+      if (payslips.length > 0 && contract) {
+        const bulletinsFolder = zip.folder('03_Bulletins');
+        const baseSalary = parseFloat(contract.salary) || 0;
+
+        for (const slip of payslips) {
+          try {
+            const [monthStr, yearStr] = slip.month.split('-');
+            const month = parseInt(monthStr);
+            const year = parseInt(yearStr);
+            const monthLabel = String(month).padStart(2, '0');
+
+            const monthPrimes = primes.filter((p: any) => {
+              const pd = new Date(p.createdAt);
+              return pd.getMonth() + 1 === month && pd.getFullYear() === year && p.status === 'APPROVED';
+            });
+            const totalPrimes = monthPrimes.reduce((s: number, p: any) => s + (p.amount || 0), 0);
+            const monthStart = new Date(year, month - 1, 1);
+            const monthEnd = new Date(year, month, 0);
+            const activeAdvances = advances.filter((a: any) => {
+              if (a.status !== 'APPROVED') return false;
+              const sd = new Date(a.createdAt);
+              const ed = new Date(sd);
+              ed.setMonth(ed.getMonth() + (a.months || 1));
+              return sd <= monthEnd && ed >= monthStart;
+            });
+            const totalAdvDeductions = activeAdvances.reduce((s: number, a: any) => s + (a.amount || 0), 0);
+            const grossSalary = baseSalary + totalPrimes;
+            const socialEmp = Math.round(grossSalary * 0.22 * 100) / 100;
+            const netSalary = Math.round((grossSalary - socialEmp - totalAdvDeductions) * 100) / 100;
+
+            const salaryCalc = {
+              baseSalary: Math.round(baseSalary * 100) / 100,
+              grossSalary: Math.round(grossSalary * 100) / 100,
+              netSalary,
+              totalPrimes: Math.round(totalPrimes * 100) / 100,
+              socialChargesEmployee: socialEmp,
+              socialChargesEmployer: Math.round(grossSalary * 0.18 * 100) / 100,
+              totalAdvanceDeductions: Math.round(totalAdvDeductions * 100) / 100,
+              currency
+            };
+
+            // Rendre le composant PayslipPreview
+            const container = document.createElement('div');
+            container.style.cssText = 'position:absolute;left:-10000px;top:-10000px';
+            document.body.appendChild(container);
+            const root = createRoot(container);
+            root.render(React.createElement(PayslipPreview, { employee, contract, tenant, salaryCalculation: salaryCalc, month, year }));
+            await new Promise(r => setTimeout(r, 120));
+            const slipHtml = `<!DOCTYPE html>
+<html lang="fr"><head><meta charset="UTF-8"/><title>Bulletin ${monthLabel}/${year}</title>
+<style>body{margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;}${getPayslipStyles()}</style>
+</head><body>${container.innerHTML}</body></html>`;
+            root.unmount();
+            document.body.removeChild(container);
+
+            bulletinsFolder?.file(`Bulletin_${monthLabel}_${year}.html`, slipHtml);
+          } catch (slipErr) {
+            console.warn('Erreur bulletin', slip.month, slipErr);
+          }
+        }
+      }
+
+      // ── 4. Documents uploadés ────────────────────────────────────────────
+      if (documents.length > 0) {
+        const docsFolder = zip.folder('04_Documents');
+        for (const doc of documents) {
+          if (!doc.fileUrl) continue;
+          try {
+            const response = await fetch(doc.fileUrl);
+            if (!response.ok) continue;
+            const arrayBuffer = await response.arrayBuffer();
+            const ext = doc.fileUrl.split('.').pop()?.split('?')[0] || 'bin';
+            const safeName = (doc.name || doc.type || 'document').replace(/[^a-z0-9_\-]/gi, '_');
+            docsFolder?.file(`${safeName}.${ext}`, arrayBuffer);
+          } catch {
+            // Ignorer les erreurs de fetch (CORS, etc.)
+          }
+        }
+      }
+
+      // ── 5. README ────────────────────────────────────────────────────────
+      zip.file('README.txt', `DOSSIER COMPLET — ${employee.firstName.toUpperCase()} ${employee.lastName.toUpperCase()}
+Généré le ${new Date().toLocaleDateString('fr-FR', { weekday:'long', year:'numeric', month:'long', day:'numeric' })}
+
+Contenu du dossier :
+  01_Profil_${empName}.html     — Fiche identitaire complète
+  02_Contrat_${empName}.html    — Contrat de travail actif
+  03_Bulletins/                 — Bulletins de paie (${payslips.length} bulletin${payslips.length > 1 ? 's' : ''})
+  04_Documents/                 — Documents RH uploadés (${documents.length} fichier${documents.length > 1 ? 's' : ''})
+
+Ouvrir les fichiers .html dans un navigateur pour afficher ou imprimer en PDF.
+GeStockPro ERP — Tous droits réservés`);
+
+      // ── 6. Générer et télécharger le ZIP ─────────────────────────────────
+      const zipBlob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 } });
+      const url = window.URL.createObjectURL(zipBlob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `Dossier_${empName}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+      showToast('Dossier complet téléchargé avec succès', 'success');
+    } catch (err: any) {
+      console.error('Erreur dossier complet:', err);
+      showToast(`Erreur lors de la génération du dossier: ${err.message}`, 'error');
+    } finally {
+      setDossierLoading(false);
+    }
+  };
+
   const tabs = [
     { id: 'general', label: 'Général', icon: <UserCheck size={16} /> },
     { id: 'contracts', label: 'Contrats', icon: <FileText size={16} /> },
     { id: 'history', label: 'Historique', icon: <History size={16} /> },
     { id: 'documents', label: 'Documents', icon: <FolderOpen size={16} /> },
     { id: 'payroll', label: 'Paie', icon: <CreditCard size={16} /> },
+    { id: 'attendance', label: 'Pointage', icon: <Clock size={16} /> },
     { id: 'performance', label: 'Performance', icon: <Activity size={16} /> },
   ];
 
@@ -1763,8 +2028,13 @@ const EmployeeProfile: React.FC<EmployeeProfileProps> = ({ employeeId, onNavigat
           </div>
         </div>
         <div className="flex items-center gap-3">
-          <button className="px-6 py-3 bg-white border border-slate-100 text-slate-900 rounded-2xl font-black text-[10px] uppercase tracking-widest flex items-center gap-2 hover:bg-slate-50 transition-all shadow-sm">
-            <Download size={16} /> Dossier Complet
+          <button
+            onClick={handleDownloadDossierComplet}
+            disabled={dossierLoading}
+            className="px-6 py-3 bg-white border border-slate-100 text-slate-900 rounded-2xl font-black text-[10px] uppercase tracking-widest flex items-center gap-2 hover:bg-slate-50 transition-all shadow-sm disabled:opacity-60 disabled:cursor-not-allowed"
+          >
+            {dossierLoading ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
+            {dossierLoading ? 'Génération...' : 'Dossier Complet'}
           </button>
           <button 
             onClick={() => { 
@@ -1881,7 +2151,7 @@ const EmployeeProfile: React.FC<EmployeeProfileProps> = ({ employeeId, onNavigat
         {tabs.map(tab => (
           <button
             key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
+            onClick={() => { setActiveTab(tab.id); if ((tab.id === 'attendance' || tab.id === 'performance') && employee?.id) loadAttendance(employee.id); }}
             className={`px-3 sm:px-6 py-2.5 sm:py-3 rounded-full font-black text-[9px] sm:text-[10px] uppercase tracking-widest transition-all flex items-center gap-1.5 sm:gap-2 whitespace-nowrap flex-shrink-0 ${activeTab === tab.id ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
           >
             {tab.icon} {tab.label}
@@ -1977,184 +2247,506 @@ const EmployeeProfile: React.FC<EmployeeProfileProps> = ({ employeeId, onNavigat
                   )}
                 </div>
 
-                {/* Section Statut de Présence */}
+                {/* Section Statut de Présence — lié au pointage du jour + congés */}
                 <div className="bg-white p-5 md:p-10 rounded-[2rem] md:rounded-[3rem] border border-slate-100 shadow-sm">
                   <h3 className="text-lg font-black text-slate-900 uppercase tracking-tighter mb-8 flex items-center gap-3">
                     <Clock className="text-blue-500" /> Statut de Présence
                   </h3>
-                  {(() => {
+                  {loadingAttendance ? (
+                    <div className="flex items-center justify-center h-20"><Loader2 size={22} className="animate-spin text-indigo-400"/></div>
+                  ) : (() => {
+                    const today = new Date().toISOString().split('T')[0];
                     const presenceStatus = getEmployeePresenceStatus(employee.id);
-                    return (
-                      <div className={`p-6 rounded-2xl ${presenceStatus.isPresent ? 'bg-emerald-50 border border-emerald-200' : 'bg-red-50 border border-red-200'}`}>
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-4">
-                            <div className={`w-4 h-4 rounded-full ${presenceStatus.isPresent ? 'bg-emerald-500 animate-pulse' : 'bg-red-500'}`}></div>
-                            <div>
-                              <h4 className={`text-lg font-black uppercase tracking-tighter ${presenceStatus.isPresent ? 'text-emerald-700' : 'text-red-700'}`}>
-                                {presenceStatus.isPresent ? 'Employé Présent' : 'Employé Absent'}
-                              </h4>
-                              <p className={`text-sm font-medium ${presenceStatus.isPresent ? 'text-emerald-600' : 'text-red-600'}`}>
-                                {presenceStatus.isPresent ? 
-                                  'Disponible pour les tâches et réunions' : 
-                                  `En ${presenceStatus.leaveType === 'SICK' ? 'arrêt maladie' : 
-                                         presenceStatus.leaveType === 'PAID' ? 'congé payé' :
-                                         presenceStatus.leaveType === 'MATERNITY' ? 'congé maternité/paternité' :
-                                         presenceStatus.leaveType === 'UNPAID' ? 'congé sans solde' : 'absence'}`
-                                }
-                              </p>
+
+                    // Priorité 1 : congé approuvé en cours
+                    if (!presenceStatus.isPresent && presenceStatus.leave) {
+                      const leaveLabel = presenceStatus.leaveType === 'SICK' ? 'Arrêt maladie'
+                        : presenceStatus.leaveType === 'PAID' ? 'Congé payé'
+                        : presenceStatus.leaveType === 'MATERNITY' ? 'Congé maternité/paternité'
+                        : presenceStatus.leaveType === 'UNPAID' ? 'Congé sans solde'
+                        : 'Absence autorisée';
+                      const start = new Date(presenceStatus.leave.startDate);
+                      const end   = new Date(presenceStatus.leave.endDate);
+                      const diffDays = Math.ceil(Math.abs(end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+                      return (
+                        <div className="p-6 rounded-2xl bg-amber-50 border border-amber-200 space-y-4">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-4">
+                              <div className="w-4 h-4 rounded-full bg-amber-400"/>
+                              <div>
+                                <h4 className="text-lg font-black uppercase tracking-tighter text-amber-800">{leaveLabel}</h4>
+                                <p className="text-sm font-medium text-amber-600">Retour prévu le {new Date(presenceStatus.leaveEndDate!).toLocaleDateString('fr-FR', { weekday:'long', day:'numeric', month:'long' })}</p>
+                              </div>
+                            </div>
+                            <span className="px-3 py-1 bg-amber-200 text-amber-800 text-[9px] font-black uppercase rounded-full">{diffDays} j</span>
+                          </div>
+                          {presenceStatus.leave.reason && <p className="text-xs text-amber-700 font-medium border-t border-amber-200 pt-3">Motif : {presenceStatus.leave.reason}</p>}
+                        </div>
+                      );
+                    }
+
+                    // Priorité 2 : pointage du jour (section attendance)
+                    if (attendanceToday) {
+                      const clockIn  = attendanceToday.clockIn  ? new Date(attendanceToday.clockIn).toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'})  : null;
+                      const clockOut = attendanceToday.clockOut ? new Date(attendanceToday.clockOut).toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'}) : null;
+                      const isLate   = attendanceToday.status === 'LATE';
+                      const isAbsent = attendanceToday.status === 'ABSENT';
+                      const isWorking = clockIn && !clockOut;
+
+                      if (isAbsent) {
+                        return (
+                          <div className="p-6 rounded-2xl bg-rose-50 border border-rose-200">
+                            <div className="flex items-center gap-4">
+                              <div className="w-4 h-4 rounded-full bg-rose-500"/>
+                              <div>
+                                <h4 className="text-lg font-black uppercase tracking-tighter text-rose-700">Absent aujourd'hui</h4>
+                                <p className="text-sm font-medium text-rose-500">Aucune présence enregistrée pour {today}</p>
+                              </div>
                             </div>
                           </div>
-                          {!presenceStatus.isPresent && presenceStatus.leaveEndDate && (
-                            <div className="text-right">
-                              <p className="text-xs font-black text-red-500 uppercase tracking-widest">Retour prévu</p>
-                              <p className="text-sm font-bold text-red-700">
-                                {new Date(presenceStatus.leaveEndDate).toLocaleDateString('fr-FR', {
-                                  weekday: 'long',
-                                  year: 'numeric',
-                                  month: 'long',
-                                  day: 'numeric'
-                                })}
-                              </p>
-                            </div>
-                          )}
-                        </div>
-                        
-                        {!presenceStatus.isPresent && presenceStatus.leave && (
-                          <div className="mt-4 pt-4 border-t border-red-200">
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 text-sm">
+                        );
+                      }
+
+                      return (
+                        <div className={`p-6 rounded-2xl space-y-4 ${isLate ? 'bg-amber-50 border border-amber-200' : 'bg-emerald-50 border border-emerald-200'}`}>
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-4">
+                              <div className={`w-4 h-4 rounded-full ${isWorking ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'}`}/>
                               <div>
-                                <p className="text-xs font-black text-red-500 uppercase tracking-widest">Début du congé</p>
-                                <p className="font-bold text-red-700">
-                                  {new Date(presenceStatus.leave.startDate).toLocaleDateString('fr-FR')}
-                                </p>
-                              </div>
-                              <div>
-                                <p className="text-xs font-black text-red-500 uppercase tracking-widest">Durée</p>
-                                <p className="font-bold text-red-700">
-                                  {(() => {
-                                    const start = new Date(presenceStatus.leave.startDate);
-                                    const end = new Date(presenceStatus.leave.endDate);
-                                    const diffTime = Math.abs(end.getTime() - start.getTime());
-                                    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
-                                    return `${diffDays} jour${diffDays > 1 ? 's' : ''}`;
-                                  })()}
+                                <h4 className={`text-lg font-black uppercase tracking-tighter ${isLate ? 'text-amber-800' : 'text-emerald-800'}`}>
+                                  {isWorking ? (isLate ? 'En service — arrivée tardive' : 'En service') : 'Journée terminée'}
+                                </h4>
+                                <p className={`text-sm font-medium ${isLate ? 'text-amber-600' : 'text-emerald-600'}`}>
+                                  {clockIn ? `Arrivée : ${clockIn}` : ''}
+                                  {clockOut ? ` · Départ : ${clockOut}` : ''}
                                 </p>
                               </div>
                             </div>
-                            {presenceStatus.leave.reason && (
-                              <div className="mt-3">
-                                <p className="text-xs font-black text-red-500 uppercase tracking-widest">Motif</p>
-                                <p className="font-medium text-red-700">{presenceStatus.leave.reason}</p>
-                              </div>
+                            {attendanceToday.overtimeMinutes > 0 && (
+                              <span className="px-3 py-1 bg-indigo-100 text-indigo-700 text-[9px] font-black uppercase rounded-full">
+                                +{Math.floor(attendanceToday.overtimeMinutes/60)}h{attendanceToday.overtimeMinutes%60 > 0 ? (attendanceToday.overtimeMinutes%60)+'m' : ''} supp.
+                              </span>
                             )}
                           </div>
-                        )}
+                          {isLate && attendanceToday.meta?.lateMinutes > 0 && (
+                            <p className="text-xs text-amber-700 font-medium border-t border-amber-200 pt-3">Retard enregistré : {attendanceToday.meta.lateMinutes} min</p>
+                          )}
+                        </div>
+                      );
+                    }
+
+                    // Priorité 3 : pas de pointage aujourd'hui, pas de congé → absent par défaut
+                    return (
+                      <div className="p-6 rounded-2xl bg-slate-50 border border-slate-200">
+                        <div className="flex items-center gap-4">
+                          <div className="w-4 h-4 rounded-full bg-slate-300"/>
+                          <div>
+                            <h4 className="text-lg font-black uppercase tracking-tighter text-slate-600">Pas encore pointé</h4>
+                            <p className="text-sm font-medium text-slate-400">Aucun pointage enregistré pour aujourd'hui</p>
+                          </div>
+                        </div>
                       </div>
                     );
                   })()}
                 </div>
 
+                {/* KPI & Performance — calculés depuis l'historique de pointage */}
                 <div className="bg-white p-5 md:p-10 rounded-[2rem] md:rounded-[3rem] border border-slate-100 shadow-sm">
                   <h3 className="text-lg font-black text-slate-900 uppercase tracking-tighter mb-8 flex items-center gap-3">
                     <TrendingUp className="text-emerald-500" /> KPI & Performance Visuelle
                   </h3>
-                  <div className="grid sm:grid-cols-3 gap-8">
-                    <div className="text-center p-6 bg-slate-50 rounded-[2rem]">
-                      <p className="text-3xl font-black text-slate-900 mb-1">92%</p>
-                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Productivité</p>
-                    </div>
-                    <div className="text-center p-6 bg-slate-50 rounded-[2rem]">
-                      <p className="text-3xl font-black text-slate-900 mb-1">4.8/5</p>
-                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Feedback Team</p>
-                    </div>
-                    <div className="text-center p-6 bg-slate-50 rounded-[2rem]">
-                      <p className="text-3xl font-black text-slate-900 mb-1">0</p>
-                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Absences Non Just.</p>
-                    </div>
-                  </div>
+                  {loadingAttendance ? (
+                    <div className="flex items-center justify-center h-20"><Loader2 size={22} className="animate-spin text-indigo-400"/></div>
+                  ) : (() => {
+                    const workRecords   = attendanceHistory.filter(r => ['PRESENT','LATE','ABSENT','HALF_DAY'].includes(r.status));
+                    const totalDays     = workRecords.length;
+                    const presentDays   = workRecords.filter(r => r.status === 'PRESENT').length;
+                    const lateDays      = workRecords.filter(r => r.status === 'LATE').length;
+                    const absentDays    = workRecords.filter(r => r.status === 'ABSENT').length;
+                    const halfDays      = workRecords.filter(r => r.status === 'HALF_DAY').length;
+                    const totalOTMin    = attendanceHistory.reduce((s,r) => s + (r.overtimeMinutes || 0), 0);
+                    const assiduiteScore  = totalDays > 0 ? Math.round(((presentDays + lateDays + halfDays * 0.5) / totalDays) * 100) : 0;
+                    const ponctualiteScore = (presentDays + lateDays) > 0 ? Math.round((presentDays / (presentDays + lateDays)) * 100) : 100;
+                    const otBonus  = Math.min(10, Math.round(totalOTMin / 60));
+                    const rawScore = totalDays > 0 ? Math.min(100, Math.round(assiduiteScore * 0.5 + ponctualiteScore * 0.4 + otBonus)) : null;
+                    const grade    = rawScore === null ? '—' : rawScore >= 95 ? 'A+' : rawScore >= 88 ? 'A' : rawScore >= 78 ? 'B+' : rawScore >= 65 ? 'B' : rawScore >= 50 ? 'C' : 'D';
+                    const gradeColor = rawScore === null ? 'text-slate-400' : rawScore >= 88 ? 'text-emerald-500' : rawScore >= 65 ? 'text-indigo-500' : rawScore >= 50 ? 'text-amber-500' : 'text-rose-500';
+                    const otHours  = Math.floor(totalOTMin / 60);
+                    const otMinRem = totalOTMin % 60;
+
+                    if (totalDays === 0) {
+                      return <p className="text-sm text-slate-400 font-medium text-center py-6">Aucun historique de pointage — les KPI seront disponibles après les premiers enregistrements.</p>;
+                    }
+                    return (
+                      <div className="grid sm:grid-cols-3 gap-6">
+                        <div className="p-6 bg-slate-50 rounded-[2rem] space-y-2">
+                          <p className={`text-3xl font-black ${assiduiteScore >= 90 ? 'text-emerald-600' : assiduiteScore >= 70 ? 'text-indigo-600' : assiduiteScore >= 50 ? 'text-amber-500' : 'text-rose-500'}`}>{assiduiteScore}%</p>
+                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Assiduité</p>
+                          <p className="text-[9px] text-slate-400">{presentDays + lateDays} j travaillés / {totalDays}</p>
+                          <div className="h-1.5 bg-slate-200 rounded-full overflow-hidden mt-1">
+                            <div className={`h-full rounded-full ${assiduiteScore >= 90 ? 'bg-emerald-500' : assiduiteScore >= 70 ? 'bg-indigo-500' : assiduiteScore >= 50 ? 'bg-amber-500' : 'bg-rose-500'}`} style={{width:`${assiduiteScore}%`}}/>
+                          </div>
+                        </div>
+                        <div className="p-6 bg-slate-50 rounded-[2rem] space-y-2">
+                          <p className={`text-3xl font-black ${gradeColor}`}>{grade}</p>
+                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Score Global</p>
+                          <p className="text-[9px] text-slate-400">{rawScore ?? '—'}/100 · {ponctualiteScore}% ponctualité</p>
+                          <div className="h-1.5 bg-slate-200 rounded-full overflow-hidden mt-1">
+                            <div className={`h-full rounded-full ${gradeColor.replace('text-','bg-')}`} style={{width:`${rawScore ?? 0}%`}}/>
+                          </div>
+                        </div>
+                        <div className="p-6 bg-slate-50 rounded-[2rem] space-y-2">
+                          <p className={`text-3xl font-black ${absentDays === 0 ? 'text-emerald-600' : absentDays <= 2 ? 'text-amber-500' : 'text-rose-500'}`}>{absentDays}</p>
+                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Absences non just.</p>
+                          <p className="text-[9px] text-slate-400">{otHours > 0 ? `${otHours}h${otMinRem > 0 ? otMinRem+'m' : ''} heures supp.` : 'Aucune heure supp.'}</p>
+                          <div className="h-1.5 bg-slate-200 rounded-full overflow-hidden mt-1">
+                            <div className={`h-full rounded-full ${absentDays === 0 ? 'bg-emerald-500' : absentDays <= 2 ? 'bg-amber-500' : 'bg-rose-500'}`} style={{width:`${Math.min(100,(absentDays/Math.max(totalDays,1))*100*3)}%`}}/>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </div>
               </div>
 
               <div className="space-y-8">
+                {/* Temps & Présence — données réelles */}
                 <div className="bg-slate-900 p-5 md:p-10 rounded-[2rem] md:rounded-[3rem] text-white relative overflow-hidden">
                   <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-500/10 blur-2xl rounded-full"></div>
                   <h3 className="text-sm font-black uppercase tracking-widest mb-8 flex items-center gap-3">
                     <Clock className="text-indigo-400" /> Temps & Présence
                   </h3>
-                  <div className="space-y-6 relative z-10">
-                    <div className="flex justify-between items-center">
-                      <span className="text-xs font-bold text-slate-400">Congés Restants</span>
-                      <span className="text-lg font-black text-white">18.5 Jours</span>
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <span className="text-xs font-bold text-slate-400">Heures Sup. (Mois)</span>
-                      <span className="text-lg font-black text-emerald-400">+4.5h</span>
-                    </div>
-                    <div className="pt-4">
-                      <button className="w-full py-4 bg-white/10 hover:bg-white/20 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all border border-white/10">
-                        Consulter Planning
-                      </button>
-                    </div>
-                  </div>
+                  {(() => {
+                    const today = new Date().toISOString().split('T')[0];
+                    // Congés approuvés futurs ou en cours
+                    const upcomingLeaves = leaves.filter(l =>
+                      String(l.employeeId) === String(employee.id) &&
+                      l.status === 'APPROVED' &&
+                      l.endDate >= today
+                    );
+                    const totalLeaveDays = upcomingLeaves.reduce((sum, l) => {
+                      const s = new Date(l.startDate), e = new Date(l.endDate);
+                      return sum + Math.ceil(Math.abs(e.getTime() - s.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+                    }, 0);
+                    // Heures sup du mois courant
+                    const currentMonth = new Date().toISOString().substring(0, 7);
+                    const monthOTMin = attendanceHistory
+                      .filter(r => (r.date || r.createdAt || '').substring(0, 7) === currentMonth)
+                      .reduce((s, r) => s + (r.overtimeMinutes || 0), 0);
+                    const otH = Math.floor(monthOTMin / 60);
+                    const otM = monthOTMin % 60;
+                    // Absences ce mois
+                    const monthAbsences = attendanceHistory.filter(r =>
+                      (r.date || r.createdAt || '').substring(0, 7) === currentMonth &&
+                      r.status === 'ABSENT'
+                    ).length;
+                    return (
+                      <div className="space-y-5 relative z-10">
+                        <div className="flex justify-between items-center">
+                          <span className="text-xs font-bold text-slate-400">Congés approuvés</span>
+                          <span className={`text-lg font-black ${totalLeaveDays > 0 ? 'text-amber-400' : 'text-white'}`}>
+                            {totalLeaveDays > 0 ? `${totalLeaveDays} j` : '— '}
+                          </span>
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className="text-xs font-bold text-slate-400">Heures supp. (mois)</span>
+                          <span className={`text-lg font-black ${monthOTMin > 0 ? 'text-emerald-400' : 'text-slate-500'}`}>
+                            {monthOTMin > 0 ? `+${otH}h${otM > 0 ? otM+'m' : ''}` : '0h'}
+                          </span>
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className="text-xs font-bold text-slate-400">Absences (mois)</span>
+                          <span className={`text-lg font-black ${monthAbsences > 0 ? 'text-rose-400' : 'text-emerald-400'}`}>
+                            {monthAbsences > 0 ? `${monthAbsences} j` : '0'}
+                          </span>
+                        </div>
+                        <div className="pt-2">
+                          <button
+                            onClick={() => { setActiveTab('attendance'); if (employee?.id) loadAttendance(employee.id); }}
+                            className="w-full py-3 bg-white/10 hover:bg-white/20 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all border border-white/10"
+                          >
+                            Voir le pointage complet
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </div>
 
+                {/* Alertes & Rappels — enrichies */}
                 <div className="bg-white p-5 md:p-10 rounded-[2rem] md:rounded-[3rem] border border-slate-100 shadow-sm">
-                  <h3 className="text-sm font-black text-slate-900 uppercase tracking-widest mb-8 flex items-center gap-3">
+                  <h3 className="text-sm font-black text-slate-900 uppercase tracking-widest mb-6 flex items-center gap-3">
                     <AlertCircle className="text-amber-500" /> Alertes & Rappels
                   </h3>
-                  <div className="space-y-4">
-                    {/* Contract expiration alerts */}
-                    {expiringContracts.filter(c => c.employee_id === employee.id).map((c, i) => (
-                      <div key={i} className="flex items-start gap-4 p-4 bg-red-50 rounded-2xl border border-red-100">
-                        <AlertCircle className="text-red-500 shrink-0" size={18} />
-                        <p className="text-xs font-medium text-red-800">
-                          Contrat {c.type} expire le {new Date(c.end_date).toLocaleDateString('fr-FR')}
-                        </p>
-                      </div>
-                    ))}
-                    
-                    {/* Trial period alert */}
-                    {contract?.trialPeriodEnd && new Date(contract.trialPeriodEnd) > new Date() && (
-                      <div className="flex items-start gap-4 p-4 bg-amber-50 rounded-2xl border border-amber-100">
-                        <AlertCircle className="text-amber-500 shrink-0" size={18} />
-                        <p className="text-xs font-medium text-amber-800">
-                          La période d'essai se termine le {new Date(contract.trialPeriodEnd).toLocaleDateString('fr-FR')}
-                        </p>
-                      </div>
-                    )}
-                    
-                    {/* Default alert if no contract */}
-                    {!contract && (
-                      <div className="flex items-start gap-4 p-4 bg-blue-50 rounded-2xl border border-blue-100">
-                        <Calendar className="text-blue-500 shrink-0" size={18} />
-                        <p className="text-xs font-medium text-blue-800">Aucun contrat actif pour cet employé.</p>
-                      </div>
-                    )}
-                  </div>
+                  {(() => {
+                    const today = new Date().toISOString().split('T')[0];
+                    const alerts: React.ReactNode[] = [];
+
+                    // 1. Contrat expirant bientôt
+                    expiringContracts.filter(c => c.employee_id === employee.id).forEach((c, i) => {
+                      const daysLeft = Math.ceil((new Date(c.end_date).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+                      alerts.push(
+                        <div key={`exp-${i}`} className="flex items-start gap-3 p-4 bg-rose-50 rounded-2xl border border-rose-100">
+                          <AlertCircle className="text-rose-500 shrink-0 mt-0.5" size={16} />
+                          <div>
+                            <p className="text-xs font-black text-rose-800 uppercase">Contrat {c.type} expire dans {daysLeft} j</p>
+                            <p className="text-[10px] text-rose-500 font-medium">{new Date(c.end_date).toLocaleDateString('fr-FR')}</p>
+                          </div>
+                        </div>
+                      );
+                    });
+
+                    // 2. Période d'essai en cours
+                    if (contract?.trialPeriodEnd && new Date(contract.trialPeriodEnd) > new Date()) {
+                      const daysLeft = Math.ceil((new Date(contract.trialPeriodEnd).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+                      alerts.push(
+                        <div key="trial" className="flex items-start gap-3 p-4 bg-amber-50 rounded-2xl border border-amber-100">
+                          <AlertCircle className="text-amber-500 shrink-0 mt-0.5" size={16} />
+                          <div>
+                            <p className="text-xs font-black text-amber-800 uppercase">Période d'essai — {daysLeft} j restants</p>
+                            <p className="text-[10px] text-amber-600 font-medium">Fin le {new Date(contract.trialPeriodEnd).toLocaleDateString('fr-FR')}</p>
+                          </div>
+                        </div>
+                      );
+                    }
+
+                    // 3. Congé approuvé à venir (dans les 7 prochains jours)
+                    leaves.filter(l =>
+                      String(l.employeeId) === String(employee.id) &&
+                      l.status === 'APPROVED' &&
+                      l.startDate >= today &&
+                      Math.ceil((new Date(l.startDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24)) <= 7
+                    ).forEach((l, i) => {
+                      const daysUntil = Math.ceil((new Date(l.startDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+                      const typeLabel = l.type === 'PAID' ? 'Congé payé' : l.type === 'SICK' ? 'Arrêt maladie' : l.type === 'MATERNITY' ? 'Maternité/Paternité' : 'Congé';
+                      alerts.push(
+                        <div key={`leave-${i}`} className="flex items-start gap-3 p-4 bg-sky-50 rounded-2xl border border-sky-100">
+                          <Calendar className="text-sky-500 shrink-0 mt-0.5" size={16} />
+                          <div>
+                            <p className="text-xs font-black text-sky-800 uppercase">{typeLabel} dans {daysUntil === 0 ? 'aujourd\'hui' : `${daysUntil} j`}</p>
+                            <p className="text-[10px] text-sky-500 font-medium">Du {new Date(l.startDate).toLocaleDateString('fr-FR')} au {new Date(l.endDate).toLocaleDateString('fr-FR')}</p>
+                          </div>
+                        </div>
+                      );
+                    });
+
+                    // 4. Avances en attente de validation
+                    const pendingAdvances = advances.filter(a => a.status === 'PENDING');
+                    if (pendingAdvances.length > 0) {
+                      alerts.push(
+                        <div key="adv" className="flex items-start gap-3 p-4 bg-violet-50 rounded-2xl border border-violet-100">
+                          <CreditCard className="text-violet-500 shrink-0 mt-0.5" size={16} />
+                          <div>
+                            <p className="text-xs font-black text-violet-800 uppercase">{pendingAdvances.length} avance{pendingAdvances.length > 1 ? 's' : ''} en attente</p>
+                            <p className="text-[10px] text-violet-500 font-medium">À valider dans la section Paie</p>
+                          </div>
+                        </div>
+                      );
+                    }
+
+                    // 5. Absentéisme élevé ce mois
+                    const currentMonth = new Date().toISOString().substring(0, 7);
+                    const monthAbsences = attendanceHistory.filter(r =>
+                      (r.date || r.createdAt || '').substring(0, 7) === currentMonth && r.status === 'ABSENT'
+                    ).length;
+                    if (monthAbsences >= 3) {
+                      alerts.push(
+                        <div key="abs" className="flex items-start gap-3 p-4 bg-rose-50 rounded-2xl border border-rose-100">
+                          <UserX className="text-rose-500 shrink-0 mt-0.5" size={16} />
+                          <div>
+                            <p className="text-xs font-black text-rose-800 uppercase">{monthAbsences} absences ce mois</p>
+                            <p className="text-[10px] text-rose-500 font-medium">Suivi recommandé — voir onglet Performance</p>
+                          </div>
+                        </div>
+                      );
+                    }
+
+                    // 6. Pas de contrat actif
+                    if (!contract) {
+                      alerts.push(
+                        <div key="nocontract" className="flex items-start gap-3 p-4 bg-blue-50 rounded-2xl border border-blue-100">
+                          <FileText className="text-blue-500 shrink-0 mt-0.5" size={16} />
+                          <p className="text-xs font-medium text-blue-800">Aucun contrat actif pour cet employé.</p>
+                        </div>
+                      );
+                    }
+
+                    if (alerts.length === 0) {
+                      return (
+                        <div className="flex items-center gap-3 p-4 bg-emerald-50 rounded-2xl border border-emerald-100">
+                          <CheckCircle2 className="text-emerald-500 shrink-0" size={16} />
+                          <p className="text-xs font-medium text-emerald-800">Aucune alerte — situation normale.</p>
+                        </div>
+                      );
+                    }
+                    return <div className="space-y-3">{alerts}</div>;
+                  })()}
                 </div>
               </div>
             </div>
           )}
 
           {activeTab === 'contracts' && (
-            <div className="bg-white p-5 md:p-10 rounded-[2rem] md:rounded-[3rem] border border-slate-100 shadow-sm">
-              <div className="flex items-center justify-between mb-10">
-                <h3 className="text-lg font-black text-slate-900 uppercase tracking-tighter flex items-center gap-3">
-                  <FileText className="text-indigo-500" /> Gestion du Contrat
-                </h3>
+            <div className="space-y-8">
+
+              {/* ── En-tête ── */}
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-xl font-black text-slate-900 uppercase tracking-tighter flex items-center gap-3">
+                    <FileText className="text-indigo-500" size={22} /> Gestion du Contrat
+                  </h3>
+                  <p className="text-xs text-slate-400 font-medium mt-1">Contrat de travail · {employee.firstName} {employee.lastName}</p>
+                </div>
                 {!contract && (
-                  <button 
-                    onClick={() => {
-                      resetContractForm();
-                      setIsContractModalOpen(true);
-                    }}
+                  <button
+                    onClick={() => { resetContractForm(); setIsContractModalOpen(true); }}
                     className="px-6 py-3 bg-slate-900 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest flex items-center gap-2 hover:bg-indigo-600 transition-all shadow-xl active:scale-95"
                   >
                     <Plus size={16} /> Créer Contrat
                   </button>
                 )}
               </div>
-              
+
+              {/* ── Carte contrat actif ── */}
+              {contract ? (
+                <div className="space-y-6">
+
+                  {/* Bandeau statut */}
+                  <div className={`rounded-[2.5rem] overflow-hidden shadow-xl ${
+                    contract.status === 'ACTIVE'     ? 'bg-gradient-to-br from-slate-900 to-indigo-950' :
+                    contract.status === 'SUSPENDED'  ? 'bg-gradient-to-br from-amber-900 to-amber-800'  :
+                                                       'bg-gradient-to-br from-rose-900 to-rose-800'
+                  }`}>
+                    {/* Header carte */}
+                    <div className="px-6 md:px-10 pt-8 pb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                      <div className="flex items-center gap-5">
+                        <div className={`w-16 h-16 rounded-[1.5rem] flex items-center justify-center shadow-lg ${
+                          contract.status === 'ACTIVE' ? 'bg-indigo-500' :
+                          contract.status === 'SUSPENDED' ? 'bg-amber-500' : 'bg-rose-500'
+                        }`}>
+                          <Briefcase size={28} className="text-white" />
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-3">
+                            <span className="text-2xl font-black text-white tracking-tighter">{contract.contractType || contract.type || 'N/A'}</span>
+                            <span className={`px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest ${
+                              contract.status === 'ACTIVE'    ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' :
+                              contract.status === 'SUSPENDED' ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'     :
+                                                                'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+                            }`}>
+                              {contract.status === 'ACTIVE' ? '● Actif' : contract.status === 'SUSPENDED' ? '⏸ Suspendu' : '✕ Résilié'}
+                            </span>
+                          </div>
+                          <p className="text-[10px] font-bold text-white/50 uppercase tracking-widest mt-1">Contrat de travail</p>
+                        </div>
+                      </div>
+                      {/* Salaire */}
+                      {contract.salary && (
+                        <div className="text-right">
+                          <p className="text-[9px] font-black text-white/40 uppercase tracking-widest">Salaire de base</p>
+                          <p className="text-2xl font-black text-white">{formatAmount(contract.salary, contract.currency)}</p>
+                          <p className="text-[9px] text-white/40 font-medium">{contract.currency || 'F CFA'} / mois</p>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Grille dates */}
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-px bg-white/5 border-t border-white/10">
+                      {[
+                        { label: 'Date de début', value: contract.startDate ? new Date(contract.startDate).toLocaleDateString('fr-FR') : '—' },
+                        { label: 'Date de fin',   value: contract.endDate   ? new Date(contract.endDate).toLocaleDateString('fr-FR')   : 'Indéterminée' },
+                        { label: 'Durée',         value: contract.startDate && contract.endDate ? calculateContractDuration(contract.startDate, contract.endDate) : contract.startDate ? `Depuis ${new Date(contract.startDate).toLocaleDateString('fr-FR', {month:'short',year:'numeric'})}` : '—' },
+                        { label: "Fin d'essai",   value: contract.trialPeriodEnd ? new Date(contract.trialPeriodEnd).toLocaleDateString('fr-FR') : 'N/A' },
+                      ].map((item, i) => (
+                        <div key={i} className="px-6 py-5 bg-white/5">
+                          <p className="text-[9px] font-black text-white/40 uppercase tracking-widest mb-1">{item.label}</p>
+                          <p className="text-sm font-black text-white">{item.value}</p>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Période d'essai en cours */}
+                    {contract.trialPeriodEnd && new Date(contract.trialPeriodEnd) > new Date() && (
+                      <div className="mx-6 md:mx-10 mb-6 mt-4 p-4 bg-amber-500/10 border border-amber-500/20 rounded-2xl flex items-center gap-3">
+                        <Clock size={16} className="text-amber-400 shrink-0" />
+                        <p className="text-xs font-bold text-amber-300">
+                          Période d'essai en cours — se termine le {new Date(contract.trialPeriodEnd).toLocaleDateString('fr-FR')} ({Math.ceil((new Date(contract.trialPeriodEnd).getTime() - Date.now()) / (1000 * 60 * 60 * 24))} jours restants)
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Détails suspension / résiliation */}
+                    {(contract.status === 'SUSPENDED' || contract.status === 'TERMINATED') && (
+                      <div className={`mx-6 md:mx-10 mb-6 mt-4 p-5 rounded-2xl border ${contract.status === 'SUSPENDED' ? 'bg-amber-500/10 border-amber-500/20' : 'bg-rose-500/10 border-rose-500/20'}`}>
+                        <p className={`text-[9px] font-black uppercase tracking-widest mb-2 ${contract.status === 'SUSPENDED' ? 'text-amber-400' : 'text-rose-400'}`}>
+                          {contract.status === 'SUSPENDED' ? 'Motif de suspension' : 'Motif de résiliation'}
+                        </p>
+                        <p className="text-sm font-medium text-white/80">
+                          {contract.status === 'SUSPENDED' ? contract.suspensionReason : contract.terminationReason || '—'}
+                        </p>
+                        {(contract.suspensionDate || contract.terminationDate) && (
+                          <p className={`text-[10px] font-bold mt-2 ${contract.status === 'SUSPENDED' ? 'text-amber-400' : 'text-rose-400'}`}>
+                            Le {new Date(contract.suspensionDate || contract.terminationDate).toLocaleDateString('fr-FR')}
+                          </p>
+                        )}
+                      </div>
+                    )}
+
+                  </div>
+
+                  {/* ── Barre d'actions — en dehors de la carte sombre ── */}
+                  <div className="flex flex-wrap items-center gap-3 pt-2">
+                    {contract.status === 'ACTIVE' && (
+                      <>
+                        <button
+                          onClick={() => { resetSuspensionForm(); setSelectedContract(contract); setIsSuspendModalOpen(true); }}
+                          className="flex items-center gap-2 px-5 py-3 bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all active:scale-95"
+                        >
+                          <Clock size={14}/> Suspendre
+                        </button>
+                        <button
+                          onClick={() => { resetTerminationForm(); setSelectedContract(contract); setIsTerminateModalOpen(true); }}
+                          className="flex items-center gap-2 px-5 py-3 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all active:scale-95"
+                        >
+                          <X size={14}/> Résilier
+                        </button>
+                      </>
+                    )}
+                    {contract.status === 'SUSPENDED' && (
+                      <button
+                        onClick={() => handleReactivateContract(contract.id)}
+                        className="flex items-center gap-2 px-5 py-3 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all active:scale-95"
+                      >
+                        <CheckCircle2 size={14}/> Réactiver
+                      </button>
+                    )}
+                    <button className="flex items-center gap-2 px-5 py-3 bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-200 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all active:scale-95 ml-auto">
+                      <Download size={14}/> Exporter
+                    </button>
+                  </div>
+
+                </div>
+              ) : (
+                /* ── Aucun contrat ── */
+                <div className="bg-white rounded-[2rem] border-2 border-dashed border-slate-200 p-12 flex flex-col items-center text-center gap-6">
+                  <div className="w-20 h-20 bg-slate-50 rounded-[2rem] flex items-center justify-center">
+                    <FileText size={36} className="text-slate-300" />
+                  </div>
+                  <div>
+                    <p className="text-lg font-black text-slate-900 uppercase tracking-tighter mb-2">Aucun contrat actif</p>
+                    <p className="text-sm text-slate-400 font-medium">Créez le premier contrat de travail pour cet employé.</p>
+                  </div>
+                  <button
+                    onClick={() => { resetContractForm(); setIsContractModalOpen(true); }}
+                    className="px-8 py-3 bg-slate-900 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest flex items-center gap-2 hover:bg-indigo-600 transition-all shadow-xl active:scale-95"
+                  >
+                    <Plus size={16} /> Créer le contrat
+                  </button>
+                </div>
+              )}
+
+              {/* ── Modals (inchangés) ── */}
+              <div className="hidden">
               {/* Contract Modal */}
               <HRModal 
                 isOpen={isContractModalOpen} 
@@ -2528,26 +3120,73 @@ const EmployeeProfile: React.FC<EmployeeProfileProps> = ({ employeeId, onNavigat
                 </div>
               </HRModal>
             </div>
+          </div>
           )}
 
           {activeTab === 'history' && (
-            <div className="bg-white p-5 md:p-10 rounded-[2rem] md:rounded-[3rem] border border-slate-100 shadow-sm">
-              <div className="flex items-center justify-between mb-10">
-                <h3 className="text-lg font-black text-slate-900 uppercase tracking-tighter flex items-center gap-3">
-                  <History className="text-indigo-500" /> Timeline Carrière
-                </h3>
-                <button 
+            <div className="space-y-8">
+
+              {/* ── En-tête ── */}
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-xl font-black text-slate-900 uppercase tracking-tighter flex items-center gap-3">
+                    <History className="text-indigo-500" size={22}/> Timeline Carrière
+                  </h3>
+                  <p className="text-xs text-slate-400 font-medium mt-1">Historique complet · contrats, primes, avances</p>
+                </div>
+                <button
                   onClick={() => employee?.id && loadCareerTimeline(employee.id)}
                   disabled={loadingTimeline}
-                  className="px-6 py-3 bg-slate-900 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest flex items-center gap-2 hover:bg-indigo-600 transition-all shadow-xl active:scale-95 disabled:opacity-50"
+                  className="flex items-center gap-2 px-5 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all active:scale-95 disabled:opacity-50"
                 >
-                  {loadingTimeline ? (
-                    <><RefreshCw className="animate-spin" size={16} /> Actualisation...</>
-                  ) : (
-                    <><RefreshCw size={16} /> Actualiser Timeline</>
-                  )}
+                  <RefreshCw size={14} className={loadingTimeline ? 'animate-spin' : ''}/>
+                  {loadingTimeline ? 'Actualisation...' : 'Actualiser'}
                 </button>
               </div>
+
+              {/* ── Salaire du mois en cours ── */}
+              <div className="bg-slate-900 rounded-[2.5rem] overflow-hidden shadow-xl">
+                <div className="px-6 md:px-10 pt-8 pb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-white/10">
+                  <div>
+                    <p className="text-[9px] font-black text-white/40 uppercase tracking-widest mb-1">Salaire calculé</p>
+                    <h4 className="text-base font-black text-white uppercase tracking-tight flex items-center gap-2">
+                      <CreditCard size={16} className="text-indigo-400"/>
+                      {new Date().toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })}
+                    </h4>
+                  </div>
+                  {loadingSalary ? (
+                    <div className="flex items-center gap-2 text-white/50">
+                      <Loader2 size={16} className="animate-spin"/> <span className="text-xs font-bold">Calcul...</span>
+                    </div>
+                  ) : currentMonthSalary ? (
+                    <p className="text-3xl font-black text-white">{formatAmount(currentMonthSalary.netSalary, currentMonthSalary.currency)} <span className="text-sm font-bold text-white/40">net</span></p>
+                  ) : (
+                    <p className="text-sm font-bold text-white/30">{contract ? 'Calcul indisponible' : 'Aucun contrat actif'}</p>
+                  )}
+                </div>
+
+                {currentMonthSalary && (
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-px bg-white/5">
+                    {[
+                      { label: 'Salaire de base',          value: formatAmount(currentMonthSalary.baseSalary, currentMonthSalary.currency),  color: 'text-white' },
+                      { label: `Primes (${currentMonthSalary.primesCount})`,   value: `+${formatAmount(currentMonthSalary.totalPrimes, currentMonthSalary.currency)}`,  color: 'text-emerald-400' },
+                      { label: `Avances (${currentMonthSalary.advancesCount})`, value: `-${formatAmount(currentMonthSalary.totalAdvances, currentMonthSalary.currency)}`, color: 'text-rose-400' },
+                      { label: 'Charges sociales',         value: `-${formatAmount(currentMonthSalary.socialChargesEmployee, currentMonthSalary.currency)}`, color: 'text-amber-400' },
+                    ].map((item, i) => (
+                      <div key={i} className="px-6 py-5 bg-white/5">
+                        <p className="text-[9px] font-black text-white/40 uppercase tracking-widest mb-1">{item.label}</p>
+                        <p className={`text-sm font-black ${item.color}`}>{item.value}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* ── Timeline des événements ── */}
+              <div className="bg-white rounded-[2rem] border border-slate-100 shadow-sm p-5 md:p-10">
+                <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-8 border-b border-slate-50 pb-4">
+                  Historique des événements
+                </h4>
               
               {/* Salaire du Mois En Cours */}
               <div className="mb-10 p-8 bg-gradient-to-r from-indigo-50 to-blue-50 rounded-[2.5rem] border border-indigo-100">
@@ -2638,270 +3277,162 @@ const EmployeeProfile: React.FC<EmployeeProfileProps> = ({ employeeId, onNavigat
               </div>
               
               {loadingTimeline ? (
-                <div className="flex items-center justify-center py-20">
-                  <div className="flex items-center gap-3 text-slate-500">
-                    <RefreshCw className="animate-spin" size={20} />
-                    <span className="font-medium">Chargement de l'historique...</span>
-                  </div>
+                <div className="flex items-center justify-center py-16">
+                  <Loader2 size={28} className="animate-spin text-indigo-400 mr-3"/>
+                  <span className="text-sm font-bold text-slate-400">Chargement de l'historique...</span>
                 </div>
               ) : careerTimeline.length > 0 ? (
-                <div className="relative space-y-8 before:absolute before:left-8 before:top-2 before:bottom-2 before:w-0.5 before:bg-slate-100">
-                  {careerTimeline.map((event: any) => {
-                    // Icônes selon le type d'événement
-                    const getEventIcon = (type: string) => {
-                      switch (type) {
-                        case 'CONTRACT_START':
-                          return event.isRenewal ? 
-                            <RefreshCw className="text-emerald-500" /> : 
-                            <FileText className="text-indigo-500" />;
-                        case 'CONTRACT_MODIFICATION':
-                          return <Edit3 className="text-blue-500" />;
-                        case 'CONTRACT_END':
-                          return <Clock className="text-slate-500" />;
-                        case 'CONTRACT_TERMINATED':
-                          return <X className="text-red-500" />;
-                        case 'CONTRACT_SUSPENDED':
-                          return <AlertCircle className="text-amber-500" />;
+                <div className="relative">
+                  {/* Ligne verticale */}
+                  <div className="absolute left-[22px] top-3 bottom-3 w-px bg-slate-100"/>
+
+                  <div className="space-y-4">
+                  {careerTimeline.map((event: any, idx: number) => {
+                    const isContract = (event.type || '').startsWith('CONTRACT');
+                    const isAdvance  = event.type === 'ADVANCE';
+                    const isPrime    = event.type === 'PRIME';
+
+                    // Couleur du nœud
+                    const nodeStyle = (() => {
+                      if (isAdvance) return { dot: 'bg-blue-500',   ring: 'ring-blue-100',   icon: <CreditCard size={12} className="text-white"/>, card: 'border-blue-100 bg-blue-50/50' };
+                      if (isPrime)   return { dot: 'bg-emerald-500', ring: 'ring-emerald-100', icon: <TrendingUp size={12} className="text-white"/>, card: 'border-emerald-100 bg-emerald-50/50' };
+                      switch (event.type) {
+                        case 'CONTRACT_START':      return { dot: 'bg-indigo-600', ring: 'ring-indigo-100',  icon: <FileText size={12} className="text-white"/>,    card: 'border-indigo-100 bg-indigo-50/50' };
                         case 'CONTRACT_RENEWED':
-                          return <RefreshCw className="text-emerald-500" />;
-                        case 'ADVANCE':
-                          return <CreditCard className="text-blue-600" />;
-                        case 'PRIME':
-                          return <TrendingUp className="text-emerald-600" />;
-                        default:
-                          return <FileText className="text-slate-500" />;
+                        case 'CONTRACT_MODIFICATION': return { dot: 'bg-sky-500',    ring: 'ring-sky-100',    icon: <RefreshCw size={12} className="text-white"/>, card: 'border-sky-100 bg-sky-50/50' };
+                        case 'CONTRACT_SUSPENDED':  return { dot: 'bg-amber-500',   ring: 'ring-amber-100',  icon: <AlertCircle size={12} className="text-white"/>, card: 'border-amber-100 bg-amber-50/50' };
+                        case 'CONTRACT_TERMINATED': return { dot: 'bg-rose-500',    ring: 'ring-rose-100',   icon: <X size={12} className="text-white"/>,          card: 'border-rose-100 bg-rose-50/50' };
+                        default:                    return { dot: 'bg-slate-400',   ring: 'ring-slate-100',  icon: <FileText size={12} className="text-white"/>,    card: 'border-slate-100 bg-slate-50' };
                       }
-                    };
-                    
-                    // Couleurs selon le type d'événement  
-                    const getEventColor = (type: string) => {
-                      switch (type) {
-                        case 'CONTRACT_START':
-                          return event.isRenewal ? 'border-emerald-200 bg-emerald-50' : 'border-indigo-200 bg-indigo-50';
-                        case 'CONTRACT_MODIFICATION':
-                          return 'border-blue-200 bg-blue-50';
-                        case 'CONTRACT_TERMINATED':
-                          return 'border-red-200 bg-red-50';
-                        case 'CONTRACT_SUSPENDED':
-                          return 'border-amber-200 bg-amber-50';
-                        case 'CONTRACT_RENEWED':
-                          return 'border-emerald-200 bg-emerald-50';
-                        case 'ADVANCE':
-                          return 'border-blue-200 bg-blue-50';
-                        case 'PRIME':
-                          return 'border-emerald-200 bg-emerald-50';
-                        default:
-                          return 'border-slate-200 bg-slate-50';
+                    })();
+
+                    // Badge statut
+                    const statusBadge = (() => {
+                      if (isAdvance) {
+                        const s = event.status;
+                        return s === 'APPROVED' ? { label: 'Approuvée',  cls: 'bg-emerald-100 text-emerald-700' }
+                             : s === 'REJECTED' ? { label: 'Refusée',    cls: 'bg-rose-100 text-rose-700' }
+                             :                    { label: 'En attente', cls: 'bg-amber-100 text-amber-700' };
                       }
-                    };
-                    
+                      if (isPrime) {
+                        const typeLabel: Record<string, string> = {
+                          PERFORMANCE: 'Performance', EXCEPTIONAL: 'Exceptionnelle',
+                          ANNUAL_BONUS: 'Annuelle', PROJECT_BONUS: 'Projet',
+                        };
+                        return { label: typeLabel[event.primeType] || event.primeType || 'Prime', cls: 'bg-emerald-100 text-emerald-700' };
+                      }
+                      if (isContract) {
+                        const s = event.status;
+                        return s === 'ACTIVE'     ? { label: 'Actif',    cls: 'bg-emerald-100 text-emerald-700' }
+                             : s === 'TERMINATED' ? { label: 'Résilié',  cls: 'bg-rose-100 text-rose-700' }
+                             : s === 'SUSPENDED'  ? { label: 'Suspendu', cls: 'bg-amber-100 text-amber-700' }
+                             :                     { label: s || '—',    cls: 'bg-slate-100 text-slate-600' };
+                      }
+                      return null;
+                    })();
+
                     return (
-                      <div key={event.id} className="relative pl-20">
-                        <div className={`absolute left-0 w-16 h-16 border-4 rounded-2xl flex items-center justify-center shadow-sm z-10 ${getEventColor(event.type)}`}>
-                          {getEventIcon(event.type)}
+                      <div key={event.id || idx} className="relative flex gap-5 pl-0">
+                        {/* Nœud timeline */}
+                        <div className={`relative z-10 mt-4 w-11 h-11 shrink-0 rounded-2xl ${nodeStyle.dot} ring-4 ${nodeStyle.ring} flex items-center justify-center shadow-sm`}>
+                          {nodeStyle.icon}
                         </div>
-                        <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100">
-                          <div className="flex items-start justify-between mb-3">
-                            <div>
-                              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">
-                                {new Date(event.date).toLocaleDateString('fr-FR', { 
-                                  day: '2-digit', 
-                                  month: 'long', 
-                                  year: 'numeric' 
-                                })}
+
+                        {/* Carte événement */}
+                        <div className={`flex-1 p-5 rounded-[1.5rem] border ${nodeStyle.card} mb-1`}>
+                          <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
+                            <div className="flex-1 min-w-0">
+                              {/* Date */}
+                              <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">
+                                {new Date(event.date).toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' })}
                               </p>
-                              <h4 className="text-lg font-black text-slate-900 uppercase tracking-tight">
+                              {/* Titre */}
+                              <p className="text-sm font-black text-slate-900 uppercase tracking-tight leading-tight">
                                 {event.title}
-                              </h4>
+                              </p>
+                              {/* Description */}
+                              {event.description && (
+                                <p className="text-xs text-slate-500 font-medium mt-1 leading-relaxed">{event.description}</p>
+                              )}
+                              {/* Badges */}
+                              <div className="flex flex-wrap gap-2 mt-3">
+                                {isContract && event.contractType && (
+                                  <span className={`px-2.5 py-1 rounded-full text-[9px] font-black uppercase tracking-widest ${
+                                    event.contractType === 'CDI'   ? 'bg-indigo-100 text-indigo-700' :
+                                    event.contractType === 'CDD'   ? 'bg-blue-100 text-blue-700'    :
+                                    event.contractType === 'STAGE' ? 'bg-purple-100 text-purple-700' :
+                                                                     'bg-slate-100 text-slate-600'
+                                  }`}>{event.contractType}</span>
+                                )}
+                                {statusBadge && (
+                                  <span className={`px-2.5 py-1 rounded-full text-[9px] font-black uppercase tracking-widest ${statusBadge.cls}`}>
+                                    {statusBadge.label}
+                                  </span>
+                                )}
+                                {isAdvance && event.months > 1 && (
+                                  <span className="px-2.5 py-1 rounded-full text-[9px] font-black uppercase tracking-widest bg-slate-100 text-slate-600">
+                                    {event.months} mois
+                                  </span>
+                                )}
+                                {isPrime && event.details?.isPaid && (
+                                  <span className="px-2.5 py-1 rounded-full text-[9px] font-black uppercase tracking-widest bg-emerald-100 text-emerald-700">
+                                    Payée
+                                  </span>
+                                )}
+                                {isContract && event.isRenewal && (
+                                  <span className="px-2.5 py-1 rounded-full text-[9px] font-black uppercase tracking-widest bg-sky-100 text-sky-700">
+                                    Renouvellement
+                                  </span>
+                                )}
+                              </div>
+                              {/* Raison refus avance */}
+                              {isAdvance && event.details?.rejectionReason && (
+                                <p className="mt-2 text-[10px] text-rose-600 font-bold italic">Motif refus : {event.details.rejectionReason}</p>
+                              )}
                             </div>
-                            {/* Affichage du montant selon le type d'événement */}
-                            {(event.salary || event.amount) && (
-                              <div className="text-right">
-                                <p className="text-xs font-bold text-slate-500 uppercase">
-                                  {event.type === 'ADVANCE' ? 'Montant Avance' :
-                                   event.type === 'PRIME' ? 'Montant Prime' :
-                                   'Salaire'}
+
+                            {/* Montant */}
+                            {(event.amount || event.salary) && (
+                              <div className="text-right shrink-0">
+                                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-0.5">
+                                  {isAdvance ? 'Avance / mois' : isPrime ? 'Prime' : 'Salaire'}
                                 </p>
-                                <p className="text-sm font-black text-indigo-600">
+                                <p className={`text-base font-black ${isAdvance ? 'text-blue-700' : isPrime ? 'text-emerald-700' : 'text-slate-900'}`}>
                                   {formatAmount(event.amount || event.salary, event.currency)}
                                 </p>
-                                {event.type === 'ADVANCE' && event.months > 1 && (
-                                  <p className="text-xs text-slate-500 font-medium">
-                                    {event.months} mois • Total: {formatAmount(event.amount * event.months, event.currency)}
+                                {isAdvance && event.months > 1 && (
+                                  <p className="text-[9px] text-slate-400 font-bold">
+                                    Total : {formatAmount(event.amount * event.months, event.currency)}
                                   </p>
                                 )}
                               </div>
                             )}
                           </div>
-                          <p className="text-sm text-slate-600 font-medium leading-relaxed mb-3">
-                            {event.description}
-                          </p>
-                          
-                          {/* Informations additionnelles selon le type */}
-                          <div className="flex items-center gap-4 text-xs flex-wrap">
-                            {/* Affichage pour les contrats */}
-                            {event.type.startsWith('CONTRACT') && (
-                              <>
-                                <span className={`px-3 py-1 rounded-full font-bold uppercase tracking-wide ${
-                                  event.contractType === 'CDI' ? 'bg-emerald-100 text-emerald-700' :
-                                  event.contractType === 'CDD' ? 'bg-blue-100 text-blue-700' :
-                                  event.contractType === 'STAGE' ? 'bg-purple-100 text-purple-700' :
-                                  'bg-slate-100 text-slate-700'
-                                }`}>
-                                  {event.contractType || 'N/A'}
-                                </span>
-                                <span className={`px-3 py-1 rounded-full font-bold uppercase tracking-wide ${
-                                  event.status === 'ACTIVE' ? 'bg-emerald-100 text-emerald-700' :
-                                  event.status === 'TERMINATED' ? 'bg-red-100 text-red-700' :
-                                  event.status === 'SUSPENDED' ? 'bg-amber-100 text-amber-700' :
-                                  event.status === 'RENEWED' ? 'bg-indigo-100 text-indigo-700' :
-                                  'bg-slate-100 text-slate-700'
-                                }`}>
-                                  {event.status === 'ACTIVE' ? 'Actif' :
-                                   event.status === 'TERMINATED' ? 'Résilié' :
-                                   event.status === 'SUSPENDED' ? 'Suspendu' :
-                                   event.status === 'RENEWED' ? 'Renouvelé' :
-                                   event.status || 'N/A'}
-                                </span>
-                                {event.isRenewal && (
-                                  <span className="px-3 py-1 rounded-full bg-emerald-100 text-emerald-700 font-bold uppercase tracking-wide">
-                                    ✨ Renouvellement
-                                  </span>
-                                )}
-                              </>
-                            )}
-                            
-                            {/* Affichage pour les avances */}
-                            {event.type === 'ADVANCE' && (
-                              <>
-                                <span className={`px-3 py-1 rounded-full font-bold uppercase tracking-wide ${
-                                  event.status === 'APPROVED' ? 'bg-emerald-100 text-emerald-700' :
-                                  event.status === 'REJECTED' ? 'bg-red-100 text-red-700' :
-                                  'bg-amber-100 text-amber-700'
-                                }`}>
-                                  {event.status === 'APPROVED' ? '✓ Approuvée' :
-                                   event.status === 'REJECTED' ? '✗ Refusée' :
-                                   '⏳ En attente'}
-                                </span>
-                                <span className="px-3 py-1 rounded-full bg-blue-100 text-blue-700 font-bold uppercase tracking-wide">
-                                  💰 Avance sur salaire
-                                </span>
-                                {event.months > 1 && (
-                                  <span className="px-3 py-1 rounded-full bg-slate-100 text-slate-700 font-bold uppercase tracking-wide">
-                                    📅 {event.months} mois
-                                  </span>
-                                )}
-                              </>
-                            )}
-                            
-                            {/* Affichage pour les primes */}
-                            {event.type === 'PRIME' && (
-                              <>
-                                <span className="px-3 py-1 rounded-full bg-emerald-100 text-emerald-700 font-bold uppercase tracking-wide">
-                                  🎉 Prime accordée
-                                </span>
-                                <span className={`px-3 py-1 rounded-full font-bold uppercase tracking-wide ${
-                                  event.primeType === 'PERFORMANCE' ? 'bg-indigo-100 text-indigo-700' :
-                                  event.primeType === 'EXCEPTIONAL' ? 'bg-purple-100 text-purple-700' :
-                                  event.primeType === 'ANNUAL_BONUS' ? 'bg-orange-100 text-orange-700' :
-                                  event.primeType === 'PROJECT_BONUS' ? 'bg-cyan-100 text-cyan-700' :
-                                  'bg-slate-100 text-slate-700'
-                                }`}>
-                                  {event.primeType === 'PERFORMANCE' ? '⭐ Performance' :
-                                   event.primeType === 'EXCEPTIONAL' ? '🏆 Exceptionnelle' :
-                                   event.primeType === 'ANNUAL_BONUS' ? '📅 Annuelle' :
-                                   event.primeType === 'PROJECT_BONUS' ? '🚀 Projet' :
-                                   event.primeType}
-                                </span>
-                                {event.details?.isPaid && (
-                                  <span className="px-3 py-1 rounded-full bg-emerald-100 text-emerald-700 font-bold uppercase tracking-wide">
-                                    ✅ Payée
-                                  </span>
-                                )}
-                              </>
-                            )}
-                          </div>
-                          
-                          {/* Détails complémentaires */}
-                          {event.type === 'ADVANCE' && event.details?.rejectionReason && (
-                            <div className="mt-4 p-3 bg-red-50 rounded-xl border border-red-100">
-                              <p className="text-xs font-bold text-red-700 mb-1 uppercase">Raison du refus</p>
-                              <p className="text-sm text-red-800 font-medium">{event.details.rejectionReason}</p>
-                            </div>
-                          )}
-                          
-                          {event.type === 'PRIME' && event.details?.payrollMonth && (
-                            <div className="mt-4 p-3 bg-emerald-50 rounded-xl border border-emerald-100">
-                              <p className="text-xs font-bold text-emerald-700 mb-1 uppercase">Mois de paie</p>
-                              <p className="text-sm text-emerald-800 font-medium">{event.details.payrollMonth}</p>
-                            </div>
-                          )}
-                          
-                          {/* Raison du renouvellement si applicable */}
-                          {event.renewalReason && (
-                            <div className="mt-4 p-3 bg-white rounded-xl border border-emerald-100">
-                              <p className="text-xs font-bold text-emerald-700 mb-1 uppercase">Raison du renouvellement</p>
-                              <p className="text-sm text-emerald-800 font-medium">{event.renewalReason}</p>
-                            </div>
-                          )}
-                          
-                          {/* Détails des modifications si applicable */}
-                          {event.isModification && event.changes && (
-                            <div className="mt-4 p-4 bg-white rounded-xl border border-blue-100">
-                              <p className="text-xs font-bold text-blue-700 mb-3 uppercase">Changements effectués</p>
-                              <div className="space-y-2">
-                                {event.changes.map((change: any, idx: number) => (
-                                  <div key={idx} className="flex items-center gap-3 text-xs">
-                                    <span className="font-medium text-slate-700 min-w-20">
-                                      {change.field === 'type' ? 'Type' :
-                                       change.field === 'salary' ? 'Salaire' :
-                                       change.field === 'startDate' ? 'Début' :
-                                       change.field === 'endDate' ? 'Fin' :
-                                       change.field === 'workLocation' ? 'Lieu' :
-                                       change.field}:
-                                    </span>
-                                    <div className="flex items-center gap-2 flex-1">
-                                      <span className="px-2 py-1 bg-red-100 text-red-700 rounded font-medium">
-                                        {change.oldValue || 'Non défini'}
-                                      </span>
-                                      <span>→</span>
-                                      <span className="px-2 py-1 bg-green-100 text-green-700 rounded font-medium">
-                                        {change.newValue || 'Non défini'}
-                                      </span>
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
-                              {event.modifiedBy && (
-                                <p className="text-xs text-slate-500 mt-3 italic">
-                                  Modifié par: {event.modifiedBy}
-                                </p>
-                              )}
-                            </div>
-                          )}
                         </div>
                       </div>
                     );
                   })}
+                  </div>
                 </div>
               ) : (
-                <div className="text-center py-20">
-                  <div className="w-20 h-20 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-6">
-                    <History className="text-slate-400" size={32} />
+                <div className="flex flex-col items-center gap-4 py-16 text-center">
+                  <div className="w-16 h-16 bg-slate-50 rounded-[1.5rem] flex items-center justify-center">
+                    <History size={28} className="text-slate-300"/>
                   </div>
-                  <h4 className="text-lg font-bold text-slate-700 mb-2">Aucun historique disponible</h4>
-                  <p className="text-slate-500 max-w-md mx-auto">
-                    L'historique des contrats et renouvellements apparaîtra ici une fois que des données seront disponibles.
-                  </p>
-                  <button 
+                  <div>
+                    <p className="text-sm font-black text-slate-700 uppercase tracking-tight mb-1">Aucun historique disponible</p>
+                    <p className="text-xs text-slate-400 font-medium">Les événements apparaîtront ici au fur et à mesure.</p>
+                  </div>
+                  <button
                     onClick={() => employee?.id && loadCareerTimeline(employee.id)}
-                    className="mt-6 px-6 py-3 bg-indigo-600 text-white rounded-2xl font-bold text-sm hover:bg-indigo-700 transition-all"
+                    className="flex items-center gap-2 px-5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all"
                   >
-                    Actualiser
+                    <RefreshCw size={13}/> Actualiser
                   </button>
                 </div>
               )}
             </div>
+          </div>
           )}
 
           {activeTab === 'documents' && (
@@ -3362,22 +3893,7 @@ const EmployeeProfile: React.FC<EmployeeProfileProps> = ({ employeeId, onNavigat
                     <CreditCard className="text-indigo-500" /> Historique des Bulletins
                   </h3>
                   <div className="flex items-center gap-3">
-                    <button 
-                      onClick={handleGeneratePayslip}
-                      disabled={isGeneratingPayslip || !hasActiveContract}
-                      className={`px-6 py-3 rounded-2xl font-black text-[10px] uppercase tracking-widest flex items-center gap-2 shadow-xl active:scale-95 transition-all ${
-                        hasActiveContract && !isGeneratingPayslip 
-                          ? 'bg-slate-900 text-white hover:bg-indigo-600' 
-                          : 'bg-slate-200 text-slate-400 cursor-not-allowed'
-                      }`}
-                      title={!hasActiveContract ? 'Aucun contrat actif - Impossible de générer une fiche de paie' : ''}
-                    >
-                      {isGeneratingPayslip ? (
-                        <><RefreshCw size={14} className="animate-spin" /> Génération...</>
-                      ) : (
-                        <><FileText size={14} /> Générer Fiche du Mois{!hasActiveContract && ' (Inactif)'}</>
-                      )}
-                    </button>
+                    
                     <select className="bg-slate-50 border-none rounded-xl font-black text-[10px] uppercase tracking-widest text-slate-600 px-4 py-2 focus:ring-2 focus:ring-indigo-500">
                       <option>Année 2026</option>
                       <option>Année 2025</option>
@@ -3488,75 +4004,57 @@ const EmployeeProfile: React.FC<EmployeeProfileProps> = ({ employeeId, onNavigat
                           </p>
                         </div>
                       </div>
-                      <div className="flex items-center gap-6">
+                      <div className="flex items-center gap-3">
                         <span className={`text-[10px] font-black uppercase tracking-widest px-3 py-1 rounded-full ${
-                          slip.status === 'PAID' ? 'text-emerald-500 bg-emerald-50' : 
-                          slip.status === 'PENDING' ? 'text-amber-500 bg-amber-50' : 
-                          'text-slate-500 bg-slate-100'
+                          slip.status === 'PAID'    ? 'text-emerald-600 bg-emerald-50 border border-emerald-100' :
+                          slip.status === 'PENDING' ? 'text-amber-600 bg-amber-50 border border-amber-100'       :
+                                                      'text-slate-500 bg-slate-100 border border-slate-200'
                         }`}>
                           {slip.status === 'PAID' ? 'Payé' : slip.status === 'PENDING' ? 'En attente' : 'Brouillon'}
                         </span>
-                        
-                        {/* Dropdown pour les options de téléchargement */}
+
+                        {/* Bouton PDF direct */}
+                        <button
+                          onClick={() => handleDownloadPayslip(slip, 'pdf')}
+                          disabled={downloadLoading === slip.month}
+                          title="Télécharger en PDF"
+                          className="flex items-center gap-2 px-4 py-2.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl font-black text-[10px] uppercase tracking-widest transition-all shadow-sm active:scale-95 disabled:opacity-50"
+                        >
+                          {downloadLoading === slip.month ? (
+                            <Loader2 size={13} className="animate-spin"/>
+                          ) : (
+                            <Download size={13}/>
+                          )}
+                          PDF
+                        </button>
+
+                        {/* Autres formats (discret) */}
                         <div className="relative group">
-                          <button 
+                          <button
                             disabled={downloadLoading === slip.month}
-                            className="px-6 py-3 bg-white border border-slate-100 text-slate-900 rounded-xl font-black text-[10px] uppercase tracking-widest hover:bg-slate-900 hover:text-white transition-all shadow-sm disabled:opacity-50 flex items-center gap-2"
+                            className="w-9 h-9 flex items-center justify-center bg-slate-100 hover:bg-slate-200 text-slate-500 rounded-xl transition-all disabled:opacity-50"
+                            title="Autres formats"
                           >
-                            <Download size={14} />
-                            {downloadLoading === slip.month ? 'Téléchargement...' : 'Télécharger'}
+                            <MoreVertical size={15}/>
                           </button>
-                          
-                          <div className="absolute right-0 top-full mt-2 w-56 bg-white border border-slate-100 rounded-xl shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50">
-                            <div className="p-2">
-                              <div className="text-[8px] font-black text-slate-400 uppercase tracking-widest px-3 py-2 border-b border-slate-50">
-                                Formats disponibles
-                              </div>
-                              
+                          <div className="absolute right-0 top-full mt-1 w-48 bg-white border border-slate-100 rounded-2xl shadow-2xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50 overflow-hidden">
+                            {[
+                              { fmt: 'png',  icon: <Camera size={14} className="text-blue-500"/>,   label: 'PNG',  sub: 'Image haute qualité' },
+                              { fmt: 'jpg',  icon: <Image  size={14} className="text-green-500"/>,  label: 'JPG',  sub: 'Image compressée' },
+                              { fmt: 'html', icon: <Code   size={14} className="text-indigo-500"/>, label: 'HTML', sub: 'Format web' },
+                            ].map(({ fmt, icon, label, sub }) => (
                               <button
-                                onClick={() => handleDownloadPayslip(slip, 'pdf')}
-                                className="w-full text-left px-4 py-3 text-xs font-bold text-slate-700 hover:bg-red-50 hover:text-red-600 rounded-lg transition-colors flex items-center gap-3"
+                                key={fmt}
+                                onClick={() => handleDownloadPayslip(slip, fmt)}
+                                className="w-full flex items-center gap-3 px-4 py-3 text-xs font-bold text-slate-700 hover:bg-slate-50 transition-colors"
                               >
-                                <FileText size={16} className="text-red-500" />
-                                <div>
-                                  <div className="font-black uppercase tracking-tight">PDF</div>
-                                  <div className="text-[10px] text-slate-400">Document officiel</div>
+                                {icon}
+                                <div className="text-left">
+                                  <p className="font-black uppercase tracking-tight text-[11px]">{label}</p>
+                                  <p className="text-[9px] text-slate-400">{sub}</p>
                                 </div>
                               </button>
-                              
-                              <button
-                                onClick={() => handleDownloadPayslip(slip, 'png')}
-                                className="w-full text-left px-4 py-3 text-xs font-bold text-slate-700 hover:bg-blue-50 hover:text-blue-600 rounded-lg transition-colors flex items-center gap-3"
-                              >
-                                <Camera size={16} className="text-blue-500" />
-                                <div>
-                                  <div className="font-black uppercase tracking-tight">PNG</div>
-                                  <div className="text-[10px] text-slate-400">Image haute qualité</div>
-                                </div>
-                              </button>
-                              
-                              <button
-                                onClick={() => handleDownloadPayslip(slip, 'jpg')}
-                                className="w-full text-left px-4 py-3 text-xs font-bold text-slate-700 hover:bg-green-50 hover:text-green-600 rounded-lg transition-colors flex items-center gap-3"
-                              >
-                                <Image size={16} className="text-green-500" />
-                                <div>
-                                  <div className="font-black uppercase tracking-tight">JPG</div>
-                                  <div className="text-[10px] text-slate-400">Image compressée</div>
-                                </div>
-                              </button>
-                              
-                              <button
-                                onClick={() => handleDownloadPayslip(slip, 'html')}
-                                className="w-full text-left px-4 py-3 text-xs font-bold text-slate-700 hover:bg-indigo-50 hover:text-indigo-600 rounded-lg transition-colors flex items-center gap-3"
-                              >
-                                <Code size={16} className="text-indigo-500" />
-                                <div>
-                                  <div className="font-black uppercase tracking-tight">HTML</div>
-                                  <div className="text-[10px] text-slate-400">Format web</div>
-                                </div>
-                              </button>
-                            </div>
+                            ))}
                           </div>
                         </div>
                       </div>
@@ -3904,65 +4402,334 @@ const EmployeeProfile: React.FC<EmployeeProfileProps> = ({ employeeId, onNavigat
             </div>
           )}
 
-          {activeTab === 'performance' && (
-            <div className="space-y-8">
+          {activeTab === 'attendance' && (
+            <div className="space-y-6">
+              {/* Pointage du jour — contrôle admin */}
               <div className="bg-white p-5 md:p-10 rounded-[2rem] md:rounded-[3rem] border border-slate-100 shadow-sm">
-                <h3 className="text-lg font-black text-slate-900 uppercase tracking-tighter mb-10 flex items-center gap-3">
-                  <Activity className="text-indigo-500" /> Évaluation de la Performance
+                <h3 className="text-lg font-black text-slate-900 uppercase tracking-tighter mb-8 flex items-center gap-3">
+                  <Clock className="text-indigo-500" /> Pointage du Jour
                 </h3>
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 lg:gap-12">
-                  <div className="space-y-8">
-                    <h4 className="text-sm font-black uppercase tracking-widest text-slate-400">Objectifs 2024</h4>
-                    {[
-                      { label: 'Développement Module Kernel', progress: 95, status: 'En cours' },
-                      { label: 'Optimisation Base de Données', progress: 100, status: 'Terminé' },
-                      { label: 'Mentorat Junior Developers', progress: 70, status: 'En cours' },
-                    ].map((obj, i) => (
-                      <div key={i} className="space-y-3">
-                        <div className="flex justify-between items-center">
-                          <span className="text-sm font-bold text-slate-900">{obj.label}</span>
-                          <span className={`text-[10px] font-black uppercase tracking-widest ${obj.status === 'Terminé' ? 'text-emerald-500' : 'text-indigo-500'}`}>{obj.status}</span>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                  {/* Statut actuel */}
+                  <div className="bg-slate-50 p-6 rounded-[2rem] space-y-4">
+                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Statut aujourd'hui</p>
+                    {loadingAttendance ? (
+                      <div className="flex items-center gap-2 text-slate-400"><RefreshCw size={16} className="animate-spin" /> Chargement...</div>
+                    ) : attendanceToday ? (
+                      <div className="space-y-3">
+                        <div className={`inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-black uppercase tracking-widest ${
+                          attendanceToday.status === 'PRESENT' ? 'bg-emerald-100 text-emerald-700' :
+                          attendanceToday.status === 'LATE'    ? 'bg-amber-100 text-amber-700' :
+                          attendanceToday.status === 'ABSENT'  ? 'bg-red-100 text-red-700' :
+                          'bg-slate-100 text-slate-600'
+                        }`}>
+                          <div className={`w-2 h-2 rounded-full ${
+                            attendanceToday.status === 'PRESENT' ? 'bg-emerald-500 animate-pulse' :
+                            attendanceToday.status === 'LATE'    ? 'bg-amber-500 animate-pulse' :
+                            'bg-red-500'
+                          }`}></div>
+                          {attendanceToday.status === 'PRESENT' ? 'Présent' :
+                           attendanceToday.status === 'LATE'    ? 'En retard' :
+                           attendanceToday.status === 'ABSENT'  ? 'Absent' : attendanceToday.status}
                         </div>
-                        <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
-                          <div className={`h-full transition-all duration-1000 ${obj.status === 'Terminé' ? 'bg-emerald-500' : 'bg-indigo-500'}`} style={{ width: `${obj.progress}%` }}></div>
-                        </div>
+                        {attendanceToday.clockIn && (
+                          <p className="text-sm font-bold text-slate-700">
+                            Arrivée : <span className="text-indigo-600">{new Date(attendanceToday.clockIn).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</span>
+                            {attendanceToday.meta?.lateMinutes > 0 && <span className="ml-2 text-amber-500 text-xs">({attendanceToday.meta.lateMinutes} min retard)</span>}
+                          </p>
+                        )}
+                        {attendanceToday.clockOut && (
+                          <p className="text-sm font-bold text-slate-700">
+                            Départ : <span className="text-indigo-600">{new Date(attendanceToday.clockOut).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</span>
+                          </p>
+                        )}
+                        {attendanceToday.source === 'admin' && (
+                          <p className="text-[10px] text-slate-400 font-medium">Pointé par l'administration</p>
+                        )}
                       </div>
-                    ))}
+                    ) : (
+                      <p className="text-sm text-slate-500 font-medium">Pas encore pointé aujourd'hui</p>
+                    )}
                   </div>
-                  <div className="bg-slate-50 p-10 rounded-[3rem] flex flex-col items-center justify-center text-center">
-                    <div className="w-32 h-32 bg-white rounded-[2.5rem] shadow-xl flex items-center justify-center mb-6 border border-slate-100">
-                      <TrendingUp size={48} className="text-indigo-500" />
+
+                  {/* Actions admin */}
+                  <div className="space-y-4">
+                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Pointer pour cet employé</p>
+                    <div className="space-y-3">
+                      <div>
+                        <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 block mb-1">Heure (optionnel)</label>
+                        <input
+                          type="time"
+                          value={adminClockForm.time}
+                          onChange={e => setAdminClockForm({ time: e.target.value })}
+                          className="w-full px-4 py-3 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-indigo-500 font-bold text-sm"
+                        />
+                        <p className="text-[10px] text-slate-400 mt-1">Si vide, l'heure actuelle est utilisée</p>
+                      </div>
+                      <div className="flex gap-3">
+                        <button
+                          onClick={handleAdminClockIn}
+                          disabled={adminClockLoading || !!attendanceToday?.clockIn}
+                          className="flex-1 px-4 py-3 bg-emerald-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-emerald-700 transition-all disabled:opacity-40 flex items-center justify-center gap-2"
+                        >
+                          {adminClockLoading ? <RefreshCw size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}
+                          Arrivée
+                        </button>
+                        <button
+                          onClick={handleAdminClockOut}
+                          disabled={adminClockLoading || !attendanceToday?.clockIn || !!attendanceToday?.clockOut}
+                          className="flex-1 px-4 py-3 bg-slate-700 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-slate-900 transition-all disabled:opacity-40 flex items-center justify-center gap-2"
+                        >
+                          {adminClockLoading ? <RefreshCw size={14} className="animate-spin" /> : <Clock size={14} />}
+                          Départ
+                        </button>
+                      </div>
                     </div>
-                    <p className="text-2xl md:text-4xl font-black text-slate-900 tracking-tighter mb-2">A+</p>
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-6">Score Global Performance</p>
-                    <p className="text-xs text-slate-500 font-medium leading-relaxed max-w-xs">
-                      Moussa dépasse systématiquement les attentes techniques et fait preuve d'un leadership exemplaire.
-                    </p>
                   </div>
                 </div>
               </div>
 
+              {/* Historique pointage */}
               <div className="bg-white p-5 md:p-10 rounded-[2rem] md:rounded-[3rem] border border-slate-100 shadow-sm">
-                <h3 className="text-lg font-black text-slate-900 uppercase tracking-tighter mb-8 flex items-center gap-3">
-                  <MessageSquare size={20} className="text-indigo-500" /> Feedback Continu
-                </h3>
-                <div className="space-y-6">
-                  {[
-                    { from: 'Awa Ndiaye', text: 'Excellente gestion de la crise sur le serveur de prod hier.', date: 'Hier' },
-                    { from: 'Jean Koffi', text: 'Merci pour ton aide sur l\'intégration de l\'API Sales.', date: 'Il y a 3 jours' },
-                  ].map((f, i) => (
-                    <div key={i} className="p-6 bg-slate-50 rounded-2xl border border-slate-100">
-                      <div className="flex justify-between items-center mb-2">
-                        <span className="text-xs font-black text-slate-900 uppercase tracking-tight">{f.from}</span>
-                        <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{f.date}</span>
-                      </div>
-                      <p className="text-sm text-slate-500 font-medium italic">"{f.text}"</p>
-                    </div>
-                  ))}
+                <div className="flex items-center justify-between mb-8">
+                  <h3 className="text-lg font-black text-slate-900 uppercase tracking-tighter flex items-center gap-3">
+                    <History className="text-indigo-500" /> Historique (30 derniers)
+                  </h3>
+                  <button
+                    onClick={() => employee?.id && loadAttendance(employee.id)}
+                    disabled={loadingAttendance}
+                    className="px-4 py-2 bg-slate-100 text-slate-600 rounded-xl font-black text-[10px] uppercase tracking-widest hover:bg-slate-200 transition-all flex items-center gap-2 disabled:opacity-50"
+                  >
+                    <RefreshCw size={14} className={loadingAttendance ? 'animate-spin' : ''} /> Actualiser
+                  </button>
                 </div>
+                {loadingAttendance ? (
+                  <div className="flex items-center gap-2 text-slate-400 py-8 justify-center"><RefreshCw size={16} className="animate-spin" /> Chargement...</div>
+                ) : attendanceHistory.length === 0 ? (
+                  <div className="text-center py-12 text-slate-400">
+                    <Clock size={40} className="mx-auto mb-4 text-slate-200" />
+                    <p className="font-medium">Aucun historique de pointage</p>
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full">
+                      <thead>
+                        <tr className="border-b border-slate-100">
+                          <th className="text-left text-[10px] font-black uppercase tracking-widest text-slate-400 pb-4">Date</th>
+                          <th className="text-left text-[10px] font-black uppercase tracking-widest text-slate-400 pb-4">Statut</th>
+                          <th className="text-left text-[10px] font-black uppercase tracking-widest text-slate-400 pb-4">Arrivée</th>
+                          <th className="text-left text-[10px] font-black uppercase tracking-widest text-slate-400 pb-4">Départ</th>
+                          <th className="text-left text-[10px] font-black uppercase tracking-widest text-slate-400 pb-4">H. Supp</th>
+                          <th className="text-left text-[10px] font-black uppercase tracking-widest text-slate-400 pb-4">Source</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-50">
+                        {attendanceHistory.slice(0, 30).map((rec: any) => (
+                          <tr key={rec.id} className="hover:bg-slate-50 transition-colors">
+                            <td className="py-4 text-sm font-bold text-slate-900">
+                              {new Date(rec.date).toLocaleDateString('fr-FR', { weekday: 'short', day: '2-digit', month: 'short' })}
+                            </td>
+                            <td className="py-4">
+                              <span className={`px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest ${
+                                rec.status === 'PRESENT' ? 'bg-emerald-50 text-emerald-600' :
+                                rec.status === 'LATE'    ? 'bg-amber-50 text-amber-600' :
+                                rec.status === 'ABSENT'  ? 'bg-red-50 text-red-600' :
+                                rec.status === 'HOLIDAY' ? 'bg-purple-50 text-purple-600' :
+                                'bg-slate-100 text-slate-500'
+                              }`}>
+                                {rec.status === 'PRESENT' ? 'Présent' :
+                                 rec.status === 'LATE'    ? 'Retard' :
+                                 rec.status === 'ABSENT'  ? 'Absent' :
+                                 rec.status === 'HOLIDAY' ? 'Congé' : rec.status}
+                              </span>
+                            </td>
+                            <td className="py-4 text-sm text-slate-600 font-medium">
+                              {rec.clockIn ? new Date(rec.clockIn).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '—'}
+                            </td>
+                            <td className="py-4 text-sm text-slate-600 font-medium">
+                              {rec.clockOut ? new Date(rec.clockOut).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '—'}
+                            </td>
+                            <td className="py-4 text-sm font-medium">
+                              {rec.overtimeMinutes > 0 ? (
+                                <span className="text-emerald-600 font-bold">+{Math.floor(rec.overtimeMinutes / 60)}h{rec.overtimeMinutes % 60 > 0 ? rec.overtimeMinutes % 60 + 'm' : ''}</span>
+                              ) : '—'}
+                            </td>
+                            <td className="py-4">
+                              <span className={`text-[9px] font-black uppercase tracking-widest ${rec.source === 'admin' ? 'text-indigo-500' : 'text-slate-400'}`}>
+                                {rec.source === 'admin' ? 'Admin' : 'Auto'}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
             </div>
           )}
+
+          {activeTab === 'performance' && (() => {
+            // ── Calculs depuis l'historique de pointage ──────────────────────
+            const workRecords = attendanceHistory.filter(r =>
+              ['PRESENT','LATE','ABSENT','HALF_DAY'].includes(r.status)
+            );
+            const totalDays      = workRecords.length;
+            const presentDays    = workRecords.filter(r => r.status === 'PRESENT').length;
+            const lateDays       = workRecords.filter(r => r.status === 'LATE').length;
+            const absentDays     = workRecords.filter(r => r.status === 'ABSENT').length;
+            const halfDays       = workRecords.filter(r => r.status === 'HALF_DAY').length;
+            const totalLateMin   = workRecords.reduce((s, r) => s + (r.meta?.lateMinutes || 0), 0);
+            const totalOTMin     = attendanceHistory.reduce((s, r) => s + (r.overtimeMinutes || 0), 0);
+
+            const assiduiteScore   = totalDays > 0 ? Math.round(((presentDays + lateDays + halfDays * 0.5) / totalDays) * 100) : 0;
+            const ponctualiteScore = (presentDays + lateDays) > 0 ? Math.round((presentDays / (presentDays + lateDays)) * 100) : 100;
+            const otHours          = Math.floor(totalOTMin / 60);
+            const otMin            = totalOTMin % 60;
+            const avgLateMin       = lateDays > 0 ? Math.round(totalLateMin / lateDays) : 0;
+
+            // Score global pondéré : assiduité 50%, ponctualité 40%, bonus HS 10%
+            const otBonus   = Math.min(10, Math.round(totalOTMin / 60));
+            const rawScore  = Math.min(100, Math.round(assiduiteScore * 0.5 + ponctualiteScore * 0.4 + otBonus));
+            const grade     = rawScore >= 95 ? 'A+' : rawScore >= 88 ? 'A' : rawScore >= 78 ? 'B+' : rawScore >= 65 ? 'B' : rawScore >= 50 ? 'C' : 'D';
+            const gradeColor= rawScore >= 88 ? 'text-emerald-500' : rawScore >= 65 ? 'text-indigo-500' : rawScore >= 50 ? 'text-amber-500' : 'text-rose-500';
+            const gradeComment = rawScore >= 95
+              ? 'Ponctualité et présence exemplaires — performance remarquable.'
+              : rawScore >= 88
+              ? 'Très bonne assiduité avec un engagement constant.'
+              : rawScore >= 78
+              ? 'Bonne performance générale, quelques retards à surveiller.'
+              : rawScore >= 65
+              ? 'Performance correcte, marge d\'amélioration sur la ponctualité.'
+              : rawScore >= 50
+              ? 'Présence irrégulière — suivi recommandé.'
+              : 'Absentéisme ou retards fréquents — entretien nécessaire.';
+
+            const metrics = [
+              {
+                label: 'Assiduité',
+                value: assiduiteScore,
+                color: assiduiteScore >= 90 ? 'bg-emerald-500' : assiduiteScore >= 70 ? 'bg-indigo-500' : assiduiteScore >= 50 ? 'bg-amber-500' : 'bg-rose-500',
+                detail: `${presentDays + lateDays} jours travaillés / ${totalDays} jours`,
+              },
+              {
+                label: 'Ponctualité',
+                value: ponctualiteScore,
+                color: ponctualiteScore >= 90 ? 'bg-emerald-500' : ponctualiteScore >= 70 ? 'bg-indigo-500' : ponctualiteScore >= 50 ? 'bg-amber-500' : 'bg-rose-500',
+                detail: `${lateDays} retard${lateDays > 1 ? 's' : ''} · moy. ${avgLateMin} min`,
+              },
+              {
+                label: 'Score Global',
+                value: rawScore,
+                color: rawScore >= 88 ? 'bg-emerald-500' : rawScore >= 65 ? 'bg-indigo-500' : rawScore >= 50 ? 'bg-amber-500' : 'bg-rose-500',
+                detail: `Note : ${grade}`,
+              },
+            ];
+
+            return (
+              <div className="space-y-8">
+                {loadingAttendance ? (
+                  <div className="flex items-center justify-center h-40">
+                    <Loader2 size={28} className="animate-spin text-indigo-400" />
+                  </div>
+                ) : totalDays === 0 ? (
+                  <div className="bg-white p-10 rounded-[2rem] border border-slate-100 shadow-sm text-center text-slate-400 text-sm font-medium">
+                    Aucun historique de pointage disponible pour calculer la performance.
+                  </div>
+                ) : (
+                  <>
+                    {/* ── Score global + badges ── */}
+                    <div className="bg-white p-5 md:p-10 rounded-[2rem] md:rounded-[3rem] border border-slate-100 shadow-sm">
+                      <h3 className="text-lg font-black text-slate-900 uppercase tracking-tighter mb-10 flex items-center gap-3">
+                        <Activity className="text-indigo-500" /> Évaluation de la Performance
+                      </h3>
+                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 lg:gap-12">
+
+                        {/* Jauges métriques */}
+                        <div className="space-y-8">
+                          {metrics.map((m, i) => (
+                            <div key={i} className="space-y-2">
+                              <div className="flex justify-between items-center">
+                                <span className="text-xs font-black text-slate-700 uppercase tracking-wider">{m.label}</span>
+                                <span className="text-xs font-black text-slate-500">{m.value}%</span>
+                              </div>
+                              <div className="h-2.5 bg-slate-100 rounded-full overflow-hidden">
+                                <div className={`h-full rounded-full transition-all duration-700 ${m.color}`} style={{ width: `${m.value}%` }} />
+                              </div>
+                              <p className="text-[10px] text-slate-400 font-medium">{m.detail}</p>
+                            </div>
+                          ))}
+                        </div>
+
+                        {/* Grade central */}
+                        <div className="bg-slate-50 p-8 rounded-[2.5rem] flex flex-col items-center justify-center text-center gap-4">
+                          <div className="w-28 h-28 bg-white rounded-[2rem] shadow-xl flex items-center justify-center border border-slate-100">
+                            <TrendingUp size={44} className={gradeColor} />
+                          </div>
+                          <p className={`text-4xl md:text-5xl font-black tracking-tighter ${gradeColor}`}>{grade}</p>
+                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Score Global · {rawScore}/100</p>
+                          <p className="text-xs text-slate-500 font-medium leading-relaxed max-w-xs">{gradeComment}</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* ── Statistiques détaillées ── */}
+                    <div className="bg-white p-5 md:p-10 rounded-[2rem] md:rounded-[3rem] border border-slate-100 shadow-sm">
+                      <h3 className="text-lg font-black text-slate-900 uppercase tracking-tighter mb-8 flex items-center gap-3">
+                        <Clock size={20} className="text-indigo-500" /> Détail Pointage & Heures
+                      </h3>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        {[
+                          { label: 'Jours présents', value: presentDays, sub: 'à l\'heure', color: 'text-emerald-600', bg: 'bg-emerald-50' },
+                          { label: 'Retards', value: lateDays, sub: `${totalLateMin} min cumulées`, color: 'text-amber-600', bg: 'bg-amber-50' },
+                          { label: 'Absences', value: absentDays, sub: 'jours non justifiés', color: 'text-rose-600', bg: 'bg-rose-50' },
+                          {
+                            label: 'Heures supp.',
+                            value: `${otHours}h${otMin > 0 ? otMin + 'm' : ''}`,
+                            sub: `${Math.round(totalOTMin / 60 * 10) / 10}h totales`,
+                            color: 'text-indigo-600',
+                            bg: 'bg-indigo-50',
+                          },
+                        ].map((stat, i) => (
+                          <div key={i} className={`${stat.bg} rounded-2xl p-5 flex flex-col gap-2`}>
+                            <p className={`text-2xl font-black tracking-tighter ${stat.color}`}>{stat.value}</p>
+                            <p className="text-[10px] font-black text-slate-600 uppercase tracking-widest">{stat.label}</p>
+                            <p className="text-[9px] text-slate-400 font-medium">{stat.sub}</p>
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* Répartition par statut */}
+                      {totalDays > 0 && (
+                        <div className="mt-8">
+                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">Répartition sur {totalDays} jours enregistrés</p>
+                          <div className="h-3 bg-slate-100 rounded-full overflow-hidden flex">
+                            {presentDays > 0 && <div className="bg-emerald-400 h-full" style={{ width: `${(presentDays / totalDays) * 100}%` }} title="Présent" />}
+                            {lateDays   > 0 && <div className="bg-amber-400  h-full" style={{ width: `${(lateDays   / totalDays) * 100}%` }} title="Retard" />}
+                            {halfDays   > 0 && <div className="bg-blue-400   h-full" style={{ width: `${(halfDays   / totalDays) * 100}%` }} title="Demi-journée" />}
+                            {absentDays > 0 && <div className="bg-rose-400   h-full" style={{ width: `${(absentDays / totalDays) * 100}%` }} title="Absent" />}
+                          </div>
+                          <div className="flex flex-wrap gap-4 mt-3">
+                            {[
+                              { label: 'Présent', count: presentDays, color: 'bg-emerald-400' },
+                              { label: 'Retard',  count: lateDays,    color: 'bg-amber-400'  },
+                              { label: 'Demi-j.', count: halfDays,    color: 'bg-blue-400'   },
+                              { label: 'Absent',  count: absentDays,  color: 'bg-rose-400'   },
+                            ].filter(l => l.count > 0).map((l, i) => (
+                              <div key={i} className="flex items-center gap-1.5">
+                                <div className={`w-2.5 h-2.5 rounded-full ${l.color}`} />
+                                <span className="text-[10px] font-bold text-slate-500">{l.label} · {l.count}j</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
+            );
+          })()}
           </>
         </motion.div>
       </AnimatePresence>
