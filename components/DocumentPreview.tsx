@@ -261,7 +261,9 @@ const DocumentPreview: React.FC<DocumentProps> = ({ type, sale, tenant, currency
   } : tenant;
 
   const recipient = sale.customer;
-  const recipientName = recipient?.companyName || recipient?.name || 'Client de Passage';
+  const walkinName  = sale.walkin_name  || sale.walkinName  || null;
+  const walkinPhone = sale.walkin_phone || sale.walkinPhone || null;
+  const recipientName = recipient?.companyName || recipient?.name || walkinName || 'Client de Passage';
 
   const allItems = isBonSortie
     ? (sale.items?.filter((i: any) => i.stockItemId || i.stock_item_id || i.stock_item) || [])
@@ -324,8 +326,8 @@ const DocumentPreview: React.FC<DocumentProps> = ({ type, sale, tenant, currency
                     {recipientName}
                   </h2>
                   <div className="space-y-0.5 text-xs text-slate-600 font-medium leading-relaxed">
-                    <p>{recipient?.billingAddress || recipient?.address || 'Vente Directe'}</p>
-                    <p>{recipient?.phone}</p>
+                    <p>{recipient?.billingAddress || recipient?.address || (walkinName ? 'Client de passage' : 'Vente Directe')}</p>
+                    <p>{recipient?.phone || walkinPhone}</p>
                     <p>{recipient?.email}</p>
                   </div>
                 </div>

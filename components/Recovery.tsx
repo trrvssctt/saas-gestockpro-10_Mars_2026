@@ -99,6 +99,38 @@ const Recovery = ({ currency }: { currency: string }) => {
 
   useEffect(() => { fetchDebtors(); }, []);
 
+  const CHEQUE_PENDING_STATUSES = ['PENDING', 'REGISTERED', 'DEPOSITED', 'PROCESSING'];
+
+  // ── Chèques en attente par client ────────────────────────────────────────
+  const pendingChequesByCustomer = useMemo(() => {
+    const map: Record<string, { name: string; amount: number; count: number }> = {};
+    rawSales.forEach((sale: any) => {
+      if (sale.status === 'ANNULE') return;
+      const customer = sale.customer;
+      const customerId = sale.customerId || sale.customer_id;
+      if (!customer || !customerId) return;
+      (sale.payments || []).forEach((p: any) => {
+        if (p.method === 'CHEQUE' && CHEQUE_PENDING_STATUSES.includes(p.status)) {
+          if (!map[customerId]) {
+            map[customerId] = {
+              name: customer.companyName || customer.name || '—',
+              amount: 0,
+              count: 0
+            };
+          }
+          map[customerId].amount += parseFloat(p.amount || 0);
+          map[customerId].count += 1;
+        }
+      });
+    });
+    return Object.entries(map).map(([id, v]) => ({ id, ...v })).sort((a, b) => b.amount - a.amount);
+  }, [rawSales]);
+
+  const totalPendingCheques = useMemo(() =>
+    pendingChequesByCustomer.reduce((s, c) => s + c.amount, 0),
+    [pendingChequesByCustomer]
+  );
+
   // ── Stats ────────────────────────────────────────────────────────────────
   const stats = useMemo(() => {
     const total = debtors.reduce((s, d) => s + (d.outstandingBalance || 0), 0);
@@ -240,6 +272,38 @@ const Recovery = ({ currency }: { currency: string }) => {
           </div>
         </div>
       </div>
+
+      {/* ── CHÈQUES EN ATTENTE PAR CLIENT ── */}
+      {pendingChequesByCustomer.length > 0 && (
+        <div className="bg-amber-50 border border-amber-200 rounded-3xl p-5 md:p-7 space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 bg-amber-500 rounded-2xl flex items-center justify-center shadow">
+                <AlertTriangle size={16} className="text-white"/>
+              </div>
+              <div>
+                <p className="text-[10px] font-black text-amber-700 uppercase tracking-widest">Chèques en Attente d'Encaissement</p>
+                <p className="text-[9px] text-amber-600 font-bold">{pendingChequesByCustomer.length} client(s) — non encore encaissé(s)</p>
+              </div>
+            </div>
+            <div className="text-right">
+              <p className="text-xl font-black text-amber-700">{fmtAmount(totalPendingCheques)}</p>
+              <p className="text-[9px] text-amber-500 font-bold uppercase">{currency} en transit</p>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {pendingChequesByCustomer.map(c => (
+              <div key={c.id} className="bg-white border border-amber-100 rounded-2xl p-4 flex items-center justify-between shadow-sm">
+                <div>
+                  <p className="text-[10px] font-black text-slate-700 uppercase">{c.name}</p>
+                  <p className="text-[9px] text-amber-600 font-bold mt-0.5">{c.count} chèque(s) en circuit</p>
+                </div>
+                <p className="text-sm font-black text-amber-700">{fmtAmount(c.amount)} <span className="text-[9px] font-bold">{currency}</span></p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* ── FILTRE ANNÉE/MOIS ── */}
       <div className="bg-white p-4 rounded-3xl border border-slate-100 shadow-sm">

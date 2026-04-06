@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import {
-  LayoutDashboard, Package, FileText, ShieldAlert, LogOut,
+  LayoutDashboard, Package, FileText, ShieldAlert, LogOut, Truck,
   Users as UsersIcon, Settings as SettingsIcon, Activity,
   CreditCard, ShieldCheck, Terminal, ShieldHalf, Loader2,
   Layers, GitMerge, Wallet, History, TrendingDown, Sparkles,
@@ -66,6 +66,8 @@ const Layout: React.FC<LayoutProps> = ({
     { id: 'employee-pointage', label: 'Mon Pointage', icon: Clock },
     { id: 'my-leaves', label: 'Mes Congés', icon: Activity },
     { id: 'customers', label: 'Clients', icon: UsersIcon },
+    { id: 'suppliers', label: 'Fournisseurs', icon: Truck },
+    { id: 'deliveries', label: 'Livraisons', icon: Package },
     { id: 'sales', label: 'Ventes & Factures', icon: FileText },
     { id: 'recovery', label: 'Recouvrement', icon: TrendingDown },
     { id: 'payments', label: 'Trésorerie', icon: Wallet },
@@ -273,6 +275,7 @@ const Layout: React.FC<LayoutProps> = ({
         />
       )}
       <aside
+        id="tour-sidebar"
         className={`${sidebarCollapsed ? 'w-16' : 'w-64'} text-white flex flex-col shadow-2xl z-50 transition-all duration-300 ease-in-out fixed md:relative inset-y-0 left-0 transform ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0`}
         style={!isSuperAdminMode ? { backgroundColor: 'var(--button-kernel)', color: asideTextColor } : undefined}
         onMouseEnter={() => setSidebarCollapsed(false)}

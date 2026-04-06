@@ -131,6 +131,7 @@ const SubcategoryManager: React.FC<{ plan?: SubscriptionPlan }> = ({ plan }) => 
     }
     setSelectedSub(sub);
     setFormData({ name: sub.name, description: sub.description || '', categoryId: sub.categoryId });
+    setError(null);
     setShowModal('EDIT');
   };
 
@@ -173,10 +174,10 @@ const SubcategoryManager: React.FC<{ plan?: SubscriptionPlan }> = ({ plan }) => 
              </div>
           ) : (
             <button 
-              onClick={() => { 
-                setFormData({ name: '', description: '', categoryId: categories[0]?.id || '' }); 
-                setShowModal('CREATE'); 
+              onClick={() => {
+                setFormData({ name: '', description: '', categoryId: categories[0]?.id || '' });
                 setError(null);
+                setShowModal('CREATE');
               }}
               disabled={categories.length === 0}
               className={`px-8 py-4 rounded-2xl font-black transition-all shadow-xl flex items-center gap-3 text-xs uppercase tracking-widest ${categories.length === 0 ? 'bg-slate-100 text-slate-400' : 'bg-slate-900 text-white hover:bg-indigo-600'}`}
@@ -469,17 +470,24 @@ const SubcategoryManager: React.FC<{ plan?: SubscriptionPlan }> = ({ plan }) => 
                    </div>
                 </div>
 
+                {error && (
+                  <div className="flex items-start gap-3 p-4 bg-rose-50 border border-rose-200 rounded-2xl animate-in slide-in-from-top-2 duration-200">
+                    <AlertCircle size={16} className="text-rose-500 mt-0.5 shrink-0" />
+                    <p className="text-xs font-bold text-rose-700 leading-relaxed">{error}</p>
+                  </div>
+                )}
+
                 <div className="flex gap-4">
-                  <button 
-                    type="button" 
-                    onClick={() => setShowModal(null)} 
+                  <button
+                    type="button"
+                    onClick={() => { setShowModal(null); setError(null); }}
                     className="flex-1 py-5 border-2 border-slate-100 text-slate-400 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-slate-50 transition-all"
                   >
                     ANNULER
                   </button>
-                  <button 
-                    type="submit" 
-                    disabled={actionLoading} 
+                  <button
+                    type="submit"
+                    disabled={actionLoading}
                     className={`flex-1 py-5 text-white rounded-2xl font-black text-[10px] uppercase tracking-[0.2em] shadow-xl transition-all flex items-center justify-center gap-3 ${showModal === 'CREATE' ? 'bg-indigo-600 hover:bg-slate-900' : 'bg-amber-600 hover:bg-amber-700'}`}
                   >
                     {actionLoading ? <RefreshCw className="animate-spin" size={18} /> : (
@@ -526,59 +534,117 @@ const SubcategoryManager: React.FC<{ plan?: SubscriptionPlan }> = ({ plan }) => 
       )}
 
       {/* DETAILS MODAL */}
-      {showDetailsSub && (
-        <div className="fixed inset-0 z-[1100] flex items-center justify-center p-6 bg-slate-950/95 backdrop-blur-md animate-in fade-in duration-300">
-           <div className="bg-white w-full mx-4 md:mx-auto max-w-5xl rounded-[4rem] shadow-2xl overflow-hidden flex flex-col max-h-[90vh] animate-in zoom-in-95 duration-500">
-              <div className="px-6 md:px-12 py-6 md:py-10 bg-slate-900 text-white flex justify-between items-center shrink-0">
-                 <div className="flex items-center gap-6">
-                    <div className="w-20 h-20 bg-indigo-600 rounded-3xl flex items-center justify-center text-3xl shadow-2xl shadow-indigo-500/20 overflow-hidden">
-                      <Package size={40} />
+      {showDetailsSub && (() => {
+        const linkedProducts = stocks.filter(s => (s.subcategoryId || (s as any).subcategory_id) === showDetailsSub.id);
+        const parentCatName = getParentCategoryName(showDetailsSub.categoryId);
+        return (
+          <div className="fixed inset-0 z-[1100] flex items-center justify-center p-4 md:p-6 bg-slate-950/95 backdrop-blur-md animate-in fade-in duration-300">
+            <div className="bg-white w-full mx-auto max-w-4xl rounded-[2.5rem] shadow-2xl overflow-hidden flex flex-col max-h-[92vh] animate-in zoom-in-95 duration-300">
+
+              {/* Header */}
+              <div className="px-6 md:px-10 py-6 bg-gradient-to-r from-slate-900 to-indigo-900 text-white flex justify-between items-center shrink-0">
+                <div className="flex items-center gap-4">
+                  <div className="w-14 h-14 bg-indigo-500/30 border border-indigo-400/30 rounded-2xl flex items-center justify-center shadow-inner shrink-0">
+                    <FolderTree size={26} />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="text-[8px] font-black bg-indigo-500/20 text-indigo-300 px-2.5 py-1 rounded-full uppercase tracking-widest">{parentCatName}</span>
                     </div>
-                    <div>
-                       <h3 className="text-3xl font-black uppercase tracking-tighter leading-none">{showDetailsSub.name}</h3>
-                       <div className="flex items-center gap-4 mt-3">
-                         <span className="text-xs text-indigo-200 uppercase tracking-widest">ID: {showDetailsSub.id.slice(0,8)}</span>
-                       </div>
-                    </div>
-                 </div>
-                 <button onClick={() => setShowDetailsSub(null)} className="p-4 bg-white/5 hover:bg-white/10 rounded-3xl transition-all"><X size={32}/></button>
+                    <h3 className="text-xl md:text-2xl font-black uppercase tracking-tight leading-none">{showDetailsSub.name}</h3>
+                    <p className="text-[9px] text-indigo-300/70 font-mono mt-1 uppercase tracking-widest">REF: {showDetailsSub.id.slice(0,8)}</p>
+                  </div>
+                </div>
+                <button onClick={() => setShowDetailsSub(null)} className="p-3 bg-white/5 hover:bg-white/15 rounded-2xl transition-all shrink-0"><X size={22}/></button>
               </div>
-              <div className="flex-1 overflow-y-auto p-12 grid grid-cols-12 gap-10 bg-slate-50/30 custom-scrollbar">
-                 <div className="col-span-12 lg:col-span-4 space-y-8">
-                    <div className="bg-white p-8 rounded-[3rem] border border-slate-100 shadow-sm space-y-6">
-                       <h4 className="text-xs font-black uppercase tracking-widest text-slate-400">Description</h4>
-                       <p className="text-sm font-black text-slate-800">{showDetailsSub.description || '—'}</p>
-                       <div>
-                         <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Produits liés</h5>
-                         <p className="text-2xl font-black text-indigo-700 mt-2">{stocks.filter(s => (s.subcategoryId || s.subcategory_id) === showDetailsSub.id).length}</p>
-                       </div>
+
+              {/* Body */}
+              <div className="flex-1 overflow-y-auto p-4 md:p-8 bg-slate-50/60 custom-scrollbar">
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+
+                  {/* Left column */}
+                  <div className="lg:col-span-1 space-y-4">
+                    {/* Stat card */}
+                    <div className="bg-gradient-to-br from-indigo-600 to-indigo-700 p-6 rounded-2xl text-white shadow-lg shadow-indigo-200 relative overflow-hidden">
+                      <div className="absolute -right-4 -bottom-4 opacity-10"><Package size={80}/></div>
+                      <p className="text-[9px] font-black uppercase tracking-[0.25em] opacity-70 mb-3">Produits en stock</p>
+                      <p className="text-4xl font-black">{linkedProducts.length}</p>
+                      <p className="text-[9px] font-black uppercase tracking-widest opacity-60 mt-1">
+                        {linkedProducts.length === 0 ? 'Aucun article' : linkedProducts.length === 1 ? 'article référencé' : 'articles référencés'}
+                      </p>
                     </div>
-                 </div>
-                 <div className="col-span-12 lg:col-span-8 bg-white p-10 rounded-[3.5rem] border border-slate-100 shadow-sm flex flex-col min-h-[300px]">
-                    <h4 className="text-xs font-black uppercase tracking-widest text-slate-400 mb-6">Liste des produits</h4>
-                    <div className="flex-1 overflow-y-auto space-y-3 custom-scrollbar">
-                      {stocks.filter(s => (s.subcategoryId || s.subcategory_id) === showDetailsSub.id).length === 0 ? (
-                        <div className="py-10 text-center text-slate-300">Aucun produit lié</div>
+
+                    {/* Description */}
+                    <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm">
+                      <h4 className="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-3">Description</h4>
+                      <p className="text-sm text-slate-700 font-medium leading-relaxed">
+                        {showDetailsSub.description || <span className="text-slate-300 italic">Aucune description renseignée.</span>}
+                      </p>
+                    </div>
+
+                    {/* Parent + status */}
+                    <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm space-y-4">
+                      <div>
+                        <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-1">Catégorie parente</p>
+                        <div className="flex items-center gap-2 mt-2">
+                          <div className="w-7 h-7 bg-indigo-50 text-indigo-500 rounded-lg flex items-center justify-center"><Layers size={14}/></div>
+                          <p className="text-sm font-black text-slate-800">{parentCatName}</p>
+                        </div>
+                      </div>
+                      <div className="pt-3 border-t border-slate-50 flex items-center gap-3">
+                        <div className={`w-8 h-8 rounded-xl flex items-center justify-center ${linkedProducts.length > 0 ? 'bg-amber-50 text-amber-500' : 'bg-emerald-50 text-emerald-500'}`}>
+                          {linkedProducts.length > 0 ? <Lock size={16}/> : <CheckCircle2 size={16}/>}
+                        </div>
+                        <p className="text-[9px] font-black text-slate-700 uppercase leading-relaxed">
+                          {linkedProducts.length > 0 ? 'Lié — suppression verrouillée' : 'Libre — supprimable'}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Right column — product list */}
+                  <div className="lg:col-span-2 bg-white rounded-2xl border border-slate-100 shadow-sm flex flex-col overflow-hidden">
+                    <div className="px-6 py-4 border-b border-slate-50 flex items-center justify-between">
+                      <h4 className="text-[9px] font-black uppercase tracking-widest text-slate-400 flex items-center gap-2">
+                        <Package size={14} className="text-indigo-400"/> Produits rattachés
+                      </h4>
+                      <span className="text-[8px] font-black bg-indigo-50 text-indigo-600 px-3 py-1 rounded-full uppercase tracking-widest">{linkedProducts.length} article{linkedProducts.length !== 1 ? 's' : ''}</span>
+                    </div>
+                    <div className="flex-1 overflow-y-auto p-4 space-y-2 custom-scrollbar min-h-[220px]">
+                      {linkedProducts.length === 0 ? (
+                        <div className="py-16 flex flex-col items-center gap-3 text-slate-300">
+                          <Package size={32}/>
+                          <p className="text-[9px] font-black uppercase tracking-widest">Aucun produit lié</p>
+                        </div>
                       ) : (
-                        stocks.filter(s => (s.subcategoryId || s.subcategory_id) === showDetailsSub.id).map(prod => (
-                          <div key={prod.id} className="p-3 rounded-xl border border-slate-100 flex items-center justify-between">
-                            <div>
-                              <p className="font-black text-slate-800">{prod.name}</p>
-                              <p className="text-xs text-slate-400 mt-1">SKU: {prod.sku || '—'}</p>
+                        linkedProducts.map(prod => {
+                          const isLowStock = prod.currentLevel <= prod.minThreshold;
+                          return (
+                            <div key={prod.id} className={`flex items-center gap-4 p-4 rounded-xl border transition-all ${isLowStock ? 'border-rose-100 bg-rose-50/40' : 'border-slate-100 hover:border-indigo-100 hover:bg-indigo-50/20'}`}>
+                              <div className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center overflow-hidden shrink-0">
+                                {(prod as any).imageUrl ? <img src={(prod as any).imageUrl} className="w-full h-full object-cover" alt="" /> : <Package size={18} className="text-slate-400"/>}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <p className="font-black text-slate-800 text-sm truncate">{prod.name}</p>
+                                <p className="text-[9px] font-mono text-slate-400 mt-0.5">{(prod as any).sku || '—'}</p>
+                              </div>
+                              <div className="text-right shrink-0">
+                                <p className={`text-sm font-black ${isLowStock ? 'text-rose-600' : 'text-slate-800'}`}>{prod.currentLevel ?? 0}</p>
+                                <p className="text-[8px] text-slate-400 uppercase font-bold">{isLowStock ? 'Alerte stock' : 'En stock'}</p>
+                              </div>
                             </div>
-                            <div className="text-right">
-                              <p className="font-black">{prod.currentLevel ?? prod.quantity ?? 0}</p>
-                              <p className="text-xs text-slate-400">{prod.unitPrice ? `${prod.unitPrice} €` : '—'}</p>
-                            </div>
-                          </div>
-                        ))
+                          );
+                        })
                       )}
                     </div>
-                 </div>
+                  </div>
+
+                </div>
               </div>
-           </div>
-        </div>
-      )}
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 };

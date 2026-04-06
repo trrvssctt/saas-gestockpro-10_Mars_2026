@@ -1,12 +1,13 @@
 
 import React, { useState, useEffect } from 'react';
-import { 
-  Sparkles, Plus, Search, Edit3, Trash2, X, RefreshCw, 
+import {
+  Sparkles, Plus, Search, Edit3, Trash2, X, RefreshCw,
   Lock, Save, AlertCircle, ArrowRight, Loader2, DollarSign,
-  Briefcase, ShieldAlert, CheckCircle2, Info, Upload, ImageIcon, Eye, Tag, MapPin
+  Briefcase, ShieldAlert, CheckCircle2, XCircle, Info, Upload, ImageIcon, Eye, Tag, MapPin, ChevronRight
 } from 'lucide-react';
 import { authBridge } from '../services/authBridge';
 import { apiClient } from '../services/api';
+import { uploadFile } from '../services/uploadService';
 import { useToast } from './ToastProvider';
 
 const Services = ({ currency }: { currency: string }) => {
@@ -75,24 +76,10 @@ const Services = ({ currency }: { currency: string }) => {
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, idx: number) => {
     const file = e.target.files?.[0];
     if (!file) return;
-
     setIsUploading(true);
-
-    const cloudinaryData = new FormData();
-    cloudinaryData.append('file', file);
-    cloudinaryData.append('upload_preset', 'ml_default');
-    cloudinaryData.append('cloud_name', 'dq7avew9h');
-
     try {
-      const response = await fetch(`https://api.cloudinary.com/v1_1/dq7avew9h/image/upload`, {
-        method: 'POST',
-        body: cloudinaryData
-      });
-
-      const data = await response.json();
-      if (data.secure_url) {
-        setFormDataList(prev => prev.map((f, i) => i === idx ? { ...f, imageUrl: data.secure_url } : f));
-      }
+      const result = await uploadFile(file, 'images');
+      setFormDataList(prev => prev.map((f, i) => i === idx ? { ...f, imageUrl: result.url } : f));
     } catch (err) {
       console.error("Upload Error:", err);
       showToast("Échec de l'envoi de l'image.", 'error');
@@ -460,61 +447,99 @@ const Services = ({ currency }: { currency: string }) => {
 
       {/* MODAL VUE DÉTAILLÉE (VIEW) */}
       {modalMode === 'VIEW' && selectedService && (
-        <div className="fixed inset-0 z-[1000] flex items-center justify-center p-6 bg-slate-950/95 backdrop-blur-md animate-in fade-in duration-300">
-           <div className="bg-white w-full max-w-4xl rounded-[4rem] shadow-2xl overflow-hidden flex flex-col max-h-[85vh] animate-in zoom-in-95 duration-500">
-              <div className="px-12 py-10 bg-slate-900 text-white flex justify-between items-center shrink-0">
-                 <div className="flex items-center gap-6">
-                    <div className="w-20 h-20 bg-indigo-600 rounded-3xl flex items-center justify-center text-3xl shadow-2xl shadow-indigo-500/20 overflow-hidden">
-                      {selectedService.imageUrl ? (
-                        <img src={selectedService.imageUrl} className="w-full h-full object-cover" alt={selectedService.name} />
-                      ) : (
-                        <Sparkles size={40}/>
-                      )}
+        <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4 md:p-6 bg-slate-950/95 backdrop-blur-md animate-in fade-in duration-300">
+          <div className="bg-white w-full max-w-4xl mx-auto rounded-[2.5rem] shadow-2xl overflow-hidden flex flex-col max-h-[92vh] animate-in zoom-in-95 duration-300">
+
+            {/* ── Header ── */}
+            <div className="px-6 md:px-10 py-6 bg-gradient-to-r from-slate-900 to-violet-900 text-white flex justify-between items-center shrink-0">
+              <div className="flex items-center gap-4">
+                <div className="w-14 h-14 bg-violet-500/30 border border-violet-400/30 rounded-2xl flex items-center justify-center shadow-inner overflow-hidden shrink-0">
+                  {selectedService.imageUrl
+                    ? <img src={selectedService.imageUrl} className="w-full h-full object-cover" alt={selectedService.name} />
+                    : <Sparkles size={26} />}
+                </div>
+                <div>
+                  <p className="text-[9px] font-black text-violet-300 uppercase tracking-[0.3em] mb-1">Détail Service</p>
+                  <h3 className="text-xl md:text-2xl font-black uppercase tracking-tight leading-none">{selectedService.name}</h3>
+                  <p className="text-[9px] text-violet-300/70 font-mono mt-1 uppercase tracking-widest">REF: {selectedService.id.slice(0, 8)}</p>
+                </div>
+              </div>
+              <button onClick={() => setModalMode(null)} className="p-3 bg-white/5 hover:bg-white/15 rounded-2xl transition-all shrink-0"><X size={22} /></button>
+            </div>
+
+            {/* ── Body ── */}
+            <div className="flex-1 overflow-y-auto p-4 md:p-8 bg-slate-50/60 custom-scrollbar">
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+
+                {/* Colonne gauche */}
+                <div className="lg:col-span-1 space-y-4">
+
+                  {/* KPI tarif */}
+                  <div className="bg-gradient-to-br from-violet-600 to-indigo-700 p-6 rounded-2xl text-white shadow-lg shadow-violet-200 relative overflow-hidden">
+                    <div className="absolute -right-4 -bottom-4 opacity-10"><Sparkles size={80} /></div>
+                    <p className="text-[9px] font-black uppercase tracking-[0.25em] opacity-70 mb-3">Tarification Fixe</p>
+                    <p className="text-4xl font-black">{Number(selectedService.price).toLocaleString()}</p>
+                    <p className="text-[9px] font-black uppercase tracking-widest opacity-60 mt-1">{currency} par prestation</p>
+                  </div>
+
+                  {/* Statut */}
+                  <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm flex items-center gap-4">
+                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${selectedService.isActive ? 'bg-emerald-50 text-emerald-500' : 'bg-rose-50 text-rose-500'}`}>
+                      {selectedService.isActive ? <CheckCircle2 size={18} /> : <XCircle size={18} />}
                     </div>
                     <div>
-                       <h3 className="text-3xl font-black uppercase tracking-tighter leading-none">{selectedService.name}</h3>
-                       <div className="flex items-center gap-4 mt-3">
-                        <span className={`text-[10px] font-black uppercase px-3 py-1 rounded-full ${selectedService.isActive ? 'bg-emerald-500/10 text-emerald-400' : 'bg-rose-500/10 text-rose-400 animate-pulse'}`}>
-                          {selectedService.isActive ? 'SERVICE OPÉRATIONNEL' : 'SERVICE SUSPENDU'}
-                        </span>
-                       </div>
+                      <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Statut opérationnel</p>
+                      <p className={`text-xs font-black mt-0.5 ${selectedService.isActive ? 'text-emerald-600' : 'text-rose-600'}`}>
+                        {selectedService.isActive ? 'Service actif — disponible à la vente' : 'Service suspendu'}
+                      </p>
                     </div>
-                 </div>
-                 <button onClick={() => setModalMode(null)} className="p-4 bg-white/5 hover:bg-white/10 rounded-3xl transition-all"><X size={32}/></button>
-              </div>
-              <div className="flex-1 overflow-y-auto p-12 grid grid-cols-12 gap-10 bg-slate-50/30 custom-scrollbar">
-                 <div className="col-span-12 lg:col-span-5 space-y-8">
-                    {selectedService.imageUrl && (
-                      <div className="bg-white p-4 rounded-[3rem] border border-slate-100 shadow-sm overflow-hidden">
-                        <img src={selectedService.imageUrl} className="w-full rounded-2xl object-cover aspect-square shadow-inner" alt={selectedService.name} />
+                  </div>
+
+                  {/* Image si disponible */}
+                  {selectedService.imageUrl && (
+                    <div className="bg-white p-3 rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+                      <img src={selectedService.imageUrl} className="w-full rounded-xl object-cover aspect-square" alt={selectedService.name} />
+                    </div>
+                  )}
+
+                  {/* Infos système */}
+                  <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm space-y-3">
+                    <h4 className="text-[9px] font-black uppercase tracking-widest text-slate-400 flex items-center gap-2"><Info size={13} /> Informations Système</h4>
+                    <div className="space-y-2">
+                      <div>
+                        <p className="text-[8px] font-black text-slate-400 uppercase">Créé le</p>
+                        <p className="text-xs font-bold text-slate-800">{new Date(selectedService.createdAt).toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' })}</p>
+                      </div>
+                      <div>
+                        <p className="text-[8px] font-black text-slate-400 uppercase">Identifiant</p>
+                        <p className="text-[10px] font-mono font-bold text-slate-400">{selectedService.id.slice(0, 12).toUpperCase()}</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Colonne droite — description + détails */}
+                <div className="lg:col-span-2 bg-white rounded-2xl border border-slate-100 shadow-sm flex flex-col overflow-hidden">
+                  <div className="px-6 py-4 border-b border-slate-50 flex items-center gap-2 shrink-0">
+                    <h4 className="text-[9px] font-black uppercase tracking-widest text-slate-400 flex items-center gap-2">
+                      <ChevronRight size={14} className="text-violet-400" /> Périmètre d'intervention
+                    </h4>
+                  </div>
+                  <div className="flex-1 p-6 space-y-6 overflow-y-auto custom-scrollbar">
+                    {selectedService.description ? (
+                      <p className="text-sm font-medium text-slate-700 leading-relaxed whitespace-pre-wrap">{selectedService.description}</p>
+                    ) : (
+                      <div className="py-16 flex flex-col items-center gap-3 text-slate-300">
+                        <Info size={32} />
+                        <p className="text-[9px] font-black uppercase tracking-widest">Aucune description fournie pour ce service.</p>
                       </div>
                     )}
-                    <div className="bg-white p-8 rounded-[3rem] border border-slate-100 shadow-sm space-y-4">
-                       <h4 className="text-xs font-black uppercase tracking-widest text-slate-400 flex items-center gap-2"><Tag size={14}/> Tarification Fixe</h4>
-                       <p className="text-3xl font-black text-indigo-600">{Number(selectedService.price).toLocaleString()} <span className="text-xs uppercase">{currency}</span></p>
-                    </div>
-                 </div>
-                 <div className="col-span-12 lg:col-span-7 bg-white p-10 rounded-[3.5rem] border border-slate-100 shadow-sm space-y-8">
-                    <div className="space-y-4">
-                       <h4 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 flex items-center gap-2">Périmètre d'intervention</h4>
-                       <p className="text-sm font-medium text-slate-700 leading-relaxed whitespace-pre-wrap">{selectedService.description || 'Aucune description technique fournie pour ce service.'}</p>
-                    </div>
-                    <div className="p-6 bg-slate-50 rounded-3xl border border-slate-100 space-y-4">
-                       <h4 className="text-[9px] font-black uppercase text-slate-500 flex items-center gap-2"><Info size={14}/> Informations Système</h4>
-                       <div className="grid grid-cols-2 gap-4">
-                          <div>
-                             <p className="text-[8px] font-black text-slate-400 uppercase">Créé le</p>
-                             <p className="text-[10px] font-bold text-slate-800">{new Date(selectedService.createdAt).toLocaleDateString('fr-FR')}</p>
-                          </div>
-                          <div>
-                             <p className="text-[8px] font-black text-slate-400 uppercase">Identifiant</p>
-                             <p className="text-[10px] font-mono font-bold text-slate-400 uppercase">{selectedService.id.slice(0,12)}</p>
-                          </div>
-                       </div>
-                    </div>
-                 </div>
+                  </div>
+                </div>
+
               </div>
-           </div>
+            </div>
+          </div>
         </div>
       )}
 

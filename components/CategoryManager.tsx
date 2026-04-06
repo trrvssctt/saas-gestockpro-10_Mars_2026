@@ -117,6 +117,7 @@ const CategoryManager: React.FC<{ plan?: SubscriptionPlan }> = ({ plan }) => {
     }
     setSelectedCategory(cat);
     setFormData({ name: cat.name, description: cat.description || '' });
+    setError(null);
     setShowModal('EDIT');
   };
 
@@ -154,7 +155,7 @@ const CategoryManager: React.FC<{ plan?: SubscriptionPlan }> = ({ plan }) => {
             </div>
           ) : (
             <button
-              onClick={() => { setFormData({ name: '', description: '' }); setShowModal('CREATE'); }}
+              onClick={() => { setFormData({ name: '', description: '' }); setError(null); setShowModal('CREATE'); }}
               className="bg-slate-900 text-white px-4 md:px-8 py-4 rounded-2xl font-black hover:bg-indigo-600 transition-all shadow-xl flex items-center gap-3 text-xs uppercase tracking-widest"
             >
               <Plus size={18} /> CRÉER UNE CATÉGORIE
@@ -426,10 +427,17 @@ const CategoryManager: React.FC<{ plan?: SubscriptionPlan }> = ({ plan }) => {
                    </div>
                 </div>
 
+                {error && (
+                  <div className="flex items-start gap-3 p-4 bg-rose-50 border border-rose-200 rounded-2xl animate-in slide-in-from-top-2 duration-200">
+                    <AlertCircle size={16} className="text-rose-500 mt-0.5 shrink-0" />
+                    <p className="text-xs font-bold text-rose-700 leading-relaxed">{error}</p>
+                  </div>
+                )}
+
                 <div className="flex flex-wrap gap-4">
                   <button
                     type="button"
-                    onClick={() => setShowModal(null)}
+                    onClick={() => { setShowModal(null); setError(null); }}
                     className="flex-1 py-5 border-2 border-slate-100 text-slate-400 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-slate-50 transition-all"
                   >
                     ANNULER
@@ -483,53 +491,101 @@ const CategoryManager: React.FC<{ plan?: SubscriptionPlan }> = ({ plan }) => {
       )}
 
       {/* DETAILS MODAL */}
-      {showDetailsCategory && (
-        <div className="fixed inset-0 z-[800] flex items-center justify-center p-6 bg-slate-950/95 backdrop-blur-md animate-in fade-in duration-300">
-           <div className="bg-white w-full max-w-4xl mx-4 md:mx-auto rounded-[3rem] shadow-2xl overflow-hidden flex flex-col max-h-[90vh] animate-in zoom-in-95">
-              <div className="px-6 md:px-10 py-6 md:py-8 bg-slate-900 text-white flex justify-between items-center">
-                 <div className="flex items-center gap-4">
-                   <div className="w-16 h-16 bg-indigo-600 rounded-2xl flex items-center justify-center text-2xl shadow-inner">
-                     <Layers size={28} />
-                   </div>
-                   <div>
-                     <h3 className="text-xl md:text-2xl font-black uppercase tracking-tight">{showDetailsCategory.name}</h3>
-                     <p className="text-xs text-indigo-200 uppercase tracking-widest mt-1">ID: {showDetailsCategory.id.slice(0,8)}</p>
-                   </div>
-                 </div>
-                 <button onClick={() => setShowDetailsCategory(null)} className="p-3 hover:bg-white/10 rounded-2xl transition-all"><X size={24} /></button>
+      {showDetailsCategory && (() => {
+        const linkedSubs = subcategories.filter(s => (s.categoryId || s.category_id) === showDetailsCategory.id);
+        return (
+          <div className="fixed inset-0 z-[800] flex items-center justify-center p-4 md:p-6 bg-slate-950/95 backdrop-blur-md animate-in fade-in duration-300">
+            <div className="bg-white w-full max-w-4xl mx-auto rounded-[2.5rem] shadow-2xl overflow-hidden flex flex-col max-h-[92vh] animate-in zoom-in-95 duration-300">
+              {/* Header */}
+              <div className="px-6 md:px-10 py-6 bg-gradient-to-r from-slate-900 to-indigo-900 text-white flex justify-between items-center shrink-0">
+                <div className="flex items-center gap-4">
+                  <div className="w-14 h-14 bg-indigo-500/30 border border-indigo-400/30 rounded-2xl flex items-center justify-center shadow-inner">
+                    <Layers size={26} />
+                  </div>
+                  <div>
+                    <p className="text-[9px] font-black text-indigo-300 uppercase tracking-[0.3em] mb-1">Détail Catégorie</p>
+                    <h3 className="text-xl md:text-2xl font-black uppercase tracking-tight leading-none">{showDetailsCategory.name}</h3>
+                    <p className="text-[9px] text-indigo-300/70 font-mono mt-1 uppercase tracking-widest">REF: {showDetailsCategory.id.slice(0,8)}</p>
+                  </div>
+                </div>
+                <button onClick={() => setShowDetailsCategory(null)} className="p-3 bg-white/5 hover:bg-white/15 rounded-2xl transition-all"><X size={22} /></button>
               </div>
-              <div className="flex-1 overflow-y-auto p-4 md:p-8 bg-slate-50 custom-scrollbar">
-                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                   <div className="lg:col-span-1 bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
-                     <h4 className="text-xs font-black uppercase text-slate-400">Détails</h4>
-                     <p className="text-sm font-black text-slate-800 mt-3">{showDetailsCategory.description || '—'}</p>
-                     <div className="mt-6">
-                       <h5 className="text-[10px] font-black text-slate-400 uppercase">Sous-catégories liées</h5>
-                       <p className="text-2xl font-black text-indigo-700 mt-2">{subcategories.filter(s => (s.categoryId || s.category_id) === showDetailsCategory.id).length}</p>
-                     </div>
-                   </div>
-                   <div className="lg:col-span-2 bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
-                     <h4 className="text-xs font-black uppercase text-slate-400">Liste des sous-catégories</h4>
-                     <div className="mt-4 space-y-3">
-                       {subcategories.filter(s => (s.categoryId || s.category_id) === showDetailsCategory.id).length === 0 ? (
-                         <div className="py-10 text-center text-slate-300">Aucune sous-catégorie liée</div>
-                       ) : (
-                         subcategories.filter(s => (s.categoryId || s.category_id) === showDetailsCategory.id).map(sc => (
-                           <div key={sc.id} className="p-3 rounded-xl border border-slate-100 flex items-center justify-between">
-                             <div>
-                               <p className="font-black text-slate-800">{sc.name}</p>
-                               <p className="text-xs text-slate-400 mt-1">ID: {sc.id.slice(0,8)}</p>
-                             </div>
-                           </div>
-                         ))
-                       )}
-                     </div>
-                   </div>
-                 </div>
+
+              {/* Body */}
+              <div className="flex-1 overflow-y-auto p-4 md:p-8 bg-slate-50/60 custom-scrollbar">
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+
+                  {/* Left column */}
+                  <div className="lg:col-span-1 space-y-4">
+                    {/* Stat card */}
+                    <div className="bg-gradient-to-br from-indigo-600 to-indigo-700 p-6 rounded-2xl text-white shadow-lg shadow-indigo-200 relative overflow-hidden">
+                      <div className="absolute -right-4 -bottom-4 opacity-10"><Layers size={80}/></div>
+                      <p className="text-[9px] font-black uppercase tracking-[0.25em] opacity-70 mb-3">Sous-catégories</p>
+                      <p className="text-4xl font-black">{linkedSubs.length}</p>
+                      <p className="text-[9px] font-black uppercase tracking-widest opacity-60 mt-1">
+                        {linkedSubs.length === 0 ? 'Aucune rattachée' : linkedSubs.length === 1 ? 'sous-segment actif' : 'sous-segments actifs'}
+                      </p>
+                    </div>
+
+                    {/* Description */}
+                    <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm">
+                      <h4 className="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-3">Description</h4>
+                      <p className="text-sm text-slate-700 font-medium leading-relaxed">
+                        {showDetailsCategory.description || <span className="text-slate-300 italic">Aucune description renseignée.</span>}
+                      </p>
+                    </div>
+
+                    {/* Status */}
+                    <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm flex items-center gap-4">
+                      <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${linkedSubs.length > 0 ? 'bg-amber-50 text-amber-500' : 'bg-emerald-50 text-emerald-500'}`}>
+                        {linkedSubs.length > 0 ? <Lock size={18}/> : <CheckCircle2 size={18}/>}
+                      </div>
+                      <div>
+                        <p className="text-[9px] font-black uppercase tracking-widest text-slate-400">Statut</p>
+                        <p className="text-xs font-black text-slate-800 mt-0.5">
+                          {linkedSubs.length > 0 ? 'Lié — modifications verrouillées' : 'Libre — modifiable'}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Right column — subcategory list */}
+                  <div className="lg:col-span-2 bg-white rounded-2xl border border-slate-100 shadow-sm flex flex-col overflow-hidden">
+                    <div className="px-6 py-4 border-b border-slate-50 flex items-center justify-between">
+                      <h4 className="text-[9px] font-black uppercase tracking-widest text-slate-400 flex items-center gap-2">
+                        <ChevronRight size={14} className="text-indigo-400"/> Sous-catégories rattachées
+                      </h4>
+                      <span className="text-[8px] font-black bg-indigo-50 text-indigo-600 px-3 py-1 rounded-full uppercase tracking-widest">{linkedSubs.length} résultat{linkedSubs.length !== 1 ? 's' : ''}</span>
+                    </div>
+                    <div className="flex-1 overflow-y-auto p-4 space-y-2 custom-scrollbar min-h-[200px]">
+                      {linkedSubs.length === 0 ? (
+                        <div className="py-16 flex flex-col items-center gap-3 text-slate-300">
+                          <Info size={32}/>
+                          <p className="text-[9px] font-black uppercase tracking-widest">Aucune sous-catégorie liée</p>
+                        </div>
+                      ) : (
+                        linkedSubs.map((sc, idx) => (
+                          <div key={sc.id} className="flex items-center gap-4 p-4 rounded-xl border border-slate-100 hover:border-indigo-100 hover:bg-indigo-50/30 transition-all group">
+                            <div className="w-8 h-8 bg-indigo-50 text-indigo-500 rounded-lg flex items-center justify-center text-[10px] font-black shrink-0 group-hover:bg-indigo-100 transition-colors">
+                              {idx + 1}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="font-black text-slate-800 text-sm truncate">{sc.name}</p>
+                              {sc.description && <p className="text-[9px] text-slate-400 font-medium truncate mt-0.5">{sc.description}</p>}
+                            </div>
+                            <span className="text-[8px] font-mono text-slate-300 uppercase shrink-0">#{sc.id.slice(0,6)}</span>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+
+                </div>
               </div>
-           </div>
-        </div>
-      )}
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 };

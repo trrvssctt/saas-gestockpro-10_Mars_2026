@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { 
-  Plus, Search, Eye, X, RefreshCw, ShoppingCart, Wallet, 
+  Plus, Search, Eye, X, RefreshCw, ShoppingCart, Wallet,
   Loader2, DollarSign, Trash2, ArrowRight,
-  Package, PlusCircle, MinusCircle, FileText, 
+  Package, PlusCircle, MinusCircle, FileText,
   CheckCircle, Printer, Truck, Sparkles, Receipt,
   History, Info, ChevronRight, Ban, Boxes, CreditCard,
   Plus as PlusSmall, Minus as MinusSmall, FileDown,
-  Download,
+  Download, Upload,
   RotateCcw, AlertTriangle, Edit3, Save, Lock, Clock, Zap, ShieldAlert,
   User as UserIcon, CheckCircle2, Percent, ClipboardList, Filter, Calendar,
   ChevronDown
@@ -53,14 +53,32 @@ const Sales = ({ currency, user, tenantSettings, plan }: { currency: string, use
     deliveryState: 'ALL'  // ALL, DELIVERED, PENDING, PARTIAL
   });
 
-  const [paymentForm, setPaymentForm] = useState({ amount: 0, method: 'CASH', reference: '' });
+  const [paymentForm, setPaymentForm] = useState({
+    amount: 0,
+    method: 'CASH',
+    reference: '',
+    proofImage: '',      // base64 image pour mobile money
+    chequeNumber: '',
+    bankName: '',
+    chequeDate: new Date().toISOString().split('T')[0],
+    chequeOrder: ''
+  });
+  const [updatingPaymentId, setUpdatingPaymentId] = useState<string | null>(null);
   const [deliveryQuantities, setDeliveryQuantities] = useState<Record<string, number>>({});
   const [cancelForm, setCancelForm] = useState({ reason: '', returnToStock: {} as Record<string, number> });
 
   const [saleForm, setSaleForm] = useState({
-    customerId: '', 
+    customerId: '',
+    walkinName: '',
+    walkinPhone: '',
     paymentMethod: 'CASH',
     amountPaid: 0,
+    paymentReference: '',
+    paymentProofImage: '',
+    chequeNumber: '',
+    bankName: '',
+    chequeDate: new Date().toISOString().split('T')[0],
+    chequeOrder: '',
     items: [] as { productId: string, quantity: number, price: number, name: string, type: 'PRODUCT' | 'SERVICE' }[]
   });
   const showToast = useToast();
@@ -233,8 +251,39 @@ const Sales = ({ currency, user, tenantSettings, plan }: { currency: string, use
     e.preventDefault();
     if (activeInventory) { showToast("Ventes bloquées durant l'inventaire.", 'info'); return; }
     if (saleForm.items.length === 0) { showToast("Le panier est vide.", 'error'); return; }
+
+    const hasPaid = parseFloat(saleForm.amountPaid.toString()) > 0;
+    const isMobileMoneyCreate = ['WAVE', 'ORANGE_MONEY', 'MTN_MOMO'].includes(saleForm.paymentMethod);
+    const isDirectSale = !saleForm.customerId;
+
+    // Vente directe (client de passage) : nom et numéro obligatoires
+    if (!editModeId && isDirectSale) {
+      if (!saleForm.walkinName.trim()) {
+        showToast('Veuillez renseigner le nom du client de passage', 'error');
+        return;
+      }
+      if (!saleForm.walkinPhone.trim()) {
+        showToast('Veuillez renseigner le numéro du client de passage', 'error');
+        return;
+      }
+      // Référence obligatoire pour paiement mobile (vente directe)
+      if (hasPaid && isMobileMoneyCreate && !saleForm.paymentReference) {
+        showToast('Veuillez saisir la référence de transaction pour ce paiement mobile', 'error');
+        return;
+      }
+    }
+
+    if (!editModeId && hasPaid && isMobileMoneyCreate && !saleForm.paymentReference && !saleForm.paymentProofImage) {
+      showToast('Veuillez saisir la référence de transaction ou joindre une preuve (image)', 'error');
+      return;
+    }
+    if (!editModeId && hasPaid && saleForm.paymentMethod === 'CHEQUE' && (!saleForm.chequeNumber || !saleForm.bankName)) {
+      showToast('Veuillez renseigner le numéro de chèque et la banque émettrice', 'error');
+      return;
+    }
+
     setActionLoading(true);
-      try {
+    try {
       if (!editModeId && !authBridge.isCreationAllowed(user, 'sales', monthlySalesCount)) {
         if (plan?.id === 'PRO') showToast('Limite du plan PRO atteinte : maximum 50 ventes par mois.', 'info');
         else showToast('Limite du plan Basic atteinte : maximum 20 ventes par mois.', 'info');
@@ -244,11 +293,19 @@ const Sales = ({ currency, user, tenantSettings, plan }: { currency: string, use
       if (editModeId) {
         await apiClient.put(`/sales/${editModeId}`, { customerId: saleForm.customerId || null, items: saleForm.items });
       } else {
-        await apiClient.post('/sales', { 
-          customerId: saleForm.customerId || null, 
-          items: saleForm.items, 
-          amountPaid: parseFloat(saleForm.amountPaid.toString()), 
-          paymentMethod: saleForm.paymentMethod 
+        await apiClient.post('/sales', {
+          customerId: saleForm.customerId || null,
+          walkinName: !saleForm.customerId ? saleForm.walkinName.trim() : null,
+          walkinPhone: !saleForm.customerId ? saleForm.walkinPhone.trim() : null,
+          items: saleForm.items,
+          amountPaid: parseFloat(saleForm.amountPaid.toString()),
+          paymentMethod: saleForm.paymentMethod,
+          paymentReference: saleForm.paymentReference || null,
+          paymentProofImage: saleForm.paymentProofImage || null,
+          chequeNumber: saleForm.chequeNumber || null,
+          bankName: saleForm.bankName || null,
+          chequeDate: saleForm.chequeDate || null,
+          chequeOrder: saleForm.chequeOrder || null,
         });
       }
       setShowCreateModal(false);
@@ -266,13 +323,24 @@ const Sales = ({ currency, user, tenantSettings, plan }: { currency: string, use
       showToast('Le montant doit être supérieur à 0', 'error');
       return;
     }
-    
+
     const remainingAmount = parseFloat(showPaymentModal.totalTtc) - parseFloat(showPaymentModal.amountPaid);
     if (paymentForm.amount > remainingAmount) {
       showToast(`Le montant ne peut pas dépasser le solde restant de ${remainingAmount.toLocaleString()} ${currency}`, 'error');
       return;
     }
-    
+
+    const isMobileMoney = ['WAVE', 'ORANGE_MONEY', 'MTN_MOMO'].includes(paymentForm.method);
+    if (isMobileMoney && !paymentForm.reference && !paymentForm.proofImage) {
+      showToast('Veuillez saisir la référence de transaction ou joindre une preuve (image)', 'error');
+      return;
+    }
+
+    if (paymentForm.method === 'CHEQUE' && (!paymentForm.chequeNumber || !paymentForm.bankName)) {
+      showToast('Veuillez renseigner le numéro de chèque et la banque émettrice', 'error');
+      return;
+    }
+
     setActionLoading(true);
     try {
       await apiClient.post(`/sales/${showPaymentModal.id}/payments`, paymentForm);
@@ -281,6 +349,17 @@ const Sales = ({ currency, user, tenantSettings, plan }: { currency: string, use
       fetchData();
     } catch (e: any) { showToast(e.message || 'Erreur', 'error'); }
     finally { setActionLoading(false); }
+  };
+
+  const handleUpdateChequeStatus = async (paymentId: string, newStatus: string) => {
+    setUpdatingPaymentId(paymentId);
+    try {
+      await apiClient.put(`/sales/payments/${paymentId}/status`, { status: newStatus });
+      showToast('Statut du chèque mis à jour', 'success');
+      setSelectedSaleDetails(null);
+      fetchData();
+    } catch (e: any) { showToast(e.message || 'Erreur', 'error'); }
+    finally { setUpdatingPaymentId(null); }
   };
 
   const handleDelivery = async () => {
@@ -411,9 +490,9 @@ const Sales = ({ currency, user, tenantSettings, plan }: { currency: string, use
                   const items = [
                     { label: 'CSV (.csv)', action: exportInfo.csv, icon: '📄' },
                     { label: 'Excel (.xlsx)', action: exportInfo.excel, icon: '📊' },
-                    { label: 'PDF (impression)', action: exportInfo.pdf, icon: '🖨️' },
+                    /*{ label: 'PDF (impression)', action: exportInfo.pdf, icon: '🖨️' },
                     { label: 'Image PNG', action: exportInfo.imagePng, icon: '🖼️' },
-                    { label: 'Image JPG', action: exportInfo.imageJpg, icon: '📷' },
+                    { label: 'Image JPG', action: exportInfo.imageJpg, icon: '📷' },*/
                   ];
                   return items.map(({ label, action, icon }) => (
                     <button
@@ -435,7 +514,7 @@ const Sales = ({ currency, user, tenantSettings, plan }: { currency: string, use
              </div>
           ) : (
             <button
-              onClick={() => { if (activeInventory) return; setEditModeId(null); setSaleForm({ customerId: '', paymentMethod: 'CASH', amountPaid: 0, items: [] }); setShowCreateModal(true); }}
+              onClick={() => { if (activeInventory) return; setEditModeId(null); setSaleForm({ customerId: '', paymentMethod: 'CASH', amountPaid: 0, paymentReference: '', paymentProofImage: '', chequeNumber: '', bankName: '', chequeDate: new Date().toISOString().split('T')[0], chequeOrder: '', items: [] }); setShowCreateModal(true); }}
               disabled={!!activeInventory}
               className={`px-4 md:px-10 py-3 md:py-5 rounded-[1.5rem] font-black transition-all shadow-xl flex items-center gap-3 text-xs uppercase tracking-widest active:scale-95 ${activeInventory ? 'bg-slate-100 text-slate-300' : 'bg-slate-900 text-white hover:bg-indigo-600'}`}
             >
@@ -540,9 +619,19 @@ const Sales = ({ currency, user, tenantSettings, plan }: { currency: string, use
                     </td>
                     <td className="px-3 md:px-8 py-3 md:py-5">
                       <div className="flex items-center gap-2">
-                        <p className={`font-black text-slate-800 text-sm uppercase truncate max-w-[150px] ${isAnnule ? 'text-slate-400' : ''}`}>
-                          {sale.customer?.companyName || 'VENTE DIRECTE'}
-                        </p>
+                        <div>
+                          <p className={`font-black text-slate-800 text-sm uppercase truncate max-w-[150px] ${isAnnule ? 'text-slate-400' : ''}`}>
+                            {sale.customer?.companyName || sale.walkin_name || sale.walkinName || 'VENTE DIRECTE'}
+                          </p>
+                          {!sale.customer && (sale.walkin_name || sale.walkinName) && (
+                            <p className="text-[9px] text-sky-600 font-bold mt-0.5">
+                              {sale.walkin_phone || sale.walkinPhone}
+                            </p>
+                          )}
+                          {!sale.customer && !(sale.walkin_name || sale.walkinName) && (
+                            <p className="text-[8px] text-slate-400 font-bold mt-0.5">Client de passage</p>
+                          )}
+                        </div>
                         {isAnnule && <span className="bg-rose-600 text-white text-[7px] font-black px-1.5 py-0.5 rounded uppercase tracking-widest">ANNULÉ</span>}
                       </div>
                     </td>
@@ -652,34 +741,97 @@ const Sales = ({ currency, user, tenantSettings, plan }: { currency: string, use
                    ))}
                 </div>
 
-                <div className="p-4 md:p-8 bg-slate-900 text-white space-y-4 md:space-y-6">
-                   <div className="space-y-4">
-                      <select required value={saleForm.customerId} onChange={e => setSaleForm({...saleForm, customerId: e.target.value})} className="w-full bg-white/10 border border-white/10 rounded-2xl px-5 py-4 text-xs font-black outline-none focus:ring-2 focus:ring-indigo-500 transition-all text-white">
+                <div className="shrink-0 bg-slate-900 text-white flex flex-col">
+                   {/* Zone scrollable : client + paiement */}
+                   <div className="overflow-y-auto max-h-[38vh] px-4 md:px-6 pt-4 pb-2 space-y-3 custom-scrollbar">
+                      {/* Client */}
+                      <select required value={saleForm.customerId} onChange={e => setSaleForm({...saleForm, customerId: e.target.value, walkinName: '', walkinPhone: ''})} className="w-full bg-white/10 border border-white/10 rounded-xl px-4 py-3 text-xs font-black outline-none focus:ring-2 focus:ring-indigo-500 transition-all text-white">
                          <option value="" className="text-slate-900">VENTE DIRECTE (PASSAGE)</option>
                          {customers.map(c => <option key={c.id} value={c.id} className="text-slate-900">{c.companyName}</option>)}
                       </select>
-                      {!editModeId && (
-                        <div className="grid grid-cols-2 gap-4">
-                           <div className="space-y-1.5">
-                              <p className="text-[8px] font-black uppercase text-indigo-400 tracking-widest pl-2">Méthode</p>
-                              <select value={saleForm.paymentMethod} onChange={e => setSaleForm({...saleForm, paymentMethod: e.target.value})} className="w-full bg-white/10 border border-white/10 rounded-2xl px-5 py-3.5 text-xs font-black outline-none text-white appearance-none">
-                                <option value="CASH">CASH</option>
-                                <option value="WAVE">WAVE</option>
-                                <option value="ORANGE_MONEY">ORANGE MONEY</option>
-                                <option value="MTN_MOMO">MTN MOMO</option>
-                              </select>
-                           </div>
-                           <div className="space-y-1.5">
-                              <p className="text-[8px] font-black uppercase text-indigo-400 tracking-widest pl-2">Acompte</p>
-                              <input type="number" placeholder="Montant" value={saleForm.amountPaid} onChange={e => setSaleForm({...saleForm, amountPaid: parseFloat(e.target.value) || 0})} className="w-full bg-white/10 border border-white/10 rounded-2xl px-5 py-3 text-xs font-black outline-none text-white" />
-                           </div>
+
+                      {/* Champs obligatoires pour vente directe (client de passage) */}
+                      {!saleForm.customerId && !editModeId && (
+                        <div className="p-2.5 bg-sky-500/10 border border-sky-400/20 rounded-xl space-y-2">
+                          <p className="text-[7px] font-black text-sky-400 uppercase tracking-widest flex items-center gap-1"><UserIcon size={9}/> Infos client de passage <span className="text-rose-400">*</span></p>
+                          <input
+                            type="text"
+                            placeholder="Nom du client *"
+                            value={saleForm.walkinName}
+                            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSaleForm({...saleForm, walkinName: e.target.value})}
+                            className="w-full bg-white/10 border border-white/10 rounded-lg px-3 py-2 text-[10px] font-bold outline-none text-white placeholder-white/40"
+                          />
+                          <input
+                            type="tel"
+                            placeholder="Numéro de téléphone *"
+                            value={saleForm.walkinPhone}
+                            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSaleForm({...saleForm, walkinPhone: e.target.value})}
+                            className="w-full bg-white/10 border border-white/10 rounded-lg px-3 py-2 text-[10px] font-bold outline-none text-white placeholder-white/40"
+                          />
                         </div>
                       )}
+
+                      {!editModeId && (
+                        <>
+                          {/* Méthode + Montant */}
+                          <div className="grid grid-cols-2 gap-2">
+                            <div>
+                              <p className="text-[7px] font-black uppercase text-indigo-400 tracking-widest pl-1 mb-1">Méthode</p>
+                              <select value={saleForm.paymentMethod} onChange={e => setSaleForm({...saleForm, paymentMethod: e.target.value, paymentReference: '', paymentProofImage: '', chequeNumber: '', bankName: '', chequeOrder: ''})} className="w-full bg-white/10 border border-white/10 rounded-xl px-3 py-2.5 text-[10px] font-black outline-none text-white appearance-none">
+                                <option value="CASH" className="text-slate-900">ESPÈCES</option>
+                                <option value="WAVE" className="text-slate-900">WAVE</option>
+                                <option value="ORANGE_MONEY" className="text-slate-900">ORANGE MONEY</option>
+                                <option value="MTN_MOMO" className="text-slate-900">MTN MOMO</option>
+                                <option value="TRANSFER" className="text-slate-900">VIREMENT</option>
+                                <option value="CHEQUE" className="text-slate-900">CHÈQUE</option>
+                              </select>
+                            </div>
+                            <div>
+                              <p className="text-[7px] font-black uppercase text-indigo-400 tracking-widest pl-1 mb-1">
+                                {saleForm.paymentMethod === 'CHEQUE' ? 'Montant chèque' : 'Acompte'}
+                              </p>
+                              <input type="number" placeholder="0" value={saleForm.amountPaid} onChange={e => setSaleForm({...saleForm, amountPaid: parseFloat(e.target.value) || 0})} className="w-full bg-white/10 border border-white/10 rounded-xl px-3 py-2.5 text-[10px] font-black outline-none text-white" />
+                            </div>
+                          </div>
+
+                          {/* Mobile Money */}
+                          {['WAVE', 'ORANGE_MONEY', 'MTN_MOMO'].includes(saleForm.paymentMethod) && parseFloat(saleForm.amountPaid.toString()) > 0 && (
+                            <div className="p-2.5 bg-amber-500/10 border border-amber-400/20 rounded-xl space-y-2">
+                              <p className="text-[7px] font-black text-amber-400 uppercase tracking-widest flex items-center gap-1"><AlertTriangle size={9}/> Réf. OU preuve obligatoire</p>
+                              <input type="text" placeholder="Référence de transaction" value={saleForm.paymentReference} onChange={e => setSaleForm({...saleForm, paymentReference: e.target.value})} className="w-full bg-white/10 border border-white/10 rounded-lg px-3 py-2 text-[10px] font-bold outline-none text-white placeholder-white/40"/>
+                              <label className={`flex items-center gap-2 px-3 py-2 rounded-lg border cursor-pointer transition-all text-[9px] font-black uppercase ${saleForm.paymentProofImage ? 'bg-emerald-500/20 border-emerald-400/30 text-emerald-300' : 'bg-white/5 border-white/10 text-white/40 hover:border-amber-400/30'}`}>
+                                <Upload size={10}/>{saleForm.paymentProofImage ? 'Preuve jointe ✓' : 'Joindre preuve'}
+                                <input type="file" accept="image/*" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (!f) return; const r = new FileReader(); r.onload = ev => setSaleForm({...saleForm, paymentProofImage: ev.target?.result as string}); r.readAsDataURL(f); }}/>
+                              </label>
+                            </div>
+                          )}
+
+                          {/* Chèque — grille compacte 2×2 */}
+                          {saleForm.paymentMethod === 'CHEQUE' && parseFloat(saleForm.amountPaid.toString()) > 0 && (
+                            <div className="p-2.5 bg-indigo-500/10 border border-indigo-400/20 rounded-xl space-y-2">
+                              <p className="text-[7px] font-black text-indigo-400 uppercase tracking-widest flex items-center gap-1">
+                                <CreditCard size={9}/> Détails chèque · comptabilisé à l'encaissement
+                              </p>
+                              <div className="grid grid-cols-2 gap-2">
+                                <input type="text" placeholder="N° chèque *" value={saleForm.chequeNumber} onChange={e => setSaleForm({...saleForm, chequeNumber: e.target.value})} className="bg-white/10 border border-white/10 rounded-lg px-3 py-2 text-[10px] font-bold outline-none text-white placeholder-white/40 w-full"/>
+                                <input type="text" placeholder="Banque *" value={saleForm.bankName} onChange={e => setSaleForm({...saleForm, bankName: e.target.value})} className="bg-white/10 border border-white/10 rounded-lg px-3 py-2 text-[10px] font-bold outline-none text-white placeholder-white/40 w-full"/>
+                                <input type="text" placeholder="Ordre / Bénéficiaire" value={saleForm.chequeOrder} onChange={e => setSaleForm({...saleForm, chequeOrder: e.target.value})} className="bg-white/10 border border-white/10 rounded-lg px-3 py-2 text-[10px] font-bold outline-none text-white placeholder-white/40 w-full"/>
+                                <input type="date" value={saleForm.chequeDate} onChange={e => setSaleForm({...saleForm, chequeDate: e.target.value})} className="bg-white/10 border border-white/10 rounded-lg px-3 py-2 text-[10px] font-bold outline-none text-white w-full"/>
+                              </div>
+                            </div>
+                          )}
+                        </>
+                      )}
                    </div>
-                   <div className="flex justify-between items-end border-t border-white/10 pt-6">
-                      <div><p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Total TTC</p><p className="text-3xl font-black text-white">{cartTotal.toLocaleString()} <span className="text-xs">{currency}</span></p></div>
-                      <button onClick={handleSubmitSale} disabled={actionLoading || saleForm.items.length === 0} className="px-8 py-4 bg-indigo-600 text-white rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-emerald-500 transition-all shadow-xl shadow-indigo-900/50 flex items-center gap-3">
-                         {actionLoading ? <Loader2 className="animate-spin" size={18}/> : <>{editModeId ? 'METTRE À JOUR' : 'VALIDER LA VENTE'} <ArrowRight size={18}/></>}
+
+                   {/* Barre total + bouton — toujours visible */}
+                   <div className="px-4 md:px-6 py-4 border-t border-white/10 flex justify-between items-center">
+                      <div>
+                        <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Total TTC</p>
+                        <p className="text-2xl font-black text-white leading-tight">{cartTotal.toLocaleString()} <span className="text-[10px]">{currency}</span></p>
+                      </div>
+                      <button onClick={handleSubmitSale} disabled={actionLoading || saleForm.items.length === 0} className="px-6 py-3.5 bg-indigo-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-emerald-500 transition-all shadow-xl shadow-indigo-900/50 flex items-center gap-2">
+                         {actionLoading ? <Loader2 className="animate-spin" size={16}/> : <>{editModeId ? 'METTRE À JOUR' : 'VALIDER'} <ArrowRight size={16}/></>}
                       </button>
                    </div>
                 </div>
@@ -742,6 +894,26 @@ const Sales = ({ currency, user, tenantSettings, plan }: { currency: string, use
                  </div>
 
                  <div className="lg:col-span-4 space-y-8">
+                    {/* Bloc client (enregistré ou de passage) */}
+                    {(selectedSaleDetails.customer || selectedSaleDetails.walkin_name || selectedSaleDetails.walkinName) && (
+                      <div className="p-4 md:p-6 bg-white rounded-[2rem] border border-slate-100 shadow-sm space-y-1">
+                        <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-2">
+                          {selectedSaleDetails.customer ? 'Client' : 'Client de passage'}
+                        </p>
+                        <p className="text-sm font-black text-slate-900 uppercase">
+                          {selectedSaleDetails.customer?.companyName || selectedSaleDetails.walkin_name || selectedSaleDetails.walkinName}
+                        </p>
+                        {selectedSaleDetails.customer ? (
+                          <>
+                            {selectedSaleDetails.customer.phone && <p className="text-xs text-slate-500 font-medium">{selectedSaleDetails.customer.phone}</p>}
+                            {selectedSaleDetails.customer.email && <p className="text-xs text-slate-500 font-medium">{selectedSaleDetails.customer.email}</p>}
+                          </>
+                        ) : (
+                          <p className="text-xs text-sky-600 font-bold">{selectedSaleDetails.walkin_phone || selectedSaleDetails.walkinPhone}</p>
+                        )}
+                      </div>
+                    )}
+
                     <div className={`p-4 md:p-8 rounded-[2rem] md:rounded-[3rem] text-white shadow-xl space-y-4 md:space-y-6 ${selectedSaleDetails.status === 'ANNULE' ? 'bg-rose-900' : 'bg-slate-900'}`}>
                        <div className="flex justify-between items-center"><span className="text-[10px] font-black text-indigo-400 uppercase">Statut Transaction</span><span className={`px-3 py-1 rounded-full text-[8px] font-black uppercase ${selectedSaleDetails.status === 'TERMINE' ? 'bg-emerald-500/20 text-emerald-400' : selectedSaleDetails.status === 'ANNULE' ? 'bg-white/10 text-white' : 'bg-amber-500/20 text-amber-400'}`}>{selectedSaleDetails.status}</span></div>
                        <div className="space-y-1"><p className={`text-3xl font-black ${selectedSaleDetails.status === 'ANNULE' ? 'line-through opacity-50' : ''}`}>{parseFloat(selectedSaleDetails.totalTtc).toLocaleString()} {currency}</p><p className="text-[10px] font-bold text-slate-500 uppercase">Total Net à Payer</p></div>
@@ -751,13 +923,89 @@ const Sales = ({ currency, user, tenantSettings, plan }: { currency: string, use
                        </div>
                     </div>
 
+                    {/* Historique des paiements */}
+                    {selectedSaleDetails.payments && selectedSaleDetails.payments.length > 0 && (
+                      <div className="space-y-3">
+                        <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest px-1">Historique des règlements</p>
+                        {selectedSaleDetails.payments.map((p: any) => {
+                          const isCheque = p.method === 'CHEQUE';
+                          const statusColors: Record<string, string> = {
+                            PENDING: 'bg-amber-100 text-amber-700',
+                            REGISTERED: 'bg-blue-100 text-blue-700',
+                            DEPOSITED: 'bg-indigo-100 text-indigo-700',
+                            PROCESSING: 'bg-purple-100 text-purple-700',
+                            PAID: 'bg-emerald-100 text-emerald-700',
+                            REJECTED: 'bg-rose-100 text-rose-700',
+                            FAILED: 'bg-rose-100 text-rose-700',
+                          };
+                          const statusLabels: Record<string, string> = {
+                            PENDING: 'Reçu',
+                            REGISTERED: 'Enregistré',
+                            DEPOSITED: 'Déposé',
+                            PROCESSING: 'En traitement',
+                            PAID: 'Encaissé',
+                            REJECTED: 'Rejeté',
+                            FAILED: 'Impayé',
+                          };
+                          const chequeNextStatuses: Record<string, {value: string, label: string}[]> = {
+                            PENDING:    [{ value: 'REGISTERED', label: 'Enregistrer' }, { value: 'REJECTED', label: 'Rejeter' }],
+                            REGISTERED: [{ value: 'DEPOSITED', label: 'Déposer en banque' }, { value: 'REJECTED', label: 'Rejeter' }],
+                            DEPOSITED:  [{ value: 'PROCESSING', label: 'En traitement' }, { value: 'REJECTED', label: 'Rejeter' }],
+                            PROCESSING: [{ value: 'PAID', label: 'Encaisser ✓' }, { value: 'REJECTED', label: 'Rejeter' }],
+                            PAID: [],
+                            REJECTED: [],
+                            FAILED: [],
+                          };
+                          return (
+                            <div key={p.id} className={`p-4 rounded-2xl border ${isCheque ? 'bg-indigo-50 border-indigo-100' : 'bg-slate-50 border-slate-100'}`}>
+                              <div className="flex justify-between items-start">
+                                <div>
+                                  <p className="text-[10px] font-black text-slate-800 uppercase">{p.method.replace('_', ' ')} — {parseFloat(p.amount).toLocaleString()} {currency}</p>
+                                  {p.reference && <p className="text-[9px] text-slate-400 font-bold mt-0.5">Réf: {p.reference}</p>}
+                                  {isCheque && p.chequeNumber && <p className="text-[9px] text-slate-400 font-bold mt-0.5">Chèque N° {p.chequeNumber} — {p.bankName}</p>}
+                                  <p className="text-[8px] text-slate-300 font-bold mt-0.5">{new Date(p.paymentDate || p.createdAt).toLocaleDateString('fr-FR')}</p>
+                                </div>
+                                <span className={`px-2 py-0.5 rounded-full text-[8px] font-black uppercase ${statusColors[p.status] || 'bg-slate-100 text-slate-500'}`}>
+                                  {statusLabels[p.status] || p.status}
+                                </span>
+                              </div>
+                              {p.proofImage && (
+                                <img src={p.proofImage} alt="preuve" className="mt-2 w-full h-20 object-cover rounded-xl border border-slate-200"/>
+                              )}
+                              {/* Actions de suivi chèque */}
+                              {isCheque && chequeNextStatuses[p.status]?.length > 0 && (
+                                <div className="flex gap-2 mt-3 flex-wrap">
+                                  {chequeNextStatuses[p.status].map(action => (
+                                    <button
+                                      key={action.value}
+                                      onClick={() => handleUpdateChequeStatus(p.id, action.value)}
+                                      disabled={updatingPaymentId === p.id}
+                                      className={`px-3 py-1.5 rounded-xl text-[8px] font-black uppercase tracking-wide transition-all ${
+                                        action.value === 'REJECTED' || action.value === 'FAILED'
+                                          ? 'bg-rose-100 text-rose-700 hover:bg-rose-600 hover:text-white'
+                                          : action.value === 'PAID'
+                                            ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-600 hover:text-white'
+                                            : 'bg-indigo-100 text-indigo-700 hover:bg-indigo-600 hover:text-white'
+                                      }`}
+                                    >
+                                      {updatingPaymentId === p.id ? <Loader2 size={10} className="animate-spin"/> : action.label}
+                                    </button>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+
                     <div className="space-y-3">
                        {selectedSaleDetails.status !== 'ANNULE' && parseFloat(selectedSaleDetails.amountPaid) === 0 && !selectedSaleDetails.items.some((i:any) => (i.quantityDelivered || 0) > 0) && (
                           <button onClick={() => handleEditSaleRequest(selectedSaleDetails)} className="w-full py-4 bg-amber-500 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-lg flex items-center justify-center gap-3 hover:bg-amber-600 transition-all"><Edit3 size={16}/> MODIFIER LES ARTICLES</button>
                        )}
                        
                        {selectedSaleDetails.status !== 'ANNULE' && parseFloat(selectedSaleDetails.amountPaid) < parseFloat(selectedSaleDetails.totalTtc) && (
-                          <button onClick={() => { setPaymentForm({ amount: Math.max(0, parseFloat(selectedSaleDetails.totalTtc) - parseFloat(selectedSaleDetails.amountPaid)), method: 'CASH', reference: '' }); setShowPaymentModal(selectedSaleDetails); }} className="w-full py-4 bg-emerald-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-lg flex items-center justify-center gap-3"><Wallet size={16}/> ENREGISTRER RÈGLEMENT</button>
+                          <button onClick={() => { setPaymentForm({ amount: Math.max(0, parseFloat(selectedSaleDetails.totalTtc) - parseFloat(selectedSaleDetails.amountPaid)), method: 'CASH', reference: '', proofImage: '', chequeNumber: '', bankName: '', chequeDate: new Date().toISOString().split('T')[0], chequeOrder: '' }); setShowPaymentModal(selectedSaleDetails); }} className="w-full py-4 bg-emerald-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-lg flex items-center justify-center gap-3"><Wallet size={16}/> ENREGISTRER RÈGLEMENT</button>
                        )}
                        
                        {selectedSaleDetails.status !== 'ANNULE' && selectedSaleDetails.items.some((i:any) => !i.service_id && ((i.quantityDelivered || 0) < i.quantity)) && (
@@ -791,7 +1039,10 @@ const Sales = ({ currency, user, tenantSettings, plan }: { currency: string, use
                  {(() => {
                    const remainingAmount = parseFloat(showPaymentModal.totalTtc) - parseFloat(showPaymentModal.amountPaid);
                    const isAmountExceeded = paymentForm.amount > remainingAmount;
-                   const isAmountValid = paymentForm.amount > 0 && !isAmountExceeded;
+                   const isMobileMoneyMethod = ['WAVE', 'ORANGE_MONEY', 'MTN_MOMO'].includes(paymentForm.method);
+                   const mobileMoneyValid = !isMobileMoneyMethod || !!(paymentForm.reference || paymentForm.proofImage);
+                   const chequeValid = paymentForm.method !== 'CHEQUE' || !!(paymentForm.chequeNumber && paymentForm.bankName);
+                   const isAmountValid = paymentForm.amount > 0 && !isAmountExceeded && mobileMoneyValid && chequeValid;
                    
                    return (
                      <>
@@ -823,8 +1074,71 @@ const Sales = ({ currency, user, tenantSettings, plan }: { currency: string, use
                               <p className="text-rose-500 text-[9px] font-bold mt-2 px-2">Montant maximum : {remainingAmount.toLocaleString()} {currency}</p>
                             )}
                           </div>
-                          <div><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-2 mb-2 block">Canal</label><select value={paymentForm.method} onChange={e => setPaymentForm({...paymentForm, method: e.target.value})} className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 text-sm font-black outline-none appearance-none"><option value="CASH">ESPÈCES</option><option value="WAVE">WAVE</option><option value="ORANGE_MONEY">ORANGE MONEY</option><option value="MTN_MOMO">MTN MOMO</option></select></div>
-                          <input type="text" placeholder="Référence (Optionnel)" value={paymentForm.reference} onChange={e => setPaymentForm({...paymentForm, reference: e.target.value})} className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 text-sm font-bold outline-none" />
+                          <div>
+                            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-2 mb-2 block">Canal de paiement</label>
+                            <select value={paymentForm.method} onChange={e => setPaymentForm({...paymentForm, method: e.target.value})} className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 text-sm font-black outline-none appearance-none">
+                              <option value="CASH">ESPÈCES</option>
+                              <option value="WAVE">WAVE</option>
+                              <option value="ORANGE_MONEY">ORANGE MONEY</option>
+                              <option value="MTN_MOMO">MTN MOMO</option>
+                              <option value="TRANSFER">VIREMENT BANCAIRE</option>
+                              <option value="CHEQUE">CHÈQUE</option>
+                            </select>
+                          </div>
+
+                          {/* Mobile Money : référence + preuve image (l'un ou l'autre obligatoire) */}
+                          {['WAVE', 'ORANGE_MONEY', 'MTN_MOMO'].includes(paymentForm.method) && (
+                            <div className="space-y-3 p-4 bg-amber-50 border border-amber-200 rounded-2xl">
+                              <p className="text-[9px] font-black text-amber-700 uppercase tracking-widest flex items-center gap-1"><AlertTriangle size={11}/> Référence OU preuve image obligatoire</p>
+                              <input
+                                type="text"
+                                placeholder="Référence de transaction *"
+                                value={paymentForm.reference}
+                                onChange={e => setPaymentForm({...paymentForm, reference: e.target.value})}
+                                className="w-full bg-white border border-amber-200 rounded-xl px-4 py-3 text-sm font-bold outline-none focus:ring-2 focus:ring-amber-300"
+                              />
+                              <div>
+                                <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1 block">Preuve (capture d'écran, reçu)</label>
+                                <label className={`flex items-center gap-3 px-4 py-3 rounded-xl border cursor-pointer transition-all ${paymentForm.proofImage ? 'bg-emerald-50 border-emerald-300 text-emerald-700' : 'bg-white border-slate-200 text-slate-500 hover:border-amber-300'}`}>
+                                  <Upload size={14}/>
+                                  <span className="text-[10px] font-black uppercase truncate">{paymentForm.proofImage ? 'Image jointe ✓' : 'Joindre une image'}</span>
+                                  <input type="file" accept="image/*" className="hidden" onChange={e => {
+                                    const file = e.target.files?.[0];
+                                    if (!file) return;
+                                    const reader = new FileReader();
+                                    reader.onload = ev => setPaymentForm({...paymentForm, proofImage: ev.target?.result as string});
+                                    reader.readAsDataURL(file);
+                                  }}/>
+                                </label>
+                                {paymentForm.proofImage && (
+                                  <div className="mt-2 relative">
+                                    <img src={paymentForm.proofImage} alt="preuve" className="w-full h-28 object-cover rounded-xl border border-emerald-200"/>
+                                    <button onClick={() => setPaymentForm({...paymentForm, proofImage: ''})} className="absolute top-1 right-1 bg-rose-500 text-white rounded-full p-0.5"><X size={12}/></button>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* CASH ou VIREMENT : référence optionnelle */}
+                          {['CASH', 'TRANSFER'].includes(paymentForm.method) && (
+                            <input type="text" placeholder="Référence (optionnel)" value={paymentForm.reference} onChange={e => setPaymentForm({...paymentForm, reference: e.target.value})} className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 text-sm font-bold outline-none"/>
+                          )}
+
+                          {/* CHÈQUE : formulaire complet */}
+                          {paymentForm.method === 'CHEQUE' && (
+                            <div className="space-y-3 p-4 bg-indigo-50 border border-indigo-200 rounded-2xl">
+                              <p className="text-[9px] font-black text-indigo-700 uppercase tracking-widest">Détails du chèque</p>
+                              <p className="text-[8px] text-indigo-500 font-bold">Le montant sera comptabilisé uniquement après encaissement.</p>
+                              <input type="text" placeholder="N° de chèque *" value={paymentForm.chequeNumber} onChange={e => setPaymentForm({...paymentForm, chequeNumber: e.target.value})} className="w-full bg-white border border-indigo-200 rounded-xl px-4 py-3 text-sm font-bold outline-none focus:ring-2 focus:ring-indigo-300"/>
+                              <input type="text" placeholder="Banque émettrice *" value={paymentForm.bankName} onChange={e => setPaymentForm({...paymentForm, bankName: e.target.value})} className="w-full bg-white border border-indigo-200 rounded-xl px-4 py-3 text-sm font-bold outline-none focus:ring-2 focus:ring-indigo-300"/>
+                              <input type="text" placeholder="Ordre (nom bénéficiaire)" value={paymentForm.chequeOrder} onChange={e => setPaymentForm({...paymentForm, chequeOrder: e.target.value})} className="w-full bg-white border border-indigo-200 rounded-xl px-4 py-3 text-sm font-bold outline-none focus:ring-2 focus:ring-indigo-300"/>
+                              <div>
+                                <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1 block">Date du chèque</label>
+                                <input type="date" value={paymentForm.chequeDate} onChange={e => setPaymentForm({...paymentForm, chequeDate: e.target.value})} className="w-full bg-white border border-indigo-200 rounded-xl px-4 py-3 text-sm font-bold outline-none focus:ring-2 focus:ring-indigo-300"/>
+                              </div>
+                            </div>
+                          )}
                        </div>
                        <button 
                          onClick={handleAddPayment} 
@@ -835,7 +1149,7 @@ const Sales = ({ currency, user, tenantSettings, plan }: { currency: string, use
                              : 'bg-slate-900 text-white hover:bg-emerald-600'
                          }`}
                        >
-                          {actionLoading ? <Loader2 className="animate-spin" /> : <><CheckCircle size={18}/> VALIDER L'ENCAISSEMENT</>}
+                          {actionLoading ? <Loader2 className="animate-spin" /> : paymentForm.method === 'CHEQUE' ? <><CheckCircle size={18}/> ENREGISTRER LE CHÈQUE</> : <><CheckCircle size={18}/> VALIDER L'ENCAISSEMENT</>}
                        </button>
                      </>
                    );

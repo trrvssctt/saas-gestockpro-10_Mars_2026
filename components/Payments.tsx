@@ -280,13 +280,20 @@ const Payments = ({ currency, tenantSettings }: { currency: string; tenantSettin
     [filteredPayments, pageSize]
   );
 
+  const CHEQUE_PENDING_STATUSES = ['PENDING', 'REGISTERED', 'DEPOSITED', 'PROCESSING'];
+
   const stats = useMemo(() => {
-    const total   = filteredPayments.reduce((s, p) => s + parseFloat(p.amount), 0);
-    const cash    = filteredPayments.filter(p => p.method === 'CASH').reduce((s, p) => s + parseFloat(p.amount), 0);
+    // Exclure les chèques non encore encaissés du calcul de trésorerie
+    const encaished = filteredPayments.filter(p => !(p.method === 'CHEQUE' && CHEQUE_PENDING_STATUSES.includes(p.status)));
+    const total   = encaished.reduce((s, p) => s + parseFloat(p.amount), 0);
+    const cash    = encaished.filter(p => p.method === 'CASH').reduce((s, p) => s + parseFloat(p.amount), 0);
     const digital = total - cash;
-    const avg     = filteredPayments.length > 0 ? total / filteredPayments.length : 0;
-    return { total, cash, digital, avg, count: filteredPayments.length };
-  }, [filteredPayments]);
+    const avg     = encaished.length > 0 ? total / encaished.length : 0;
+    // Chèques en transit (tous, pas uniquement les filtrés)
+    const pendingCheques = payments.filter(p => p.method === 'CHEQUE' && CHEQUE_PENDING_STATUSES.includes(p.status));
+    const totalPendingCheques = pendingCheques.reduce((s, p) => s + parseFloat(p.amount || 0), 0);
+    return { total, cash, digital, avg, count: encaished.length, totalPendingCheques, pendingCheques };
+  }, [filteredPayments, payments]);
 
   const exportPreviewData = useMemo(() => payments.filter(p => {
     const pDate = new Date(p.createdAt).toISOString().split('T')[0];
@@ -394,6 +401,66 @@ const Payments = ({ currency, tenantSettings }: { currency: string; tenantSettin
           </div>
         </div>
       </div>
+
+      {/* ── CHÈQUES EN CIRCUIT ── */}
+      {stats.pendingCheques.length > 0 && (
+        <div className="bg-amber-50 border border-amber-200 rounded-3xl p-5 md:p-6 space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 bg-amber-500 rounded-2xl flex items-center justify-center shadow"><FileText size={16} className="text-white"/></div>
+              <div>
+                <p className="text-[10px] font-black text-amber-700 uppercase tracking-widest">Chèques en Circuit</p>
+                <p className="text-[9px] text-amber-600 font-bold">{stats.pendingCheques.length} chèque(s) — non encore encaissé(s)</p>
+              </div>
+            </div>
+            <div className="text-right">
+              <p className="text-xl font-black text-amber-700">{fmtAmt(stats.totalPendingCheques)}</p>
+              <p className="text-[9px] text-amber-500 font-bold uppercase">{currency} en attente</p>
+            </div>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-[9px]">
+              <thead>
+                <tr className="bg-amber-100 text-amber-700 font-black uppercase">
+                  <th className="px-3 py-2 rounded-l-xl">Date</th>
+                  <th className="px-3 py-2">Réf. Vente</th>
+                  <th className="px-3 py-2">Client</th>
+                  <th className="px-3 py-2">N° Chèque</th>
+                  <th className="px-3 py-2">Banque</th>
+                  <th className="px-3 py-2">Statut</th>
+                  <th className="px-3 py-2 text-right rounded-r-xl">Montant</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-amber-100">
+                {stats.pendingCheques.map((p: any) => (
+                  <tr key={p.id} className="font-bold hover:bg-amber-50/60">
+                    <td className="px-3 py-2 text-slate-500">{fmtDate(p.createdAt)}</td>
+                    <td className="px-3 py-2 text-indigo-600 font-mono">#{p.saleRef}</td>
+                    <td className="px-3 py-2 text-slate-800 uppercase truncate max-w-[100px]">{p.customer}</td>
+                    <td className="px-3 py-2 text-slate-600">{p.chequeNumber || '—'}</td>
+                    <td className="px-3 py-2 text-slate-600">{p.bankName || '—'}</td>
+                    <td className="px-3 py-2">
+                      <span className={`px-2 py-0.5 rounded-lg text-[8px] font-black uppercase ${
+                        p.status === 'PENDING' ? 'bg-amber-100 text-amber-700' :
+                        p.status === 'REGISTERED' ? 'bg-blue-100 text-blue-700' :
+                        p.status === 'DEPOSITED' ? 'bg-indigo-100 text-indigo-700' :
+                        'bg-purple-100 text-purple-700'
+                      }`}>{p.status}</span>
+                    </td>
+                    <td className="px-3 py-2 text-right font-black text-amber-700">{fmtAmt(p.amount)}</td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot className="bg-amber-100">
+                <tr className="font-black text-[9px]">
+                  <td colSpan={6} className="px-3 py-2 text-right text-amber-600 uppercase">Total en attente</td>
+                  <td className="px-3 py-2 text-right text-amber-700">{fmtAmt(stats.totalPendingCheques)} {currency}</td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </div>
+      )}
 
       {/* ── TOOLBAR ── */}
       <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">

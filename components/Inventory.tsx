@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { StockItem, UserRole, SubscriptionPlan, User, StockMovement } from '../types';
 import { apiClient } from '../services/api';
+import { uploadFile } from '../services/uploadService';
 import YearMonthPicker from './YearMonthPicker';
 import { useToast } from './ToastProvider';
 import { authBridge } from '../services/authBridge';
@@ -15,7 +16,7 @@ import { buildExportHandlers, ExportColumn } from '../services/exportUtils';
 import { FileDown } from 'lucide-react';
 
 
-const Inventory = ({ currency, plan }: { currency: string, userRole?: UserRole, plan?: SubscriptionPlan }) => {
+const Inventory = ({ currency, plan, refreshKey }: { currency: string, userRole?: UserRole, plan?: SubscriptionPlan, refreshKey?: number }) => {
     // State pour le modal de désactivation
     const [showDeactivateConfirm, setShowDeactivateConfirm] = useState<StockItem | null>(null);
 
@@ -98,7 +99,7 @@ const Inventory = ({ currency, plan }: { currency: string, userRole?: UserRole, 
 
   // Pour création multiple : tableau de 1 à 5 produits
   const [formDataList, setFormDataList] = useState([
-    { name: '', unitPrice: 0, minThreshold: 5, quantity: 0, subcategoryId: '', location: '', imageUrl: '' }
+    { name: '', purchasePrice: 0, unitPrice: 0, minThreshold: 5, quantity: 0, subcategoryId: '', location: '', imageUrl: '' }
   ]);
   
   const currentUser = authBridge.getSession()?.user;
@@ -112,7 +113,8 @@ const Inventory = ({ currency, plan }: { currency: string, userRole?: UserRole, 
     { key: 'sku', label: 'SKU' },
     { key: 'currentLevel', label: 'Stock Actuel', format: (v) => Number(v || 0).toLocaleString('fr-FR') },
     { key: 'minThreshold', label: 'Seuil Min', format: (v) => Number(v || 0).toLocaleString('fr-FR') },
-    { key: 'unitPrice', label: 'Prix Unitaire', format: (v) => Number(v || 0).toLocaleString('fr-FR') },
+    { key: 'purchasePrice', label: 'Prix Achat (PUMP)', format: (v) => Number(v || 0).toLocaleString('fr-FR') },
+    { key: 'unitPrice', label: 'Prix Vente', format: (v) => Number(v || 0).toLocaleString('fr-FR') },
     { key: 'subcategory', label: 'Sous-catégorie', format: (_v, row) => row.subcategory?.name || row.subcategoryId || '' },
     { key: 'location', label: 'Emplacement' },
     { key: 'status', label: 'Statut', format: (v) => v === 'actif' ? 'Actif' : 'Inactif' },
@@ -139,26 +141,16 @@ const Inventory = ({ currency, plan }: { currency: string, userRole?: UserRole, 
     }
   };
 
-  useEffect(() => { fetchData(); }, []);
+  useEffect(() => { fetchData(); }, [refreshKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Upload pour un index donné (création multiple)
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, idx: number) => {
     const file = e.target.files?.[0];
     if (!file) return;
     setIsUploading(true);
-    const cloudinaryData = new FormData();
-    cloudinaryData.append('file', file);
-    cloudinaryData.append('upload_preset', 'ml_default'); 
-    cloudinaryData.append('cloud_name', 'dq7avew9h');
     try {
-      const response = await fetch(`https://api.cloudinary.com/v1_1/dq7avew9h/image/upload`, {
-        method: 'POST',
-        body: cloudinaryData
-      });
-      const data = await response.json();
-      if (data.secure_url) {
-        setFormDataList(prev => prev.map((f, i) => i === idx ? { ...f, imageUrl: data.secure_url } : f));
-      }
+      const result = await uploadFile(file, 'images');
+      setFormDataList(prev => prev.map((f, i) => i === idx ? { ...f, imageUrl: result.url } : f));
     } catch (err) {
       console.error("Upload Error:", err);
       showToast("Échec de l'envoi de l'image.", 'error');
@@ -180,8 +172,9 @@ const Inventory = ({ currency, plan }: { currency: string, userRole?: UserRole, 
       return;
     }
     setFormDataList([
-      { name: '', unitPrice: 0, minThreshold: 5, quantity: 0, subcategoryId: subcategories[0]?.id || '', location: '', imageUrl: '' }
+      { name: '', purchasePrice: 0, unitPrice: 0, minThreshold: 5, quantity: 0, subcategoryId: subcategories[0]?.id || '', location: '', imageUrl: '' }
     ]);
+    setError(null);
     setModalMode('CREATE');
   };
 
@@ -195,6 +188,7 @@ const Inventory = ({ currency, plan }: { currency: string, userRole?: UserRole, 
     setFormDataList([
       {
         name: item.name,
+        purchasePrice: Number((item as any).purchasePrice || 0),
         unitPrice: Number(item.unitPrice),
         minThreshold: item.minThreshold,
         quantity: item.currentLevel,
@@ -203,6 +197,7 @@ const Inventory = ({ currency, plan }: { currency: string, userRole?: UserRole, 
         imageUrl: item.imageUrl || ''
       }
     ]);
+    setError(null);
     setModalMode('EDIT');
   };
 
@@ -271,7 +266,8 @@ const Inventory = ({ currency, plan }: { currency: string, userRole?: UserRole, 
     const totalProducts = stocks.length;
     const outOfStock = stocks.filter(item => item.currentLevel <= item.minThreshold).length;
     const inStock = totalProducts - outOfStock;
-    const totalValue = stocks.reduce((sum, item) => sum + (item.currentLevel * Number(item.unitPrice)), 0);
+    // Valorisation au coût d'achat (PUMP) — si indisponible, fallback sur prix vente
+    const totalValue = stocks.reduce((sum, item) => sum + (item.currentLevel * Number((item as any).purchasePrice || item.unitPrice || 0)), 0);
     const totalQuantity = stocks.reduce((sum, item) => sum + item.currentLevel, 0);
     const averageValue = totalProducts > 0 ? totalValue / totalProducts : 0;
     
@@ -391,7 +387,7 @@ const Inventory = ({ currency, plan }: { currency: string, userRole?: UserRole, 
 
         <div className="bg-white p-4 md:p-8 rounded-[2.5rem] border border-slate-100 shadow-sm relative group overflow-hidden">
           <div className="absolute right-0 top-0 p-6 opacity-5 group-hover:-rotate-12 transition-transform"><TrendingUp size={60}/></div>
-          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Valorisation Totale</p>
+          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Valorisation Stock (coût)</p>
           <h3 className="text-2xl font-black text-slate-900">{stockStats.totalValue.toLocaleString()} {currency}</h3>
           <div className="w-full h-1.5 bg-slate-50 rounded-full mt-4 overflow-hidden shadow-inner">
             <div className="h-full bg-indigo-500" style={{ width: '85%' }}></div>
@@ -464,9 +460,9 @@ const Inventory = ({ currency, plan }: { currency: string, userRole?: UserRole, 
                 const items = [
                   { label: 'CSV (.csv)', action: exportInfo.csv, icon: '📄' },
                   { label: 'Excel (.xlsx)', action: exportInfo.excel, icon: '📊' },
-                  { label: 'PDF (impression)', action: exportInfo.pdf, icon: '🖨️' },
+                  /*{ label: 'PDF (impression)', action: exportInfo.pdf, icon: '🖨️' },
                   { label: 'Image PNG', action: exportInfo.imagePng, icon: '🖼️' },
-                  { label: 'Image JPG', action: exportInfo.imageJpg, icon: '📷' },
+                  { label: 'Image JPG', action: exportInfo.imageJpg, icon: '📷' },*/
                 ];
                 return items.map(({ label, action, icon }) => (
                   <button
@@ -607,14 +603,26 @@ const Inventory = ({ currency, plan }: { currency: string, userRole?: UserRole, 
                   <h3 className="font-black text-slate-900 text-lg uppercase truncate leading-none">{item.name}</h3>
                   <p className="text-[10px] text-slate-400 font-mono mt-3 truncate font-bold">SKU: {item.sku}</p>
                   
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-6">
-                     <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                  <div className="grid grid-cols-2 gap-3 mt-6">
+                     <div className="p-3 bg-slate-50 rounded-2xl border border-slate-100">
                        <p className="text-[8px] font-black text-slate-400 uppercase mb-1">Disponible</p>
                        <p className="text-sm font-black text-slate-900">{item.currentLevel}</p>
                      </div>
-                     <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
-                       <p className="text-[8px] font-black text-slate-400 uppercase mb-1">Prix Unit.</p>
+                     <div className="p-3 bg-slate-50 rounded-2xl border border-slate-100">
+                       <p className="text-[8px] font-black text-slate-400 uppercase mb-1">Prix Vente</p>
                        <p className="text-sm font-black text-slate-900">{Number(item.unitPrice).toLocaleString()} {currency}</p>
+                     </div>
+                     <div className="p-3 bg-indigo-50 rounded-2xl border border-indigo-100">
+                       <p className="text-[8px] font-black text-indigo-400 uppercase mb-1">Prix Achat (PUMP)</p>
+                       <p className="text-sm font-black text-indigo-700">{Number((item as any).purchasePrice || 0).toLocaleString()} {currency}</p>
+                     </div>
+                     <div className="p-3 bg-emerald-50 rounded-2xl border border-emerald-100">
+                       <p className="text-[8px] font-black text-emerald-400 uppercase mb-1">Marge</p>
+                       <p className="text-sm font-black text-emerald-700">
+                         {(item as any).purchasePrice && Number(item.unitPrice) > 0
+                           ? `${Math.round(((Number(item.unitPrice) - Number((item as any).purchasePrice)) / Number(item.unitPrice)) * 100)}%`
+                           : '—'}
+                       </p>
                      </div>
                   </div>
 
@@ -680,7 +688,8 @@ const Inventory = ({ currency, plan }: { currency: string, userRole?: UserRole, 
                 <th className="px-3 md:px-6 py-3 md:py-4">SKU</th>
                 <th className="px-3 md:px-6 py-3 md:py-4">Sous-catégorie</th>
                 <th className="px-3 md:px-6 py-3 md:py-4 text-center">Stock</th>
-                <th className="px-3 md:px-6 py-3 md:py-4 text-right">Prix</th>
+                <th className="px-3 md:px-6 py-3 md:py-4 text-right">Prix Achat (PUMP)</th>
+                <th className="px-3 md:px-6 py-3 md:py-4 text-right">Prix Vente</th>
                 <th className="px-3 md:px-6 py-3 md:py-4 text-right">Actions</th>
               </tr>
             </thead>
@@ -701,6 +710,7 @@ const Inventory = ({ currency, plan }: { currency: string, userRole?: UserRole, 
                     <td className="px-3 md:px-6 py-3 md:py-4 text-slate-500 font-mono">{item.sku}</td>
                     <td className="px-3 md:px-6 py-3 md:py-4 text-slate-600">{scName}</td>
                     <td className="px-3 md:px-6 py-3 md:py-4 text-center font-black">{item.currentLevel}</td>
+                    <td className="px-3 md:px-6 py-3 md:py-4 text-right font-black text-indigo-700">{Number((item as any).purchasePrice || 0).toLocaleString()} {currency}</td>
                     <td className="px-3 md:px-6 py-3 md:py-4 text-right font-black">{Number(item.unitPrice).toLocaleString()} {currency}</td>
                     <td className="px-3 md:px-6 py-3 md:py-4 text-right flex items-center justify-end gap-2">
                       <button onClick={() => openDetails(item)} className="px-3 py-2 rounded-xl text-slate-400 hover:text-indigo-600">Voir</button>
@@ -768,7 +778,14 @@ const Inventory = ({ currency, plan }: { currency: string, userRole?: UserRole, 
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 mt-4">
                           <div className="space-y-4">
                             <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-2">Tarification & Catégorie <span className="text-rose-600">*</span></label>
-                            <input type="number" required placeholder="Prix Unit. TTC" value={formData.unitPrice} onChange={e => setFormDataList(list => list.map((f, i) => i === idx ? { ...f, unitPrice: Number(e.target.value) } : f))} className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 text-sm font-black outline-none focus:ring-4 focus:ring-indigo-500/10 shadow-inner" />
+                            <div className="space-y-2">
+                              <label className="text-[8px] font-black text-indigo-400 uppercase px-2">Prix d'achat initial (PUMP)</label>
+                              <input type="number" min="0" step="0.01" placeholder="Prix achat fournisseur" value={(formData as any).purchasePrice || 0} onChange={e => setFormDataList(list => list.map((f, i) => i === idx ? { ...f, purchasePrice: Number(e.target.value) } : f))} className="w-full bg-indigo-50 border border-indigo-100 rounded-2xl px-6 py-3 text-sm font-black outline-none focus:ring-4 focus:ring-indigo-500/10" />
+                            </div>
+                            <div className="space-y-2">
+                              <label className="text-[8px] font-black text-slate-400 uppercase px-2">Prix de vente TTC <span className="text-rose-500">*</span></label>
+                              <input type="number" required placeholder="Prix Unit. TTC" value={formData.unitPrice} onChange={e => setFormDataList(list => list.map((f, i) => i === idx ? { ...f, unitPrice: Number(e.target.value) } : f))} className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-3 text-sm font-black outline-none focus:ring-4 focus:ring-indigo-500/10 shadow-inner" />
+                            </div>
                             <select value={formData.subcategoryId} onChange={e => setFormDataList(list => list.map((f, i) => i === idx ? { ...f, subcategoryId: e.target.value } : f))} className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 text-sm font-black outline-none appearance-none cursor-pointer shadow-inner">
                               <option value="">Sélectionner Sous-Catégorie</option>
                               {subcategories.map((sc: any) => <option key={sc.id} value={sc.id}>{sc.name}</option>)}
@@ -823,6 +840,10 @@ const Inventory = ({ currency, plan }: { currency: string, userRole?: UserRole, 
                       <div className="space-y-4">
                         <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-2">Tarification & Catégorie <span className="text-rose-600">*</span></label>
                         <input type="number" required placeholder="Prix Unit. TTC" value={formDataList[0].unitPrice} onChange={e => setFormDataList(list => [{ ...list[0], unitPrice: Number(e.target.value) }])} className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 text-sm font-black outline-none focus:ring-4 focus:ring-indigo-500/10 shadow-inner" />
+                        <div className="space-y-2">
+                          <label className="text-[8px] font-black text-indigo-400 uppercase px-2">Prix d'achat (PUMP)</label>
+                          <input type="number" min="0" step="0.01" placeholder="Prix achat fournisseur" value={(formDataList[0] as any).purchasePrice || 0} onChange={e => setFormDataList(list => [{ ...list[0], purchasePrice: Number(e.target.value) }])} className="w-full bg-indigo-50 border border-indigo-100 rounded-2xl px-6 py-4 text-sm font-black outline-none focus:ring-4 focus:ring-indigo-500/10" />
+                        </div>
                         <select value={formDataList[0].subcategoryId} onChange={e => setFormDataList(list => [{ ...list[0], subcategoryId: e.target.value }])} className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 text-sm font-black outline-none appearance-none cursor-pointer shadow-inner">
                           <option value="">Sélectionner Sous-Catégorie</option>
                           {subcategories.map((sc: any) => <option key={sc.id} value={sc.id}>{sc.name}</option>)}
@@ -842,9 +863,15 @@ const Inventory = ({ currency, plan }: { currency: string, userRole?: UserRole, 
                     </div>
                   </>
                 )}
+                {error && (
+                  <div className="flex items-start gap-3 p-4 bg-rose-50 border border-rose-200 rounded-2xl animate-in slide-in-from-top-2 duration-200">
+                    <AlertCircle size={16} className="text-rose-500 mt-0.5 shrink-0" />
+                    <p className="text-xs font-bold text-rose-700 leading-relaxed">{error}</p>
+                  </div>
+                )}
                 <div className="flex gap-4 pt-4 border-t border-slate-100">
-                  <button type="button" onClick={() => setModalMode(null)} className="flex-1 py-5 border-2 border-slate-100 text-slate-400 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-slate-50 transition-all">ANNULER</button>
-                  <button type="submit" disabled={actionLoading || isUploading} className={`flex-1 py-5 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-xl transition-all flex items-center justify-center gap-3 ${modalMode === 'CREATE' ? 'bg-indigo-600' : 'bg-amber-600'}`}> 
+                  <button type="button" onClick={() => { setModalMode(null); setError(null); }} className="flex-1 py-5 border-2 border-slate-100 text-slate-400 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-slate-50 transition-all">ANNULER</button>
+                  <button type="submit" disabled={actionLoading || isUploading} className={`flex-1 py-5 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-xl transition-all flex items-center justify-center gap-3 ${modalMode === 'CREATE' ? 'bg-indigo-600' : 'bg-amber-600'}`}>
                     {actionLoading ? <Loader2 className="animate-spin" size={18} /> : <>{modalMode === 'CREATE' ? 'SCELLER LES PRODUITS' : 'ENREGISTRER'} <ArrowRight size={18}/></>}
                   </button>
                 </div>
@@ -888,76 +915,117 @@ const Inventory = ({ currency, plan }: { currency: string, userRole?: UserRole, 
 
       {/* MODAL VUE DÉTAILLÉE (VIEW) */}
       {modalMode === 'VIEW' && selectedItem && (
-        <div className="fixed inset-0 z-[1000] flex items-center justify-center p-6 bg-slate-950/95 backdrop-blur-md animate-in fade-in duration-300">
-           <div className="bg-white w-full max-w-5xl mx-4 md:mx-auto rounded-[2.5rem] md:rounded-[4rem] shadow-2xl overflow-hidden flex flex-col max-h-[90dvh] animate-in zoom-in-95 duration-500">
-              <div className="px-6 md:px-12 py-6 md:py-10 bg-slate-900 text-white flex justify-between items-center shrink-0">
-                 <div className="flex items-center gap-6">
-                    <div className="w-20 h-20 bg-indigo-600 rounded-3xl flex items-center justify-center text-3xl shadow-2xl shadow-indigo-500/20 overflow-hidden">
-                      {selectedItem.imageUrl ? (
-                        <img src={selectedItem.imageUrl} className="w-full h-full object-cover" alt={selectedItem.name} />
-                      ) : (
-                        <Package size={40}/>
-                      )}
-                    </div>
-                    <div>
-                       <h3 className="text-xl md:text-3xl font-black uppercase tracking-tighter leading-none">{selectedItem.name}</h3>
-                       <div className="flex items-center gap-4 mt-3">
-                        <span className="text-[10px] font-black text-indigo-400 uppercase bg-indigo-500/10 px-3 py-1 rounded-full tracking-widest">SKU: {selectedItem.sku}</span>
-                        <span className={`text-[10px] font-black uppercase px-3 py-1 rounded-full ${selectedItem.currentLevel > selectedItem.minThreshold ? 'bg-emerald-500/10 text-emerald-400' : 'bg-rose-500/10 text-rose-400 animate-pulse'}`}>
-                          STOCK: {selectedItem.currentLevel > selectedItem.minThreshold ? 'OPÉRA' : 'CRITIQUE'}
-                        </span>
-                       </div>
-                    </div>
-                 </div>
-                 <button onClick={() => setModalMode(null)} className="p-4 bg-white/5 hover:bg-white/10 rounded-3xl transition-all"><X size={32}/></button>
+        <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4 md:p-6 bg-slate-950/95 backdrop-blur-md animate-in fade-in duration-300">
+          <div className="bg-white w-full max-w-5xl mx-auto rounded-[2.5rem] shadow-2xl overflow-hidden flex flex-col max-h-[92vh] animate-in zoom-in-95 duration-300">
+
+            {/* ── Header ── */}
+            <div className="px-6 md:px-10 py-6 bg-gradient-to-r from-slate-900 to-indigo-900 text-white flex justify-between items-center shrink-0">
+              <div className="flex items-center gap-4">
+                <div className="w-14 h-14 bg-indigo-500/30 border border-indigo-400/30 rounded-2xl flex items-center justify-center shadow-inner overflow-hidden shrink-0">
+                  {selectedItem.imageUrl
+                    ? <img src={selectedItem.imageUrl} className="w-full h-full object-cover" alt={selectedItem.name} />
+                    : <Package size={26} />}
+                </div>
+                <div>
+                  <p className="text-[9px] font-black text-indigo-300 uppercase tracking-[0.3em] mb-1">Détail Produit</p>
+                  <h3 className="text-xl md:text-2xl font-black uppercase tracking-tight leading-none">{selectedItem.name}</h3>
+                  <p className="text-[9px] text-indigo-300/70 font-mono mt-1 uppercase tracking-widest">
+                    SKU: {selectedItem.sku || '—'} &nbsp;·&nbsp; REF: {String(selectedItem.id).slice(0, 8)}
+                  </p>
+                </div>
               </div>
-              <div className="flex-1 overflow-y-auto p-4 md:p-12 grid grid-cols-12 gap-3 md:gap-6 lg:gap-10 bg-slate-50/30 custom-scrollbar">
-                 <div className="col-span-12 lg:col-span-4 space-y-8">
-                    {selectedItem.imageUrl && (
-                      <div className="bg-white p-4 rounded-[3rem] border border-slate-100 shadow-sm overflow-hidden">
-                        <img src={selectedItem.imageUrl} className="w-full rounded-2xl object-cover aspect-square shadow-inner" alt={selectedItem.name} />
+              <button onClick={() => setModalMode(null)} className="p-3 bg-white/5 hover:bg-white/15 rounded-2xl transition-all shrink-0"><X size={22} /></button>
+            </div>
+
+            {/* ── Body ── */}
+            <div className="flex-1 overflow-y-auto p-4 md:p-8 bg-slate-50/60 custom-scrollbar">
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+
+                {/* Colonne gauche */}
+                <div className="lg:col-span-1 space-y-4">
+
+                  {/* KPI stock */}
+                  <div className={`p-6 rounded-2xl text-white shadow-lg relative overflow-hidden ${selectedItem.currentLevel > selectedItem.minThreshold ? 'bg-gradient-to-br from-indigo-600 to-indigo-700' : 'bg-gradient-to-br from-rose-600 to-rose-700'}`}>
+                    <div className="absolute -right-4 -bottom-4 opacity-10"><Package size={80} /></div>
+                    <p className="text-[9px] font-black uppercase tracking-[0.25em] opacity-70 mb-3">Niveau de stock</p>
+                    <p className="text-4xl font-black">{selectedItem.currentLevel}</p>
+                    <p className="text-[9px] font-black uppercase tracking-widest opacity-60 mt-1">
+                      {selectedItem.currentLevel > selectedItem.minThreshold ? 'Niveaux opérationnels' : 'Seuil critique — réappro. requis'}
+                    </p>
+                    <div className="mt-3 flex items-center gap-2">
+                      <span className="text-[9px] font-black bg-white/15 px-2 py-0.5 rounded-full uppercase">Seuil min : {selectedItem.minThreshold}</span>
+                    </div>
+                  </div>
+
+                  {/* Valorisation */}
+                  <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm">
+                    <h4 className="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-3 flex items-center gap-2"><Tag size={13} /> Valorisation PRMP</h4>
+                    <p className="text-2xl font-black text-indigo-600">
+                      {(selectedItem.currentLevel * Number(selectedItem.unitPrice)).toLocaleString()}
+                      <span className="text-xs font-bold ml-1">{currency}</span>
+                    </p>
+                    <p className="text-[9px] text-slate-400 font-bold mt-1 uppercase">
+                      Prix unitaire : {Number(selectedItem.unitPrice).toLocaleString()} {currency}
+                    </p>
+                  </div>
+
+                  {/* Localisation */}
+                  <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm">
+                    <h4 className="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-3 flex items-center gap-2"><MapPin size={13} /> Localisation</h4>
+                    <p className="text-sm font-black text-slate-800 uppercase leading-snug">{selectedItem.location || 'Zone de stockage indéfinie'}</p>
+                  </div>
+
+                  {/* Image si disponible */}
+                  {selectedItem.imageUrl && (
+                    <div className="bg-white p-3 rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+                      <img src={selectedItem.imageUrl} className="w-full rounded-xl object-cover aspect-square" alt={selectedItem.name} />
+                    </div>
+                  )}
+                </div>
+
+                {/* Colonne droite — flux logistiques */}
+                <div className="lg:col-span-2 bg-white rounded-2xl border border-slate-100 shadow-sm flex flex-col overflow-hidden">
+                  <div className="px-6 py-4 border-b border-slate-50 flex items-center justify-between shrink-0">
+                    <h4 className="text-[9px] font-black uppercase tracking-widest text-slate-400 flex items-center gap-2">
+                      <History size={14} className="text-indigo-400" /> Flux Logistiques
+                    </h4>
+                    <span className="text-[8px] font-black bg-indigo-50 text-indigo-600 px-3 py-1 rounded-full uppercase tracking-widest">
+                      {selectedItem.movements?.length ?? 0} mouvement{(selectedItem.movements?.length ?? 0) !== 1 ? 's' : ''}
+                    </span>
+                  </div>
+                  <div className="flex-1 overflow-y-auto p-4 space-y-2 custom-scrollbar min-h-[300px]">
+                    {(!selectedItem.movements || selectedItem.movements.length === 0) ? (
+                      <div className="py-20 flex flex-col items-center gap-3 text-slate-300">
+                        <Boxes size={36} />
+                        <p className="text-[9px] font-black uppercase tracking-widest">Aucun flux tracé pour cet article</p>
                       </div>
-                    )}
-                    <div className="bg-white p-4 md:p-8 rounded-[2rem] md:rounded-[3rem] border border-slate-100 shadow-sm space-y-4 md:space-y-6">
-                       <h4 className="text-xs font-black uppercase tracking-widest text-slate-400 flex items-center gap-2"><MapPin size={14}/> Localisation</h4>
-                       <p className="text-sm font-black text-slate-800 uppercase leading-none">{selectedItem.location || 'ZONE DE STOCKAGE INDÉFINIE'}</p>
-                    </div>
-                    <div className="bg-white p-4 md:p-8 rounded-[2rem] md:rounded-[3rem] border border-slate-100 shadow-sm space-y-4 md:space-y-6">
-                       <h4 className="text-xs font-black uppercase tracking-widest text-slate-400 flex items-center gap-2"><Tag size={14}/> Valorisation PRMP</h4>
-                       <p className="text-2xl font-black text-indigo-600">{(selectedItem.currentLevel * Number(selectedItem.unitPrice)).toLocaleString()} <span className="text-xs">{currency}</span></p>
-                    </div>
-                 </div>
-                 <div className="col-span-12 lg:col-span-8 bg-white p-5 md:p-10 rounded-[3.5rem] border border-slate-100 shadow-sm flex flex-col min-h-[450px]">
-                    <div className="flex items-center justify-between mb-8">
-                       <h4 className="text-xs font-black uppercase tracking-widest text-slate-400 flex items-center gap-2"><History size={18}/> Flux Logistiques</h4>
-                    </div>
-                    <div className="flex-1 overflow-y-auto custom-scrollbar space-y-3">
-                       {(!selectedItem.movements || selectedItem.movements.length === 0) ? (
-                          <div className="h-full flex flex-col items-center justify-center text-slate-300 gap-4 opacity-40 py-20">
-                            <Boxes size={48}/>
-                            <p className="text-[10px] font-black uppercase tracking-widest">Aucun flux tracé pour cet article</p>
-                          </div>
-                       ) : (
-                          selectedItem.movements.map((m: any) => (
-                             <div key={m.id} className="p-5 bg-slate-50/50 rounded-2xl border border-slate-100 flex items-center justify-between group hover:bg-white hover:border-indigo-500 transition-all shadow-sm">
-                                <div className="flex items-center gap-5">
-                                   {m.type === 'IN' ? <ArrowUpCircle className="text-emerald-500" size={24}/> : <ArrowDownCircle className="text-rose-500" size={24}/>}
-                                   <div>
-                                     <p className="text-sm font-black text-slate-800 uppercase tracking-tight">{m.reason || 'Saisie Manuelle'}</p>
-                                     <p className="text-[10px] text-slate-400 font-bold mt-1 uppercase">{new Date(m.createdAt || m.movementDate).toLocaleDateString('fr-FR')} • {m.userRef || 'Kernel Node'}</p>
-                                   </div>
-                                </div>
-                                <div className="text-right">
-                                   <p className={`text-base font-black ${m.type === 'IN' ? 'text-emerald-600' : 'text-rose-600'}`}>{m.type === 'IN' ? '+' : '-'}{m.qty}</p>
-                                   <p className="text-[9px] text-slate-300 font-bold uppercase tracking-widest mt-1">Stock : {m.newLevel}</p>
-                                </div>
-                             </div>
-                          ))
-                       )}
-                    </div>
-                 </div>
+                    ) : selectedItem.movements.map((m: any, idx: number) => (
+                      <div key={m.id} className="flex items-center gap-4 p-4 rounded-xl border border-slate-100 hover:border-indigo-100 hover:bg-indigo-50/30 transition-all group">
+                        <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${m.type === 'IN' ? 'bg-emerald-50' : 'bg-rose-50'}`}>
+                          {m.type === 'IN'
+                            ? <ArrowUpCircle size={18} className="text-emerald-500" />
+                            : <ArrowDownCircle size={18} className="text-rose-500" />}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="font-black text-slate-800 text-sm truncate">{m.reason || 'Saisie Manuelle'}</p>
+                          <p className="text-[9px] text-slate-400 font-bold mt-0.5 uppercase">
+                            {new Date(m.createdAt || m.movementDate).toLocaleDateString('fr-FR')} · {m.userRef || 'Kernel Node'}
+                          </p>
+                        </div>
+                        <div className="text-right shrink-0">
+                          <p className={`text-sm font-black ${m.type === 'IN' ? 'text-emerald-600' : 'text-rose-600'}`}>
+                            {m.type === 'IN' ? '+' : '-'}{m.qty}
+                          </p>
+                          <p className="text-[9px] text-slate-300 font-bold uppercase mt-0.5">→ {m.newLevel}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
               </div>
-           </div>
+            </div>
+          </div>
         </div>
       )}
     </div>

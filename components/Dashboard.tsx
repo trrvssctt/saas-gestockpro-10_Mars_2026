@@ -8,6 +8,7 @@ import {
   TrendingDown, ShoppingBag, UserCheck,
   History, Scale, Receipt,
   HandCoins, PiggyBank, Sparkles,
+  BrainCircuit, Lightbulb, TrendingDown as TrendDown,
   Trophy, Medal, AlertCircle, CreditCard,
   ShieldAlert, ArrowRight, Bell, ChevronRight,
   ArrowDownCircle, ArrowUpCircle, DollarSign,
@@ -24,7 +25,13 @@ import { apiClient } from '../services/api';
 import { authBridge } from '../services/authBridge';
 import waveQr from '../assets/qr_code_marchant_wave.png';
 import { Timer } from 'lucide-react';
-import YearMonthPicker from './YearMonthPicker';
+import TimeMachineFilter, {
+  FilterState,
+  DEFAULT_FILTER,
+  isCurrentPeriod,
+  getPeriodLabel,
+  NOW_FILTER,
+} from './TimeMachineFilter';
 
 const fmt = (n: number, currency: string) => `${Number(n || 0).toLocaleString('fr-FR')} ${currency}`;
 const fmtShort = (n: number) => Number(n || 0).toLocaleString('fr-FR');
@@ -109,9 +116,22 @@ const Dashboard: React.FC<{
   const [subscription, setSubscription] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
-  // Year/Month filter
-  const [selectedYear, setSelectedYear] = useState<number | null>(new Date().getFullYear());
-  const [selectedMonth, setSelectedMonth] = useState<number | null>(null);
+  // ── Forecast IA ──────────────────────────────────────────────
+  const [forecast, setForecast] = useState<any>(null);
+  const [forecastLoading, setForecastLoading] = useState(false);
+  const [forecastTimestamp, setForecastTimestamp] = useState<Date | null>(null);
+  const [forecastError, setForecastError] = useState<string | null>(null);
+
+  // Time Machine filter
+  const [filterState, setFilterState] = useState<FilterState>(DEFAULT_FILTER);
+
+  // Derived filter values used throughout calculations
+  const selectedYear = filterState.mode !== 'all' ? filterState.year : null;
+  const selectedMonth = (filterState.mode === 'month' || filterState.mode === 'day') ? filterState.month : null;
+  const selectedQuarter = filterState.mode === 'quarter' ? filterState.quarter : null;
+  const selectedDay = filterState.mode === 'day' ? filterState.day : null;
+
+  const QTR_MONTHS = [[0,1,2],[3,4,5],[6,7,8],[9,10,11]] as const;
 
   // Extended state for admin dashboard
   const [adminStats, setAdminStats] = useState<any>(null);
@@ -218,14 +238,17 @@ const Dashboard: React.FC<{
     };
   }, [subscription]);
 
-  // --- AVAILABLE YEARS (for year/month picker) ---
-  const availableYears = useMemo(() => {
-    const years = new Set<number>();
-    years.add(new Date().getFullYear());
-    sales.forEach(s => { if (s.createdAt) years.add(new Date(s.createdAt).getFullYear()); });
-    revenueStats.forEach(r => { if (r.month) years.add(new Date(r.month).getFullYear()); });
-    return Array.from(years).sort((a, b) => b - a);
-  }, [sales, revenueStats]);
+  // --- CHART TITLE derived from filter state ---
+  const chartTitle = useMemo(() => {
+    if (!selectedYear) return 'Tendance Revenus — 6 Derniers Mois';
+    if (selectedDay !== null && selectedMonth !== null)
+      return `Revenus du ${selectedDay} ${MONTH_LABELS[selectedMonth]} ${selectedYear} — par heure`;
+    if (selectedQuarter !== null)
+      return `Revenus T${selectedQuarter} ${selectedYear}`;
+    if (selectedMonth !== null)
+      return `Revenus ${MONTH_LABELS[selectedMonth]} ${selectedYear}`;
+    return `Revenus ${selectedYear}`;
+  }, [selectedYear, selectedMonth, selectedQuarter, selectedDay]);
 
   // --- SALES STATS ---
   const salesStats = useMemo(() => {
@@ -233,6 +256,7 @@ const Dashboard: React.FC<{
 
     // ADMIN PATH: use pre-computed server stats
     if (s) {
+      const totalChequesPending = s.totalChequesPending || 0;
       // If year filter + monthly revenue data → compute year totals from revenueStats
       if (selectedYear && revenueStats.length > 0) {
         const filtered = revenueStats.filter(r => {
@@ -249,7 +273,7 @@ const Dashboard: React.FC<{
           { name: 'Encaissé', value: totalCollected, color: '#10b981' },
           { name: 'À Recouvrer', value: Math.max(0, totalUnpaid), color: '#f43f5e' }
         ];
-        return { totalRevenue, totalCollected, totalUnpaid, overdueCount, totalSalesCount: s.totalSalesCount || sales.length, avgBasket: totalRevenue > 0 && s.totalSalesCount ? totalRevenue / s.totalSalesCount : 0, recoveryData, monthRevenue: 0 };
+        return { totalRevenue, totalCollected, totalChequesPending, totalUnpaid, overdueCount, totalSalesCount: s.totalSalesCount || sales.length, avgBasket: totalRevenue > 0 && s.totalSalesCount ? totalRevenue / s.totalSalesCount : 0, recoveryData, monthRevenue: 0 };
       }
       // Default admin stats (no year filter or no revenueStats)
       const totalRevenue = s.totalRevenue || 0;
@@ -262,42 +286,90 @@ const Dashboard: React.FC<{
         { name: 'Encaissé', value: totalCollected, color: '#10b981' },
         { name: 'À Recouvrer', value: Math.max(0, totalUnpaid), color: '#f43f5e' }
       ];
-      return { totalRevenue, totalCollected, totalUnpaid, overdueCount, totalSalesCount, avgBasket, recoveryData, monthRevenue: 0 };
+      return { totalRevenue, totalCollected, totalChequesPending, totalUnpaid, overdueCount, totalSalesCount, avgBasket, recoveryData, monthRevenue: 0 };
+    }
+
+    // ADMIN PATH: also handle quarter filter via revenueStats
+    if (s) {
+      const totalChequesPending = s.totalChequesPending || 0;
+      if (selectedYear && revenueStats.length > 0) {
+        const qMonthsFilter = selectedQuarter ? QTR_MONTHS[selectedQuarter - 1] : null;
+        const filtered = revenueStats.filter(r => {
+          const d = new Date(r.month);
+          if (d.getFullYear() !== selectedYear) return false;
+          if (selectedMonth !== null) return d.getMonth() === selectedMonth;
+          if (qMonthsFilter) return (qMonthsFilter as readonly number[]).includes(d.getMonth());
+          return true;
+        });
+        const totalRevenue = filtered.reduce((sum, r) => sum + (r.total || 0), 0);
+        const totalCollected = filtered.reduce((sum, r) => sum + (r.collected || 0), 0);
+        const totalUnpaid = s.totalUnpaid ?? Math.max(0, (s.totalRevenue || 0) - (s.totalCollected || 0));
+        const overdueCount = s.overdueCount || s.latePayments || 0;
+        const recoveryData = [
+          { name: 'Encaissé', value: totalCollected, color: '#10b981' },
+          { name: 'À Recouvrer', value: Math.max(0, totalUnpaid), color: '#f43f5e' }
+        ];
+        return { totalRevenue, totalCollected, totalChequesPending, totalUnpaid, overdueCount, totalSalesCount: s.totalSalesCount || sales.length, avgBasket: totalRevenue > 0 && s.totalSalesCount ? totalRevenue / s.totalSalesCount : 0, recoveryData, monthRevenue: 0 };
+      }
+      const totalRevenue = s.totalRevenue || 0;
+      const totalCollected = s.totalCollected || 0;
+      const totalUnpaid = s.totalUnpaid ?? (totalRevenue - totalCollected);
+      const overdueCount = s.overdueCount || s.latePayments || 0;
+      const totalSalesCount = s.totalSalesCount || sales.length;
+      const avgBasket = totalSalesCount > 0 ? totalRevenue / totalSalesCount : 0;
+      const recoveryData = [
+        { name: 'Encaissé', value: totalCollected, color: '#10b981' },
+        { name: 'À Recouvrer', value: Math.max(0, totalUnpaid), color: '#f43f5e' }
+      ];
+      return { totalRevenue, totalCollected, totalChequesPending, totalUnpaid, overdueCount, totalSalesCount, avgBasket, recoveryData, monthRevenue: 0 };
     }
 
     // NON-ADMIN PATH: client-side computation from full sales array
     const validSales = sales.filter(s => s.status !== 'ANNULE');
 
-    // CA: sales created in the selected period
-    const periodSales = selectedYear ? validSales.filter(s => {
-      const d = new Date(s.createdAt);
-      return d.getFullYear() === selectedYear &&
-        (selectedMonth === null || d.getMonth() === selectedMonth);
-    }) : validSales;
+    // Helper: does a date match the selected period?
+    const inPeriod = (dateStr: string) => {
+      if (!selectedYear) return true;
+      const d = new Date(dateStr);
+      if (d.getFullYear() !== selectedYear) return false;
+      if (selectedDay !== null && selectedMonth !== null)
+        return d.getMonth() === selectedMonth && d.getDate() === selectedDay;
+      if (selectedMonth !== null) return d.getMonth() === selectedMonth;
+      if (selectedQuarter !== null)
+        return (QTR_MONTHS[selectedQuarter - 1] as readonly number[]).includes(d.getMonth());
+      return true;
+    };
 
+    const periodSales = selectedYear ? validSales.filter(s => inPeriod(s.createdAt)) : validSales;
     const totalRevenue = periodSales.reduce((sum, s) => sum + parseFloat(s.totalTtc || 0), 0);
 
-    // Trésorerie: payments received (by payment date) in the selected period
+    const CHEQUE_PENDING_STATUSES = ['PENDING', 'REGISTERED', 'DEPOSITED', 'PROCESSING'];
+
     let totalCollected: number;
     if (selectedYear) {
       totalCollected = validSales
-        .flatMap(s => (s.payments || []).filter((p: any) => {
-          const d = new Date(p.createdAt);
-          return d.getFullYear() === selectedYear &&
-            (selectedMonth === null || d.getMonth() === selectedMonth);
-        }))
+        .flatMap(s => (s.payments || []).filter((p: any) =>
+          inPeriod(p.createdAt) && !(p.method === 'CHEQUE' && CHEQUE_PENDING_STATUSES.includes(p.status))
+        ))
         .reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
     } else {
       totalCollected = validSales.reduce((sum, s) => sum + parseFloat(s.amountPaid || 0), 0);
     }
 
-    // Créances historiques: outstanding from ALL sales up to end of selected period
-    // (Ali's 2023 debt still shows in 2024 view until paid)
+    const totalChequesPending = validSales
+      .flatMap((s: any) => (s.payments || []))
+      .filter((p: any) => p.method === 'CHEQUE' && CHEQUE_PENDING_STATUSES.includes(p.status))
+      .reduce((sum: number, p: any) => sum + parseFloat(p.amount || 0), 0);
+
     let totalUnpaid: number;
     let overdueCount: number;
     if (selectedYear) {
-      const endOfPeriod = selectedMonth !== null
+      const endOfPeriod = selectedDay !== null && selectedMonth !== null
+        ? new Date(selectedYear, selectedMonth, selectedDay, 23, 59, 59)
+        : selectedMonth !== null
         ? new Date(selectedYear, selectedMonth + 1, 0, 23, 59, 59)
+        : selectedQuarter !== null
+        ? new Date(selectedYear, QTR_MONTHS[selectedQuarter - 1][2] + 1, 0, 23, 59, 59)
         : new Date(selectedYear, 12, 0, 23, 59, 59);
       const historicalSales = validSales.filter(s => new Date(s.createdAt) <= endOfPeriod);
       totalUnpaid = historicalSales.reduce((sum, s) =>
@@ -320,12 +392,12 @@ const Dashboard: React.FC<{
       { name: 'À Recouvrer', value: Math.max(0, totalUnpaid), color: '#f43f5e' }
     ];
     return {
-      totalRevenue, totalCollected, totalUnpaid, overdueCount,
+      totalRevenue, totalCollected, totalChequesPending, totalUnpaid, overdueCount,
       totalSalesCount: periodSales.length,
       avgBasket: periodSales.length > 0 ? totalRevenue / periodSales.length : 0,
       recoveryData, monthRevenue
     };
-  }, [sales, adminStats, selectedYear, selectedMonth, revenueStats]);
+  }, [sales, adminStats, selectedYear, selectedMonth, selectedQuarter, selectedDay, revenueStats, QTR_MONTHS]);
 
   // --- STOCK STATS ---
   const stockStats = useMemo(() => {
@@ -371,20 +443,21 @@ const Dashboard: React.FC<{
 
   // --- REVENUE CHART DATA ---
   const revenueChartData = useMemo(() => {
-    const monthsToShow = selectedMonth !== null
+    // Determine which months to display based on filter mode
+    const monthsToShow: number[] = selectedMonth !== null
       ? [selectedMonth]
+      : selectedQuarter !== null
+      ? [...QTR_MONTHS[selectedQuarter - 1]]
       : Array.from({ length: 12 }, (_, i) => i);
 
     if (revenueStats.length > 0) {
       if (selectedYear) {
-        // Show all months of selected year (0 for months with no data)
         const yearStats = revenueStats.filter(r => new Date(r.month).getFullYear() === selectedYear);
         return monthsToShow.map(m => {
           const r = yearStats.find(r => new Date(r.month).getMonth() === m);
           return { label: MONTH_LABELS[m], total: r?.total || 0, collected: r?.collected || 0 };
         });
       }
-      // No year filter: original behavior
       return revenueStats.map((r: any) => {
         const d = new Date(r.month);
         return {
@@ -404,21 +477,41 @@ const Dashboard: React.FC<{
       });
 
     if (selectedYear) {
-      // Initialize all months with 0
+      // Day mode: show hourly buckets (0h–23h)
+      if (selectedDay !== null && selectedMonth !== null) {
+        const hours: Record<number, { total: number; collected: number }> = {};
+        for (let h = 0; h < 24; h++) hours[h] = { total: 0, collected: 0 };
+        validSales
+          .filter((s: any) => {
+            const d = new Date(s.createdAt);
+            return d.getFullYear() === selectedYear && d.getMonth() === selectedMonth && d.getDate() === selectedDay;
+          })
+          .forEach((s: any) => {
+            const h = new Date(s.createdAt).getHours();
+            hours[h].total += parseFloat(s.totalTtc || 0);
+            hours[h].collected += parseFloat(s.amountPaid || 0);
+          });
+        return Object.entries(hours).map(([h, v]) => ({
+          label: `${h}h`,
+          total: v.total,
+          collected: v.collected
+        }));
+      }
+
       const map: Record<number, { total: number; collected: number }> = {};
       monthsToShow.forEach(m => { map[m] = { total: 0, collected: 0 }; });
 
-      // CA: by sale creation date
       validSales
-        .filter(s => new Date(s.createdAt).getFullYear() === selectedYear)
+        .filter((s: any) => new Date(s.createdAt).getFullYear() === selectedYear)
         .forEach((s: any) => {
           const m = new Date(s.createdAt).getMonth();
           if (map[m] !== undefined) map[m].total += parseFloat(s.totalTtc || 0);
         });
 
-      // Collected: by payment date (historical — payments from any sale year counted to payment year)
+      const CHEQUE_PENDING_CHART = ['PENDING', 'REGISTERED', 'DEPOSITED', 'PROCESSING'];
       validSales.forEach((s: any) => {
         (s.payments || []).forEach((p: any) => {
+          if (p.method === 'CHEQUE' && CHEQUE_PENDING_CHART.includes(p.status)) return;
           const d = new Date(p.createdAt);
           if (d.getFullYear() === selectedYear) {
             const m = d.getMonth();
@@ -434,7 +527,7 @@ const Dashboard: React.FC<{
       }));
     }
 
-    // All-time: original behavior (last 6 months)
+    // All-time: last 6 months
     const map: Record<string, { total: number; collected: number }> = {};
     validSales.forEach((s: any) => {
       const d = new Date(s.createdAt);
@@ -451,7 +544,7 @@ const Dashboard: React.FC<{
       .sort((a, b) => a.sortKey - b.sortKey)
       .slice(-6)
       .map(({ label, total, collected }) => ({ label, total, collected }));
-  }, [revenueStats, sales, user, selectedYear, selectedMonth]);
+  }, [revenueStats, sales, user, selectedYear, selectedMonth, selectedQuarter, selectedDay, QTR_MONTHS]);
 
   // --- ACTIVITY FEED (movements + payments + customers combined) ---
   const activityFeed = useMemo(() => {
@@ -493,29 +586,39 @@ const Dashboard: React.FC<{
   // --- TODAY / PERIOD STATS ---
   const todayStats = useMemo(() => {
     if (selectedYear) {
-      const periodSales = sales.filter(s => {
+      const periodSales = sales.filter((s: any) => {
         if (s.status === 'ANNULE') return false;
         const d = new Date(s.createdAt);
-        return d.getFullYear() === selectedYear &&
-          (selectedMonth === null || d.getMonth() === selectedMonth);
+        if (d.getFullYear() !== selectedYear) return false;
+        if (selectedDay !== null && selectedMonth !== null)
+          return d.getMonth() === selectedMonth && d.getDate() === selectedDay;
+        if (selectedMonth !== null) return d.getMonth() === selectedMonth;
+        if (selectedQuarter !== null)
+          return (QTR_MONTHS[selectedQuarter - 1] as readonly number[]).includes(d.getMonth());
+        return true;
       });
+      const label = selectedDay !== null && selectedMonth !== null
+        ? `${selectedDay} ${MONTH_LABELS[selectedMonth]} ${selectedYear}`
+        : selectedQuarter !== null
+        ? `T${selectedQuarter} ${selectedYear}`
+        : selectedMonth !== null
+        ? `${MONTH_LABELS[selectedMonth]} ${selectedYear}`
+        : String(selectedYear);
       return {
         count: periodSales.length,
-        revenue: periodSales.reduce((sum, s) => sum + parseFloat(s.totalTtc || 0), 0),
-        periodLabel: selectedMonth !== null
-          ? `${MONTH_LABELS[selectedMonth]} ${selectedYear}`
-          : String(selectedYear)
+        revenue: periodSales.reduce((sum: number, s: any) => sum + parseFloat(s.totalTtc || 0), 0),
+        periodLabel: label
       };
     }
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    const todaySales = sales.filter(s => new Date(s.createdAt) >= today);
+    const todaySales = sales.filter((s: any) => new Date(s.createdAt) >= today);
     return {
       count: todaySales.length,
-      revenue: todaySales.reduce((sum, s) => sum + parseFloat(s.totalTtc || 0), 0),
+      revenue: todaySales.reduce((sum: number, s: any) => sum + parseFloat(s.totalTtc || 0), 0),
       periodLabel: "aujourd'hui"
     };
-  }, [sales, selectedYear, selectedMonth]);
+  }, [sales, selectedYear, selectedMonth, selectedQuarter, selectedDay, QTR_MONTHS]);
 
   // --- PAYMENT MODAL ---
   const [showPaymentModal, setShowPaymentModal] = useState(false);
@@ -548,6 +651,377 @@ const Dashboard: React.FC<{
     } finally {
       setIsProcessingPayment(false);
     }
+  };
+
+  // ============================================================
+  // FORECAST IA — chargement & rendu
+  // ============================================================
+  const loadForecast = async () => {
+    if (forecastLoading) return;
+    setForecastLoading(true);
+    setForecastError(null);
+    try {
+      // Construire le payload avec les données réelles du dashboard
+      const histPayload = revenueChartData.slice(-6).map(d => ({
+        label: d.label,
+        total: d.total || 0,
+        collected: d.collected || 0,
+      }));
+
+      const stockPayload = stocks.slice(0, 20).map((s: any) => ({
+        name: s.name,
+        sku: s.sku,
+        currentLevel: s.currentLevel ?? 0,
+        minThreshold: s.minThreshold ?? 5,
+      }));
+
+      const payload = {
+        historique: histPayload,
+        stock: stockPayload,
+        clients: (adminStats?.customersCount ?? customers.length),
+        kpis: {
+          totalRevenue: salesStats.totalRevenue,
+          totalCollected: salesStats.totalCollected,
+          overdueCount: salesStats.overdueCount,
+          collectionRate: salesStats.totalRevenue > 0
+            ? Math.round((salesStats.totalCollected / salesStats.totalRevenue) * 100)
+            : 0,
+          totalSalesCount: salesStats.totalSalesCount,
+        },
+        currency,
+        tenantId: user.tenantId,
+      };
+
+      const message = `PREVISION_DASHBOARD: ${JSON.stringify(payload)}`;
+
+      const res = await apiClient.post('/ai/bridge', {
+        chatInput: message,
+        sessionId: `${user.tenantId}_forecast`,
+        message,
+        planId: user.planId || 'BASIC',
+      });
+
+      // apiClient retourne le JSON directement (pas d'enveloppe .data)
+      // n8n peut retourner un objet OU un tableau [{...}]
+      const rawRes = res ?? {};
+      const data: any = Array.isArray(rawRes) ? (rawRes[0] ?? {}) : rawRes;
+      // Si le fallback bridge a enveloppé dans { fromFallback, data: ... }
+      const inner: any = data?.fromFallback ? (Array.isArray(data.data) ? (data.data[0] ?? {}) : (data.data ?? data)) : data;
+
+      let parsed: any = null;
+
+      // 1) Chercher la structure forecast dans toutes les enveloppes possibles
+      const objCandidates = [inner, inner?.data, inner?.output, inner?.result, inner?.json];
+      for (const c of objCandidates) {
+        if (c && typeof c === 'object' && !Array.isArray(c) && (c.type === 'forecast' || c.forecast)) {
+          parsed = c;
+          break;
+        }
+      }
+
+      // 2) JSON.parse sur tous les champs string
+      if (!parsed) {
+        const strCandidates = [
+          inner?.formattedResponse, inner?.output, inner?.text, inner?.message,
+          inner?.response, inner?.content,
+          typeof inner === 'string' ? inner : null,
+        ];
+        for (const s of strCandidates) {
+          if (typeof s === 'string' && s.trim().startsWith('{')) {
+            try {
+              const p = JSON.parse(s.trim());
+              if (p && (p.type === 'forecast' || p.forecast)) { parsed = p; break; }
+            } catch { /* ignore */ }
+          }
+        }
+      }
+
+      // 3) Extraction regex dans n'importe quelle string
+      if (!parsed) {
+        const allStrings = [
+          inner?.formattedResponse, inner?.output, inner?.text, inner?.message,
+          inner?.response, inner?.content,
+          typeof inner === 'string' ? inner : null,
+        ];
+        for (const s of allStrings) {
+          if (typeof s !== 'string') continue;
+          const match = s.match(/\{[\s\S]*"forecast"[\s\S]*\}/);
+          if (match) {
+            try {
+              const p = JSON.parse(match[0]);
+              if (p?.forecast) { parsed = p; break; }
+            } catch { /* ignore */ }
+          }
+        }
+      }
+
+      if (parsed?.forecast) {
+        setForecast(parsed.forecast);
+        setForecastTimestamp(new Date());
+      } else {
+        // Diagnostic : afficher les clés de la réponse pour aider au débogage
+        const keys = Object.keys(inner || {}).join(', ') || '(vide)';
+        const hint = inner?.formattedResponse?.slice?.(0, 150)
+          || inner?.output?.toString?.()?.slice?.(0, 150)
+          || inner?.message
+          || inner?.error;
+        const diagMsg = hint
+          ? `Réponse reçue (clés: ${keys}) : ${hint}`
+          : `Réponse inattendue. Clés reçues : ${keys}`;
+        setForecastError(diagMsg);
+        console.warn('[Forecast IA] Réponse brute complète:', rawRes);
+      }
+    } catch (err: any) {
+      console.error('[Forecast IA]', err);
+      setForecastError(err?.message || 'Erreur lors de la connexion au moteur IA.');
+    } finally {
+      setForecastLoading(false);
+    }
+  };
+
+  const renderForecastPanel = () => {
+    const SEVERITY_COLORS: Record<string, string> = {
+      RUPTURE:  'bg-rose-600 text-white',
+      CRITICAL: 'bg-rose-500 text-white',
+      HIGH:     'bg-amber-500 text-white',
+      MEDIUM:   'bg-amber-100 text-amber-700',
+    };
+
+    const fmtM = (n: number) => {
+      if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+      if (n >= 1_000)     return `${(n / 1_000).toFixed(0)}K`;
+      return String(Math.round(n));
+    };
+
+    // Chart data: historique réel + prévisions
+    const histData = revenueChartData.slice(-6).map(d => ({
+      label: d.label, real: d.total || 0, collected: d.collected || 0, predicted: null,
+    }));
+    const predData = forecast?.predictions?.map((p: any) => ({
+      label: p.label, real: null, collected: null, predicted: p.predicted,
+      low: p.low, high: p.high,
+    })) ?? [];
+    const combinedChart = [...histData, ...predData];
+
+    const trendColors: Record<string, string> = {
+      HAUSSE: 'text-emerald-400',
+      BAISSE: 'text-rose-400',
+      STABLE: 'text-amber-400',
+    };
+    const trendIcons: Record<string, any> = {
+      HAUSSE: TrendingUp,
+      BAISSE: TrendingDown,
+      STABLE: Activity,
+    };
+    const TrendIcon = forecast ? (trendIcons[forecast.trend] ?? TrendingUp) : TrendingUp;
+
+    return (
+      <div className="rounded-3xl overflow-hidden border border-indigo-900/30 shadow-2xl bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900">
+
+        {/* ── En-tête ── */}
+        <div className="px-6 py-5 flex items-center justify-between border-b border-white/5">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-indigo-600/30 border border-indigo-500/30 flex items-center justify-center">
+              <BrainCircuit size={20} className="text-indigo-300" />
+            </div>
+            <div>
+              <h3 className="text-[11px] font-black uppercase tracking-[0.2em] text-white">
+                Prévisions IA — Moteur Prédictif
+              </h3>
+              <p className="text-[8px] font-bold text-indigo-400 uppercase tracking-widest mt-0.5">
+                {forecastTimestamp
+                  ? `Calculé le ${forecastTimestamp.toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' })} à ${forecastTimestamp.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}`
+                  : 'Analyse statistique de vos données réelles'}
+              </p>
+            </div>
+          </div>
+
+          <button
+            onClick={loadForecast}
+            disabled={forecastLoading}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 transition-all text-white"
+          >
+            <RefreshCw size={13} className={forecastLoading ? 'animate-spin' : ''} />
+            <span className="text-[9px] font-black uppercase tracking-wider">
+              {forecast ? 'Actualiser' : 'Générer les prévisions'}
+            </span>
+          </button>
+        </div>
+
+        {/* ── Corps ── */}
+        {forecastError && !forecastLoading && (
+          <div className="mx-6 mt-5 mb-2 p-4 rounded-2xl bg-rose-500/10 border border-rose-500/20 flex items-start gap-3">
+            <AlertTriangle size={16} className="text-rose-400 flex-shrink-0 mt-0.5" />
+            <div>
+              <p className="text-[10px] font-black text-rose-300 uppercase tracking-widest mb-1">Erreur IA</p>
+              <p className="text-[10px] text-rose-200/70 font-medium leading-relaxed">{forecastError}</p>
+              <p className="text-[9px] text-rose-300/50 mt-2 uppercase tracking-widest">Vérifiez que le workflow n8n est actif et que le prompt est à jour.</p>
+            </div>
+          </div>
+        )}
+
+        {!forecast && !forecastLoading && !forecastError && (
+          <div className="py-16 text-center">
+            <div className="w-16 h-16 rounded-3xl bg-indigo-600/20 border border-indigo-500/20 flex items-center justify-center mx-auto mb-4">
+              <Sparkles size={28} className="text-indigo-300 animate-pulse" />
+            </div>
+            <p className="text-[11px] font-black text-white/60 uppercase tracking-widest">
+              Cliquez sur « Générer les prévisions » pour lancer l'analyse IA
+            </p>
+            <p className="text-[9px] text-indigo-400/60 font-bold uppercase tracking-widest mt-1">
+              Basé sur votre historique de ventes et votre stock actuel
+            </p>
+          </div>
+        )}
+
+        {forecastLoading && (
+          <div className="py-16 text-center">
+            <div className="flex items-center justify-center gap-3 mb-4">
+              <div className="w-4 h-4 rounded-full bg-indigo-500 animate-bounce" style={{ animationDelay: '0ms' }} />
+              <div className="w-4 h-4 rounded-full bg-violet-500 animate-bounce" style={{ animationDelay: '150ms' }} />
+              <div className="w-4 h-4 rounded-full bg-indigo-300 animate-bounce" style={{ animationDelay: '300ms' }} />
+            </div>
+            <p className="text-[11px] font-black text-indigo-300 uppercase tracking-[0.3em] animate-pulse">
+              Analyse en cours · Moteur IA actif…
+            </p>
+          </div>
+        )}
+
+        {forecast && !forecastLoading && (
+          <div className="p-6 space-y-6">
+
+            {/* ── Résumé tendance ── */}
+            <div className="flex items-center gap-3 bg-white/5 rounded-2xl px-4 py-3">
+              <TrendIcon size={18} className={trendColors[forecast.trend] ?? 'text-white'} />
+              <div className="flex-1">
+                <span className={`text-sm font-black ${trendColors[forecast.trend] ?? 'text-white'}`}>
+                  Tendance {forecast.trend}
+                </span>
+                {forecast.growthRate !== undefined && (
+                  <span className="text-[10px] font-bold text-white/50 ml-2 uppercase">
+                    {forecast.growthRate > 0 ? '+' : ''}{Number(forecast.growthRate).toFixed(1)}% · taux encaissement prévu {forecast.forecastedCollectionRate ?? '—'}%
+                  </span>
+                )}
+              </div>
+              {forecast.summary?.businessHealth !== undefined && (
+                <div className="text-right flex-shrink-0">
+                  <p className="text-[8px] font-black text-white/40 uppercase tracking-widest">Santé business</p>
+                  <p className="text-lg font-black text-white">{forecast.summary.businessHealth}<span className="text-xs text-white/40">/100</span></p>
+                </div>
+              )}
+            </div>
+
+            {/* ── 3 cartes prévisions mensuelles ── */}
+            <div className="grid grid-cols-3 gap-3">
+              {(forecast.predictions ?? []).map((p: any, i: number) => (
+                <div
+                  key={i}
+                  className={`rounded-2xl p-4 border ${i === 0 ? 'bg-indigo-600/20 border-indigo-500/30' : 'bg-white/5 border-white/5'}`}
+                >
+                  <p className="text-[8px] font-black text-indigo-300 uppercase tracking-widest truncate mb-2">{p.label}</p>
+                  <p className="text-xl font-black text-white tracking-tighter">{fmtM(p.predicted)}</p>
+                  <p className="text-[8px] text-white/40 font-bold">{currency.split(' ')[0]}</p>
+                  <div className="mt-3 flex items-center gap-1.5">
+                    <div className="flex-1 h-1 bg-white/10 rounded-full overflow-hidden">
+                      <div className="h-full bg-indigo-400 rounded-full" style={{ width: `${p.confidence}%` }} />
+                    </div>
+                    <span className="text-[8px] font-black text-indigo-300">{p.confidence}%</span>
+                  </div>
+                  <p className="text-[7px] text-white/25 mt-1">
+                    {fmtM(p.low)} – {fmtM(p.high)} {currency.split(' ')[0]}
+                  </p>
+                </div>
+              ))}
+            </div>
+
+            {/* ── Graphique historique + prévisions ── */}
+            {combinedChart.length > 0 && (
+              <div className="bg-white/5 rounded-2xl p-4">
+                <p className="text-[8px] font-black text-indigo-300 uppercase tracking-widest mb-3">
+                  Historique réel + Projections IA
+                </p>
+                <div className="h-48">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <ComposedChart data={combinedChart}>
+                      <defs>
+                        <linearGradient id="gradReal" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="#6366f1" stopOpacity={0.3} />
+                          <stop offset="95%" stopColor="#6366f1" stopOpacity={0} />
+                        </linearGradient>
+                        <linearGradient id="gradPred" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="#a855f7" stopOpacity={0.4} />
+                          <stop offset="95%" stopColor="#a855f7" stopOpacity={0} />
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#ffffff10" />
+                      <XAxis dataKey="label" axisLine={false} tickLine={false}
+                        tick={{ fontSize: 9, fill: '#94a3b8', fontWeight: 700 }} />
+                      <YAxis hide />
+                      <Tooltip
+                        contentStyle={{ backgroundColor: '#0f172a', border: 'none', borderRadius: '12px', fontSize: 10, color: '#fff' }}
+                        formatter={(v: any, name: string) => [
+                          `${Number(v || 0).toLocaleString('fr-FR')} ${currency.split(' ')[0]}`,
+                          name === 'real' ? 'CA Réel' : name === 'collected' ? 'Encaissé' : 'Prévision IA',
+                        ]}
+                      />
+                      <Area type="monotone" dataKey="real" stroke="#6366f1" strokeWidth={2}
+                        fill="url(#gradReal)" dot={false} connectNulls={false} />
+                      <Area type="monotone" dataKey="predicted" stroke="#a855f7" strokeWidth={2}
+                        strokeDasharray="6 3" fill="url(#gradPred)" dot={{ fill: '#a855f7', r: 4 }} connectNulls={false} />
+                    </ComposedChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            )}
+
+            {/* ── Risques stock + Recommandations ── */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+
+              {/* Risques stock */}
+              {(forecast.stockRisks ?? []).length > 0 && (
+                <div className="bg-white/5 rounded-2xl p-4">
+                  <p className="text-[8px] font-black text-rose-300 uppercase tracking-widest mb-3 flex items-center gap-1.5">
+                    <AlertTriangle size={11} /> Risques de Rupture Stock
+                  </p>
+                  <div className="space-y-2">
+                    {(forecast.stockRisks ?? []).map((r: any, i: number) => (
+                      <div key={i} className="flex items-center gap-3 py-2 border-b border-white/5 last:border-0">
+                        <span className={`text-[7px] font-black px-2 py-0.5 rounded-lg flex-shrink-0 ${SEVERITY_COLORS[r.severity] ?? 'bg-slate-700 text-slate-300'}`}>
+                          {r.daysToRupture <= 0 ? 'RUPTURE' : `${r.daysToRupture}j`}
+                        </span>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-[10px] font-black text-white truncate">{r.product}</p>
+                          <p className="text-[8px] text-white/40 font-bold">
+                            Stock: {r.currentStock} · Seuil: {r.minThreshold ?? 5}
+                          </p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Recommandations */}
+              {(forecast.recommendations ?? []).length > 0 && (
+                <div className="bg-white/5 rounded-2xl p-4">
+                  <p className="text-[8px] font-black text-amber-300 uppercase tracking-widest mb-3 flex items-center gap-1.5">
+                    <Lightbulb size={11} /> Recommandations IA
+                  </p>
+                  <ul className="space-y-2">
+                    {(forecast.recommendations ?? []).map((rec: string, i: number) => (
+                      <li key={i} className="text-[10px] font-bold text-white/70 leading-relaxed">
+                        {rec}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+
+          </div>
+        )}
+      </div>
+    );
   };
 
   // ============================================================
@@ -611,7 +1085,7 @@ const Dashboard: React.FC<{
         
 
         {/* ── ROW 1 : 8 KPI CARDS ── */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div id="tour-kpi-grid" className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <StatCard title="Chiffre d'Affaires" value={fmtShort(salesStats.totalRevenue) + ' ' + currency.split(' ')[0]} subValue={`${todayStats.count} vente(s) — ${todayStats.periodLabel}`} icon={TrendingUp} color="bg-indigo-600" trend="up" onClick={() => onNavigate?.('sales')}/>
           <StatCard title="Trésorerie Réelle" value={fmtShort(salesStats.totalCollected) + ' ' + currency.split(' ')[0]} subValue={`Taux encaissement : ${collectionRate}%`} icon={Wallet} color="bg-emerald-500" trend="up" onClick={() => onNavigate?.('payments')}/>
           <StatCard title="Créances Clients" value={fmtShort(salesStats.totalUnpaid) + ' ' + currency.split(' ')[0]} subValue={`${salesStats.overdueCount} facture(s) en retard${selectedYear ? ' (historique)' : ''}`} icon={Landmark} color="bg-rose-500" trend="down" onClick={() => onNavigate?.('recovery')}/>
@@ -619,15 +1093,15 @@ const Dashboard: React.FC<{
           <StatCard title="Clients" value={(adminStats?.customersCount ?? customers.length).toLocaleString()} subValue={`${customers.slice(0,1)[0] ? 'Dernier : ' + (customers[0]?.companyName || customers[0]?.name || '—') : 'Portefeuille actif'}`} icon={Users} color="bg-sky-500" onClick={() => onNavigate?.('customers')}/>
           <StatCard title="Références Stock" value={(adminStats?.stocksTotal ?? stocks.length).toLocaleString()} subValue={`${stockStats.out} rupture(s) • ${stockStats.low} alerte(s)`} icon={Package} color="bg-amber-500" trend={stockStats.out > 0 ? 'down' : 'up'} onClick={() => onNavigate?.('inventory')}/>
           <StatCard title="Utilisateurs" value={(adminStats?.usersCount ?? usersList.length).toLocaleString()} subValue="Accès actifs" icon={UserCheck} color="bg-slate-700" onClick={() => onNavigate?.('governance')}/>
-          <StatCard title="Panier Moyen" value={fmtShort(salesStats.avgBasket) + ' ' + currency.split(' ')[0]} subValue="Par transaction" icon={Target} color="bg-pink-500"/>
+          <StatCard title="Chèques en Transit" value={fmtShort(salesStats.totalChequesPending ?? 0) + ' ' + currency.split(' ')[0]} subValue="En attente d'encaissement" icon={Receipt} color="bg-amber-500" onClick={() => onNavigate?.('payments')}/>
         </div>
 
         {/* ── ROW 2 : REVENUE TREND + RECOVERY DONUT ── */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
 
           {/* Tendance CA 6 mois */}
-          <div className="lg:col-span-8 bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
-            <SectionHeader icon={BarChart2} title={selectedYear ? `Revenus ${selectedYear}${selectedMonth !== null ? ' — ' + MONTH_LABELS[selectedMonth] : ''}` : 'Tendance Revenus — 6 Derniers Mois'} badge="Live" color="text-indigo-600"/>
+          <div id="tour-chart" className="lg:col-span-8 bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
+            <SectionHeader icon={BarChart2} title={chartTitle} badge={isCurrentPeriod(filterState) ? 'Live' : 'Historique'} color="text-indigo-600"/>
             <div className="h-64">
               <ResponsiveContainer width="100%" height="100%">
                 <ComposedChart data={revenueChartData.length > 0 ? revenueChartData : sales.filter((s: any) => s.status !== 'ANNULE').slice(-10).map((s: any) => ({
@@ -936,6 +1410,9 @@ const Dashboard: React.FC<{
             </div>
           </div>
         )}
+
+        {/* ── PRÉVISIONS IA ── */}
+        {renderForecastPanel()}
       </div>
     );
   };
@@ -986,6 +1463,9 @@ const Dashboard: React.FC<{
           </div>
         </div>
       </div>
+
+      {/* ── PRÉVISIONS IA ── */}
+      {renderForecastPanel()}
     </div>
   );
 
@@ -1347,16 +1827,8 @@ const Dashboard: React.FC<{
         </div>
       </div>
 
-      {/* FILTRE ANNÉE / MOIS — visible pour tous les rôles */}
-      <div className="bg-white px-5 py-4 rounded-2xl border border-slate-100 shadow-sm">
-        <YearMonthPicker
-          dataYears={availableYears}
-          selectedYear={selectedYear}
-          selectedMonth={selectedMonth}
-          onYearChange={setSelectedYear}
-          onMonthChange={setSelectedMonth}
-        />
-      </div>
+      {/* TIME MACHINE FILTER — visible pour tous les rôles */}
+      <TimeMachineFilter value={filterState} onChange={setFilterState} />
 
       {/* BANNIÈRE ESSAI GRATUIT — visible pour tous les rôles non-admin aussi */}
       {trialDaysLeft !== null && !userRoles.includes(UserRole.ADMIN) && !userRoles.includes(UserRole.SUPER_ADMIN) && (

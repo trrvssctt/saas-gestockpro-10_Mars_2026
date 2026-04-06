@@ -32,31 +32,36 @@ const PERIOD_OPTIONS: PeriodOption[] = [
   { id: '1Y', label: '1 An',    months: 12, discountPct: 30 },
 ];
 
-function getPeriodPrice(baseMonthlyPrice: number, period: BillingPeriod): number {
+function getPeriodPrice(plan: SubscriptionPlan, period: BillingPeriod): number {
+  if (period === '3M' && plan.priceThreeMonths != null) return plan.priceThreeMonths;
+  if (period === '1Y' && plan.priceYearly != null) return plan.priceYearly;
+  // fallback: calcul avec remise si prix DB absent
+  const base = plan.priceMonthly ?? plan.price ?? 0;
   const opt = PERIOD_OPTIONS.find(p => p.id === period)!;
-  const fullPrice = baseMonthlyPrice * opt.months;
-  return Math.round(fullPrice * (1 - opt.discountPct / 100));
+  return Math.round(base * opt.months * (1 - opt.discountPct / 100));
 }
 
-function getSavings(baseMonthlyPrice: number, period: BillingPeriod): number {
+function getSavings(plan: SubscriptionPlan, period: BillingPeriod): number {
+  const base = plan.priceMonthly ?? plan.price ?? 0;
   const opt = PERIOD_OPTIONS.find(p => p.id === period)!;
-  const fullPrice = baseMonthlyPrice * opt.months;
-  return fullPrice - getPeriodPrice(baseMonthlyPrice, period);
+  return Math.round(base * opt.months) - getPeriodPrice(plan, period);
 }
 
 interface SubscriptionProps {
   user: User;
   currency: string;
   onUpgrade?: (plan: SubscriptionPlan) => void;
+  onLogout?: () => void;
 }
 
-const Subscription: React.FC<SubscriptionProps> = ({ user, currency, onUpgrade }) => {
+const Subscription: React.FC<SubscriptionProps> = ({ user, currency, onUpgrade, onLogout }) => {
   const showToast = useToast();
   const [subscriptionData, setSubscriptionData] = useState<any>(null);
   const [availablePlans, setAvailablePlans] = useState<SubscriptionPlan[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedPlan, setSelectedPlan] = useState<SubscriptionPlan | null>(null);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [upgradeConfirmed, setUpgradeConfirmed] = useState<{ planId: string; planName: string } | null>(null);
   
   // Durée de facturation sélectionnée
   const [selectedDuration, setSelectedDuration] = useState<BillingPeriod>('1M');
@@ -79,8 +84,8 @@ const Subscription: React.FC<SubscriptionProps> = ({ user, currency, onUpgrade }
 
   const isAdmin = user.roles?.includes(UserRole.ADMIN) || user.role === UserRole.ADMIN;
 
-  const fetchData = async () => {
-    setLoading(true);
+  const fetchData = async (silent = false) => {
+    if (!silent) setLoading(true);
     try {
       const [subInfo, plans] = await Promise.all([
         apiClient.get('/billing/my-subscription'),
@@ -88,16 +93,32 @@ const Subscription: React.FC<SubscriptionProps> = ({ user, currency, onUpgrade }
       ]);
       setSubscriptionData(subInfo);
       setAvailablePlans(plans);
+
+      // Détecter si l'admin vient de valider notre paiement en attente
+      const pendingFlag = sessionStorage.getItem('gsp_upgrade_pending');
+      if (pendingFlag && subInfo?.subscription?.status === 'ACTIVE') {
+        try {
+          const pending = JSON.parse(pendingFlag);
+          setUpgradeConfirmed(pending);
+          sessionStorage.removeItem('gsp_upgrade_pending');
+        } catch (_) {}
+      }
     } catch (e) {
       console.error("Erreur sync abonnement", e);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
+  useEffect(() => { fetchData(); }, []);
+
+  // Polling 30 s tant que l'abonnement est PENDING (attend validation admin)
   useEffect(() => {
-    fetchData();
-  }, []);
+    const status = subscriptionData?.subscription?.status;
+    if (status !== 'PENDING') return;
+    const id = setInterval(() => fetchData(true), 30000);
+    return () => clearInterval(id);
+  }, [subscriptionData?.subscription?.status]);
 
   const currentSubscription = subscriptionData?.subscription;
   const paymentHistory = subscriptionData?.payments || [];
@@ -107,6 +128,11 @@ const Subscription: React.FC<SubscriptionProps> = ({ user, currency, onUpgrade }
     if (pageSize === -1) return paymentHistory;
     return paymentHistory.slice(0, pageSize);
   }, [paymentHistory, pageSize]);
+
+  // Vrai si un paiement d'abonnement est déjà en attente de validation
+  const hasPendingSubPayment = useMemo(() =>
+    paymentHistory.some((p: any) => p.status === 'PENDING'),
+  [paymentHistory]);
 
   const currentPlan = useMemo(() => {
     return availablePlans.find(p => p.id === currentSubscription?.planId) || availablePlans[0] || SUBSCRIPTION_PLANS[0];
@@ -175,8 +201,8 @@ const Subscription: React.FC<SubscriptionProps> = ({ user, currency, onUpgrade }
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
           {filteredPlans.map((plan: SubscriptionPlan) => {
-            const periodPrice = getPeriodPrice(plan.price, selectedDuration);
-            const savings = getSavings(plan.price, selectedDuration);
+            const periodPrice = getPeriodPrice(plan, selectedDuration);
+            const savings = getSavings(plan, selectedDuration);
             const periodOpt = PERIOD_OPTIONS.find(p => p.id === selectedDuration)!;
             return (
               <div key={plan.id} className="bg-white rounded-[3rem] border-2 border-slate-100 p-5 md:p-10 hover:border-indigo-600 transition-all group relative overflow-hidden flex flex-col shadow-sm hover:shadow-2xl">
@@ -242,7 +268,7 @@ const Subscription: React.FC<SubscriptionProps> = ({ user, currency, onUpgrade }
     if (!selectedPlan) return;
     setIsStripeLoading(true);
     try {
-      const periodPrice = getPeriodPrice(selectedPlan.price, selectedDuration);
+      const periodPrice = getPeriodPrice(selectedPlan, selectedDuration);
       const resp = await apiClient.post('/billing/stripe/checkout', {
         planId: selectedPlan.id,
         period: selectedDuration,
@@ -250,6 +276,11 @@ const Subscription: React.FC<SubscriptionProps> = ({ user, currency, onUpgrade }
         cardHolder,
       });
       if (resp.url) {
+        // Stocker le flag avant la redirection Stripe
+        sessionStorage.setItem('gsp_upgrade_pending', JSON.stringify({
+          planId: selectedPlan.id,
+          planName: selectedPlan.name
+        }));
         window.location.href = resp.url;
       } else {
         showToast('Impossible de créer la session Stripe.', 'error');
@@ -265,7 +296,7 @@ const Subscription: React.FC<SubscriptionProps> = ({ user, currency, onUpgrade }
     if (!selectedPlan) return;
     setIsProcessing(true);
     try {
-      const periodPrice = getPeriodPrice(selectedPlan.price, selectedDuration);
+      const periodPrice = getPeriodPrice(selectedPlan, selectedDuration);
       const transactionId = operator === 'WAVE' ? txReference : `TX-${Date.now()}`;
       const payload = {
         planId: selectedPlan.id,
@@ -280,6 +311,12 @@ const Subscription: React.FC<SubscriptionProps> = ({ user, currency, onUpgrade }
       };
 
       await apiClient.post('/billing/upgrade', payload);
+
+      // Stocker le flag pour détecter la validation admin
+      sessionStorage.setItem('gsp_upgrade_pending', JSON.stringify({
+        planId: selectedPlan.id,
+        planName: selectedPlan.name
+      }));
 
       // Optimistically apply the new plan locally while waiting for admin validation
       setSubscriptionData((prev: any) => {
@@ -320,6 +357,10 @@ const Subscription: React.FC<SubscriptionProps> = ({ user, currency, onUpgrade }
   };
 
   const handlePayCurrentClick = () => {
+    if (hasPendingSubPayment) {
+      showToast('Un paiement est déjà en attente de validation. Veuillez patienter.', 'error');
+      return;
+    }
     setPaymentMethod(null);
     setOperator(null);
     setTxReference('');
@@ -431,9 +472,16 @@ const Subscription: React.FC<SubscriptionProps> = ({ user, currency, onUpgrade }
                      {currentSubscription?.nextBillingDate ? new Date(currentSubscription.nextBillingDate).toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' }) : 'N/A'}
                   </p>
                 <div className="mt-3">
-                  <button onClick={handlePayCurrentClick} className="px-4 py-2 bg-emerald-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-emerald-700 transition-all">
-                   PAYER CE MOIS — {currentPlan?.price?.toLocaleString()} {currency}
-                  </button>
+                  {hasPendingSubPayment ? (
+                    <div className="inline-flex items-center gap-2 px-4 py-2 bg-amber-500/20 border border-amber-500/30 text-amber-300 rounded-2xl text-[10px] font-black uppercase tracking-widest">
+                      <Clock size={12} className="animate-pulse" />
+                      Paiement en attente de validation
+                    </div>
+                  ) : (
+                    <button onClick={handlePayCurrentClick} className="px-4 py-2 bg-emerald-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-emerald-700 transition-all">
+                      PAYER CE MOIS — {currentPlan?.price?.toLocaleString()} {currency}
+                    </button>
+                  )}
                 </div>
                </div>
             </div>
@@ -513,12 +561,22 @@ const Subscription: React.FC<SubscriptionProps> = ({ user, currency, onUpgrade }
                            {Number(p.amount).toLocaleString()} {currency}
                         </td>
                         <td className="px-10 py-6 text-right">
-                           <button 
-                             onClick={() => handleDownloadInvoice(p.id)}
-                             className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-50 text-indigo-600 rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-indigo-600 hover:text-white transition-all shadow-sm group"
-                           >
-                              <FileDown size={14} className="group-hover:animate-bounce" /> Réçu de paiement
-                           </button>
+                          {p.status === 'PENDING' ? (
+                            <span className="inline-flex items-center gap-2 px-4 py-2 bg-amber-50 text-amber-600 rounded-xl text-[9px] font-black uppercase tracking-widest border border-amber-200">
+                              <Clock size={12} className="animate-pulse" /> En attente de validation
+                            </span>
+                          ) : p.status === 'REJECTED' ? (
+                            <span className="inline-flex items-center gap-2 px-4 py-2 bg-rose-50 text-rose-600 rounded-xl text-[9px] font-black uppercase tracking-widest border border-rose-200">
+                              <AlertTriangle size={12} /> Rejeté
+                            </span>
+                          ) : (
+                            <button
+                              onClick={() => handleDownloadInvoice(p.id)}
+                              className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-50 text-indigo-600 rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-indigo-600 hover:text-white transition-all shadow-sm group"
+                            >
+                              <FileDown size={14} className="group-hover:animate-bounce" /> Reçu de paiement
+                            </button>
+                          )}
                         </td>
                      </tr>
                       );
@@ -608,17 +666,88 @@ const Subscription: React.FC<SubscriptionProps> = ({ user, currency, onUpgrade }
         {plansSection}
       </div>
 
+      {/* ══ BANNER UPGRADE CONFIRMÉ ══ */}
+      {upgradeConfirmed && (
+        <div className="fixed inset-0 z-[999] flex items-center justify-center p-6 bg-slate-950/95 backdrop-blur-xl animate-in fade-in duration-500">
+          <div className="bg-white max-w-lg w-full rounded-[4rem] p-10 md:p-16 shadow-2xl text-center space-y-8 animate-in zoom-in-95 duration-500">
+
+            {/* Icône succès */}
+            <div className="relative mx-auto w-28 h-28">
+              <div className="w-28 h-28 bg-gradient-to-br from-emerald-400 to-emerald-600 text-white rounded-[2.5rem] flex items-center justify-center shadow-2xl shadow-emerald-500/30">
+                <BadgeCheck size={56} />
+              </div>
+              <div className="absolute -top-2 -right-2 w-8 h-8 bg-indigo-600 rounded-full flex items-center justify-center shadow-lg">
+                <Check size={16} className="text-white" />
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <h3 className="text-2xl md:text-3xl font-black text-slate-900 uppercase tracking-tight">
+                Upgrade Confirmé !
+              </h3>
+              <p className="text-slate-500 text-sm font-bold leading-relaxed">
+                Votre passage au plan{' '}
+                <span className="text-indigo-600 font-black">{upgradeConfirmed.planName}</span>{' '}
+                a été validé par l'administrateur.
+              </p>
+            </div>
+
+            {/* Nouvelles fonctionnalités */}
+            <div className="bg-emerald-50 border border-emerald-100 rounded-[2rem] p-6 text-left space-y-3">
+              <p className="text-[10px] font-black text-emerald-600 uppercase tracking-widest mb-4">
+                Nouvelles fonctionnalités débloquées
+              </p>
+              {[
+                'Accès aux utilisateurs supplémentaires',
+                `Toutes les fonctionnalités du plan ${upgradeConfirmed.planName}`,
+                'Reconnexion requise pour activer les accès',
+              ].map((feat, i) => (
+                <div key={i} className="flex items-center gap-3 text-sm text-slate-700 font-bold">
+                  <CheckCircle2 size={18} className="text-emerald-500 shrink-0" />
+                  {feat}
+                </div>
+              ))}
+            </div>
+
+            {/* Actions */}
+            <div className="space-y-3">
+              <button
+                onClick={() => { if (onLogout) onLogout(); }}
+                className="w-full py-5 bg-indigo-600 text-white rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-indigo-700 transition-all shadow-xl flex items-center justify-center gap-3"
+              >
+                <ArrowRight size={18} />
+                Se déconnecter & accéder à mes nouvelles fonctionnalités
+              </button>
+              <p className="text-[9px] text-slate-400 font-bold uppercase tracking-widest">
+                Reconnectez-vous pour activer votre nouveau plan
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* MODAL DE PAIEMENT */}
       {showPaymentModal && (
         <div className="fixed inset-0 z-[800] flex items-center justify-center p-6 bg-slate-950/90 backdrop-blur-xl animate-in fade-in duration-300">
           <div className="bg-white w-full max-w-2xl mx-4 md:mx-auto rounded-[4rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-500 flex flex-col max-h-[90vh]">
             {success ? (
               <div className="p-10 md:p-20 text-center space-y-8 animate-in zoom-in-90">
-                <div className="w-24 h-24 bg-emerald-500 text-white rounded-[2.5rem] flex items-center justify-center mx-auto shadow-2xl animate-bounce">
-                  <CheckCircle2 size={48} />
+                <div className="w-24 h-24 bg-amber-400 text-white rounded-[2.5rem] flex items-center justify-center mx-auto shadow-2xl">
+                  <Clock size={48} />
                 </div>
-                <h3 className="text-xl md:text-3xl font-black uppercase tracking-tight">Paiement enregistré</h3>
-                <p className="text-slate-400 text-xs font-bold uppercase">Le paiement a bien été enregistré et est en attente de validation par l'administrateur.</p>
+                <div className="space-y-2">
+                  <h3 className="text-xl md:text-3xl font-black uppercase tracking-tight">Paiement soumis</h3>
+                  <p className="text-slate-400 text-xs font-bold uppercase tracking-widest">En attente de validation administrateur</p>
+                </div>
+                <div className="bg-amber-50 border border-amber-200 rounded-[2rem] p-6 text-left space-y-3">
+                  <div className="flex items-center gap-3 text-sm font-bold text-amber-700">
+                    <AlertTriangle size={16} className="text-amber-500 shrink-0" />
+                    Votre reçu sera disponible après validation
+                  </div>
+                  <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest pl-7">
+                    Une alerte s'affichera dès que votre upgrade est confirmé.
+                  </p>
+                </div>
               </div>
             ) : (
               <>
@@ -636,8 +765,8 @@ const Subscription: React.FC<SubscriptionProps> = ({ user, currency, onUpgrade }
                 <div className="flex-1 overflow-y-auto p-6 md:p-12 space-y-8 custom-scrollbar">
                   {/* Résumé du montant */}
                   {(() => {
-                    const periodPrice = selectedPlan ? getPeriodPrice(selectedPlan.price, selectedDuration) : 0;
-                    const savings = selectedPlan ? getSavings(selectedPlan.price, selectedDuration) : 0;
+                    const periodPrice = selectedPlan ? getPeriodPrice(selectedPlan, selectedDuration) : 0;
+                    const savings = selectedPlan ? getSavings(selectedPlan, selectedDuration) : 0;
                     const periodOpt = PERIOD_OPTIONS.find(p => p.id === selectedDuration)!;
                     return (
                       <div className="p-4 md:p-6 bg-indigo-50 border border-indigo-100 rounded-[2rem] flex justify-between items-center">
@@ -730,7 +859,7 @@ const Subscription: React.FC<SubscriptionProps> = ({ user, currency, onUpgrade }
                       </div>
                       <button onClick={handleStripeCheckout} disabled={isStripeLoading}
                         className="w-full py-5 bg-indigo-600 text-white rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl flex items-center justify-center gap-3 disabled:opacity-50">
-                        {isStripeLoading ? <Loader2 className="animate-spin" /> : <><CreditCard size={18}/> PAYER PAR CARTE — {selectedPlan ? getPeriodPrice(selectedPlan.price, selectedDuration).toLocaleString() : 0} {currency}</>}
+                        {isStripeLoading ? <Loader2 className="animate-spin" /> : <><CreditCard size={18}/> PAYER PAR CARTE — {selectedPlan ? getPeriodPrice(selectedPlan, selectedDuration).toLocaleString() : 0} {currency}</>}
                       </button>
                       <button onClick={() => setPaymentMethod(null)} className="w-full py-2 text-slate-400 text-[9px] font-black uppercase tracking-widest hover:text-slate-600">
                         ← Changer de méthode

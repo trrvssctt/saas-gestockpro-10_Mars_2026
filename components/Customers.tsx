@@ -14,9 +14,10 @@ interface CustomersProps {
   user: User;
   currency: string;
   plan?: SubscriptionPlan;
+  refreshKey?: number;
 }
 
-const Customers: React.FC<CustomersProps> = ({ user, currency, plan }) => {
+const Customers: React.FC<CustomersProps> = ({ user, currency, plan, refreshKey }) => {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [sales, setSales] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -173,6 +174,7 @@ const Customers: React.FC<CustomersProps> = ({ user, currency, plan }) => {
       paymentTerms: customer.paymentTerms || 30,
       maxCreditLimit: customer.maxCreditLimit || 5000
     });
+    setError(null);
     setShowEditModal(customer);
   };
 
@@ -209,7 +211,7 @@ const Customers: React.FC<CustomersProps> = ({ user, currency, plan }) => {
     }
   };
 
-  useEffect(() => { fetchData(); }, []);
+  useEffect(() => { fetchData(); }, [refreshKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const hasLinkedSales = (customerId: string) => {
     return sales.some(s => (s.customerId || s.customer_id) === customerId);
@@ -270,7 +272,7 @@ const Customers: React.FC<CustomersProps> = ({ user, currency, plan }) => {
               </div>
             ) : (
               <button 
-                onClick={() => { resetForm(); setShowCreateModal(true); }}
+                onClick={() => { resetForm(); setError(null); setShowCreateModal(true); }}
                 className="bg-slate-900 text-white px-4 md:px-8 py-3 md:py-4 rounded-2xl font-black hover:bg-indigo-600 transition-all shadow-xl flex items-center gap-3 text-xs uppercase tracking-widest"
               >
                 <Plus size={18} /> CRÉER UN CLIENT
@@ -494,8 +496,14 @@ const Customers: React.FC<CustomersProps> = ({ user, currency, plan }) => {
                       </div>
                    </div>
                 </div>
+                {error && (
+                  <div className="flex items-start gap-3 p-4 bg-rose-50 border border-rose-200 rounded-2xl animate-in slide-in-from-top-2 duration-200">
+                    <AlertCircle size={16} className="text-rose-500 mt-0.5 shrink-0" />
+                    <p className="text-xs font-bold text-rose-700 leading-relaxed">{error}</p>
+                  </div>
+                )}
                 <div className="flex gap-4">
-                  <button type="button" onClick={() => { setShowCreateModal(false); setShowEditModal(null); }} className="flex-1 py-5 border-2 border-slate-100 text-slate-400 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-slate-50 transition-all">ANNULER</button>
+                  <button type="button" onClick={() => { setShowCreateModal(false); setShowEditModal(null); setError(null); }} className="flex-1 py-5 border-2 border-slate-100 text-slate-400 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-slate-50 transition-all">ANNULER</button>
                   <button type="submit" disabled={actionLoading} className={`flex-1 py-5 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-xl transition-all flex items-center justify-center gap-3 ${showEditModal ? 'bg-amber-600' : 'bg-indigo-600'}`}>
                     {actionLoading ? <Loader2 className="animate-spin" size={18} /> : <>{showEditModal ? 'METTRE À JOUR' : 'SCELLER LE PROFIL'} <ArrowRight size={18}/></>}
                   </button>
@@ -540,95 +548,181 @@ const Customers: React.FC<CustomersProps> = ({ user, currency, plan }) => {
 
       {/* MODAL DÉTAILS VUE 360 */}
       {showDetailModal && (
-        <div className="fixed inset-0 z-[700] flex items-center justify-center p-6 bg-slate-950/90 backdrop-blur-md animate-in fade-in duration-300">
-          <div className="bg-white w-full max-w-5xl mx-4 md:mx-auto rounded-[4rem] shadow-2xl overflow-hidden flex flex-col max-h-[90vh] animate-in zoom-in-95 duration-500">
-            <div className="px-6 md:px-12 py-6 md:py-10 bg-slate-900 text-white flex justify-between items-center">
-              <div className="flex items-center gap-6">
-                <div className="w-20 h-20 bg-indigo-600 rounded-3xl flex items-center justify-center text-4xl font-black shadow-2xl uppercase">
+        <div className="fixed inset-0 z-[700] flex items-center justify-center p-4 md:p-6 bg-slate-950/95 backdrop-blur-md animate-in fade-in duration-300">
+          <div className="bg-white w-full max-w-5xl mx-auto rounded-[2.5rem] shadow-2xl overflow-hidden flex flex-col max-h-[92vh] animate-in zoom-in-95 duration-300">
+
+            {/* ── Header ── */}
+            <div className="px-6 md:px-10 py-6 bg-gradient-to-r from-slate-900 to-indigo-900 text-white flex justify-between items-center shrink-0">
+              <div className="flex items-center gap-4">
+                <div className="w-14 h-14 bg-indigo-500/30 border border-indigo-400/30 rounded-2xl flex items-center justify-center text-2xl font-black shadow-inner shrink-0 uppercase">
                   {(showDetailModal.companyName || 'C').charAt(0)}
                 </div>
                 <div>
-                  <h3 className="text-xl md:text-3xl font-black uppercase tracking-tighter leading-none">{showDetailModal.companyName}</h3>
-                  <div className="flex items-center gap-4 mt-3">
-                    <span className="text-[10px] font-black text-indigo-400 uppercase bg-indigo-500/10 px-3 py-1 rounded-full">ID: {showDetailModal.id.slice(0, 8)}</span>
-                    <span className={`text-[10px] font-black uppercase px-3 py-1 rounded-full ${showDetailModal.healthStatus === 'GOOD' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-rose-500/10 text-rose-400 animate-pulse'}`}>
-                      SOLVABILITÉ: {showDetailModal.healthStatus}
+                  <p className="text-[9px] font-black text-indigo-300 uppercase tracking-[0.3em] mb-1">Dossier Client 360°</p>
+                  <h3 className="text-xl md:text-2xl font-black uppercase tracking-tight leading-none">{showDetailModal.companyName}</h3>
+                  <p className="text-[9px] text-indigo-300/70 font-mono mt-1 uppercase tracking-widest">
+                    REF: {showDetailModal.id.slice(0, 8)} &nbsp;·&nbsp;
+                    <span className={showDetailModal.healthStatus === 'GOOD' ? 'text-emerald-400' : 'text-rose-400'}>
+                      {showDetailModal.healthStatus === 'GOOD' ? 'Solvabilité bonne' : showDetailModal.healthStatus === 'WARNING' ? 'Solvabilité à surveiller' : 'Solvabilité critique'}
                     </span>
-                  </div>
+                  </p>
                 </div>
               </div>
-              <button onClick={() => setShowDetailModal(null)} className="p-4 bg-white/5 hover:bg-white/10 rounded-3xl transition-all"><X size={32}/></button>
+              <button onClick={() => setShowDetailModal(null)} className="p-3 bg-white/5 hover:bg-white/15 rounded-2xl transition-all shrink-0"><X size={22} /></button>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-4 md:p-12 grid grid-cols-12 gap-3 md:gap-6 lg:gap-10 bg-slate-50/30 custom-scrollbar">
-               <div className="col-span-12 lg:col-span-4 space-y-8">
-                  <div className="bg-white p-4 md:p-8 rounded-[2rem] md:rounded-[3rem] border border-slate-100 shadow-sm space-y-4 md:space-y-6">
-                    <h4 className="text-xs font-black uppercase tracking-widest text-slate-400 flex items-center gap-2"><Phone size={14}/> Coordonnées</h4>
-                    <div className="space-y-4">
-                      <div className="flex items-center gap-4">
-                        <div className="w-10 h-10 bg-indigo-50 text-indigo-600 rounded-xl flex items-center justify-center"><Mail size={18}/></div>
-                        <div className="overflow-hidden"><p className="text-[8px] font-black text-slate-400 uppercase">Email</p><p className="text-sm font-bold text-slate-800 truncate">{showDetailModal.email}</p></div>
-                      </div>
-                      <div className="flex items-center gap-4">
-                        <div className="w-10 h-10 bg-indigo-50 text-indigo-600 rounded-xl flex items-center justify-center"><Phone size={18}/></div>
-                        <div><p className="text-[8px] font-black text-slate-400 uppercase">Téléphone</p><p className="text-sm font-bold text-slate-800">{showDetailModal.phone || 'Non renseigné'}</p></div>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="bg-white p-4 md:p-8 rounded-[2rem] md:rounded-[3rem] border border-slate-100 shadow-sm space-y-4 md:space-y-6">
-                    <h4 className="text-xs font-black uppercase tracking-widest text-slate-400 flex items-center gap-2"><MapPin size={14}/> Logistique</h4>
-                    <div><p className="text-[8px] font-black text-slate-400 uppercase">Siège Social</p><p className="text-sm font-bold text-slate-800 leading-relaxed">{showDetailModal.billingAddress || 'Non renseignée'}</p></div>
-                  </div>
-               </div>
+            {/* ── Body ── */}
+            <div className="flex-1 overflow-y-auto p-4 md:p-8 bg-slate-50/60 custom-scrollbar">
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
 
-               <div className="col-span-12 lg:col-span-8 space-y-8">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                    <div className={`p-4 md:p-8 rounded-[2.5rem] text-white shadow-xl relative overflow-hidden ${ (customerStats?.outstanding || 0) > 0 ? 'bg-rose-600' : 'bg-emerald-600'}`}>
-                       <div className="absolute right-0 top-0 p-4 opacity-10"><TrendingUp size={80}/></div>
-                       <h4 className="text-[9px] font-black uppercase tracking-[0.2em] mb-4 opacity-70">Encours Actuel</h4>
-                       <p className="text-4xl font-black">{(customerStats?.outstanding || 0).toLocaleString()} <span className="text-sm uppercase">{currency}</span></p>
-                    </div>
-                    <div className="p-4 md:p-8 rounded-[2.5rem] bg-indigo-600 text-white shadow-xl relative overflow-hidden">
-                       <div className="absolute right-0 top-0 p-4 opacity-10"><BarChart3 size={80}/></div>
-                       <h4 className="text-[9px] font-black uppercase tracking-[0.2em] mb-4 opacity-70">Volume d'affaires</h4>
-                       <p className="text-4xl font-black">{(customerStats?.totalInvoiced || 0).toLocaleString()} <span className="text-sm uppercase">{currency}</span></p>
-                    </div>
+                {/* Colonne gauche */}
+                <div className="lg:col-span-1 space-y-4">
+
+                  {/* KPI encours */}
+                  <div className={`p-6 rounded-2xl text-white shadow-lg relative overflow-hidden ${(customerStats?.outstanding || 0) > 0 ? 'bg-gradient-to-br from-rose-600 to-rose-700' : 'bg-gradient-to-br from-emerald-600 to-emerald-700'}`}>
+                    <div className="absolute -right-4 -bottom-4 opacity-10"><TrendingUp size={80} /></div>
+                    <p className="text-[9px] font-black uppercase tracking-[0.25em] opacity-70 mb-3">Encours Actuel</p>
+                    <p className="text-4xl font-black">{(customerStats?.outstanding || 0).toLocaleString()}</p>
+                    <p className="text-[9px] font-black uppercase tracking-widest opacity-60 mt-1">{currency} en attente de règlement</p>
                   </div>
 
-                  <div className="bg-white p-5 md:p-10 rounded-[3.5rem] border border-slate-100 shadow-sm flex flex-col min-h-[350px]">
-                     <div className="flex items-center justify-between mb-8">
-                        <h4 className="text-xs font-black uppercase tracking-widest text-slate-400 flex items-center gap-2"><History size={18}/> Dernières commandes</h4>
-                        {historyLoading && <Loader2 className="animate-spin text-indigo-500" size={16}/>}
-                     </div>
-                     <div className="flex-1 overflow-y-auto custom-scrollbar space-y-3">
-                        {customerHistory.length === 0 && !historyLoading ? (
-                           <div className="h-full flex flex-col items-center justify-center text-slate-300 gap-4 opacity-40 py-20">
-                              <FileText size={48}/>
-                              <p className="text-[10px] font-black uppercase tracking-widest">Aucune vente enregistrée</p>
-                           </div>
-                        ) : customerHistory.map((sale: any) => (
-                           <div key={sale.id} className="p-5 bg-slate-50/50 rounded-2xl border border-slate-100 flex items-center justify-between group hover:bg-white hover:border-indigo-500 transition-all shadow-sm">
-                              <div className="flex items-center gap-5">
-                                 <div className={`w-12 h-12 rounded-xl flex items-center justify-center shadow-inner ${sale.status === 'ANNULE' ? 'bg-rose-50' : 'bg-indigo-50'}`}>
-                                    <FileText size={20} className={sale.status === 'ANNULE' ? 'text-rose-400' : 'text-indigo-600'}/>
-                                 </div>
-                                 <div>
-                                    <p className={`text-sm font-black uppercase tracking-tight ${sale.status === 'ANNULE' ? 'text-slate-400 line-through' : 'text-slate-900'}`}>#{sale.reference}</p>
-                                    <p className="text-[10px] text-slate-400 font-bold uppercase mt-1">{new Date(sale.createdAt).toLocaleDateString()}</p>
-                                 </div>
+                  {/* KPI volume d'affaires */}
+                  <div className="bg-gradient-to-br from-indigo-600 to-indigo-700 p-6 rounded-2xl text-white shadow-lg shadow-indigo-200 relative overflow-hidden">
+                    <div className="absolute -right-4 -bottom-4 opacity-10"><BarChart3 size={80} /></div>
+                    <p className="text-[9px] font-black uppercase tracking-[0.25em] opacity-70 mb-3">Volume d'affaires</p>
+                    <p className="text-4xl font-black">{(customerStats?.totalInvoiced || 0).toLocaleString()}</p>
+                    <p className="text-[9px] font-black uppercase tracking-widest opacity-60 mt-1">{currency} facturés au total</p>
+                  </div>
+
+                  {/* Coordonnées */}
+                  <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm space-y-3">
+                    <h4 className="text-[9px] font-black uppercase tracking-widest text-slate-400 flex items-center gap-2"><Phone size={13} /> Coordonnées</h4>
+                    <div className="space-y-3">
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 bg-indigo-50 text-indigo-600 rounded-lg flex items-center justify-center shrink-0"><Mail size={14} /></div>
+                        <div className="overflow-hidden">
+                          <p className="text-[8px] font-black text-slate-400 uppercase">Email</p>
+                          <p className="text-xs font-bold text-slate-800 truncate">{showDetailModal.email || 'Non renseigné'}</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 bg-indigo-50 text-indigo-600 rounded-lg flex items-center justify-center shrink-0"><Phone size={14} /></div>
+                        <div>
+                          <p className="text-[8px] font-black text-slate-400 uppercase">Téléphone</p>
+                          <p className="text-xs font-bold text-slate-800">{showDetailModal.phone || 'Non renseigné'}</p>
+                        </div>
+                      </div>
+                      {showDetailModal.billingAddress && (
+                        <div className="flex items-start gap-3">
+                          <div className="w-8 h-8 bg-indigo-50 text-indigo-600 rounded-lg flex items-center justify-center shrink-0 mt-0.5"><MapPin size={14} /></div>
+                          <div>
+                            <p className="text-[8px] font-black text-slate-400 uppercase">Siège social</p>
+                            <p className="text-xs font-bold text-slate-800 leading-relaxed">{showDetailModal.billingAddress}</p>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Colonne droite */}
+                <div className="lg:col-span-2 space-y-4">
+
+                  {/* Chèques en attente */}
+                  {(() => {
+                    const pendingChequeStatuses = ['PENDING', 'REGISTERED', 'DEPOSITED', 'PROCESSING'];
+                    const cheques = customerHistory.flatMap((sale: any) =>
+                      (sale.payments || [])
+                        .filter((p: any) => p.method === 'CHEQUE' && pendingChequeStatuses.includes(p.status))
+                        .map((p: any) => ({ ...p, saleRef: sale.reference }))
+                    );
+                    if (cheques.length === 0) return null;
+                    const total = cheques.reduce((s: number, p: any) => s + parseFloat(p.amount || 0), 0);
+                    return (
+                      <div className="bg-amber-50 border border-amber-200 rounded-2xl p-5 space-y-3">
+                        <div className="flex items-center justify-between">
+                          <h4 className="text-[9px] font-black uppercase tracking-widest text-amber-700 flex items-center gap-2">
+                            <span className="w-5 h-5 bg-amber-500 rounded-lg flex items-center justify-center text-white text-[8px]">✓</span>
+                            Chèques en Attente
+                          </h4>
+                          <p className="text-sm font-black text-amber-700">{total.toLocaleString()} <span className="text-[9px] font-bold">{currency}</span></p>
+                        </div>
+                        <div className="space-y-2">
+                          {cheques.map((p: any) => (
+                            <div key={p.id} className="bg-white border border-amber-100 rounded-xl px-4 py-2.5 flex items-center justify-between">
+                              <div>
+                                <p className="text-[9px] font-black text-slate-700">#{p.saleRef} — {p.chequeNumber || 'N° non renseigné'}</p>
+                                <p className="text-[8px] text-slate-400 font-bold">{p.bankName || '—'}</p>
                               </div>
                               <div className="text-right">
-                                 <p className={`text-base font-black ${sale.status === 'ANNULE' ? 'text-slate-300' : 'text-slate-900'}`}>{parseFloat(sale.totalTtc).toLocaleString()} {currency}</p>
-                                 <span className={`inline-block px-2 py-0.5 rounded text-[7px] font-black uppercase mt-1 ${sale.status === 'TERMINE' ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600'}`}>{sale.status}</span>
+                                <p className="text-[10px] font-black text-amber-700">{parseFloat(p.amount).toLocaleString()} {currency}</p>
+                                <span className={`text-[7px] font-black uppercase px-1.5 py-0.5 rounded ${
+                                  p.status === 'PENDING' ? 'bg-amber-100 text-amber-700' :
+                                  p.status === 'REGISTERED' ? 'bg-blue-100 text-blue-700' :
+                                  p.status === 'DEPOSITED' ? 'bg-indigo-100 text-indigo-700' :
+                                  'bg-purple-100 text-purple-700'
+                                }`}>{p.status}</span>
                               </div>
-                           </div>
-                        ))}
-                     </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  {/* Historique des commandes */}
+                  <div className="bg-white rounded-2xl border border-slate-100 shadow-sm flex flex-col overflow-hidden">
+                    <div className="px-6 py-4 border-b border-slate-50 flex items-center justify-between shrink-0">
+                      <h4 className="text-[9px] font-black uppercase tracking-widest text-slate-400 flex items-center gap-2">
+                        <History size={14} className="text-indigo-400" /> Dernières commandes
+                      </h4>
+                      {historyLoading
+                        ? <Loader2 className="animate-spin text-indigo-400" size={14} />
+                        : <span className="text-[8px] font-black bg-indigo-50 text-indigo-600 px-3 py-1 rounded-full uppercase tracking-widest">
+                            {customerHistory.length} commande{customerHistory.length !== 1 ? 's' : ''}
+                          </span>
+                      }
+                    </div>
+                    <div className="overflow-y-auto p-4 space-y-2 custom-scrollbar min-h-[220px] max-h-[380px]">
+                      {customerHistory.length === 0 && !historyLoading ? (
+                        <div className="py-16 flex flex-col items-center gap-3 text-slate-300">
+                          <FileText size={32} />
+                          <p className="text-[9px] font-black uppercase tracking-widest">Aucune vente enregistrée</p>
+                        </div>
+                      ) : customerHistory.map((sale: any, idx: number) => (
+                        <div key={sale.id} className="flex items-center gap-4 p-4 rounded-xl border border-slate-100 hover:border-indigo-100 hover:bg-indigo-50/30 transition-all group">
+                          <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 text-[10px] font-black group-hover:scale-105 transition-transform ${sale.status === 'ANNULE' ? 'bg-rose-50 text-rose-400' : 'bg-indigo-50 text-indigo-600'}`}>
+                            {idx + 1}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className={`font-black text-sm truncate ${sale.status === 'ANNULE' ? 'text-slate-400 line-through' : 'text-slate-900'}`}>#{sale.reference}</p>
+                            <p className="text-[9px] text-slate-400 font-bold mt-0.5 uppercase">{new Date(sale.createdAt).toLocaleDateString('fr-FR')}</p>
+                          </div>
+                          <div className="text-right shrink-0">
+                            <p className={`text-sm font-black ${sale.status === 'ANNULE' ? 'text-slate-300' : 'text-slate-900'}`}>{parseFloat(sale.totalTtc).toLocaleString()} {currency}</p>
+                            <span className={`inline-block px-2 py-0.5 rounded text-[7px] font-black uppercase mt-1 ${
+                              sale.status === 'TERMINE' ? 'bg-emerald-50 text-emerald-600' :
+                              sale.status === 'ANNULE'  ? 'bg-rose-50 text-rose-500' :
+                              'bg-amber-50 text-amber-600'
+                            }`}>{sale.status}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-               </div>
+
+                </div>
+              </div>
             </div>
-            <div className="p-5 md:p-10 bg-white border-t border-slate-100 flex gap-4 shrink-0">
-               <button onClick={() => setShowDetailModal(null)} className="px-12 py-5 bg-slate-100 text-slate-500 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-slate-200 transition-all">FERMER LE DOSSIER</button>
+
+            {/* ── Footer ── */}
+            <div className="px-6 md:px-8 py-4 bg-white border-t border-slate-100 flex justify-end shrink-0">
+              <button
+                onClick={() => setShowDetailModal(null)}
+                className="px-8 py-3 bg-slate-100 text-slate-600 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-slate-200 transition-all"
+              >
+                Fermer le dossier
+              </button>
             </div>
           </div>
         </div>

@@ -20,10 +20,7 @@ import { apiClient } from '../services/api';
 import { useToast } from './ToastProvider';
 
 /* ─── Assets ──────────────────────────────────────────────────── */
-let waveQr: string;
-try { waveQr = require('../assets/qr_code_marchant_wave.png'); }
-catch { waveQr = 'https://upload.wikimedia.org/wikipedia/commons/6/6b/QR_code_example.png'; }
-
+import waveQr from '../assets/qr_code_marchant_wave.png';
 /* ─── Constantes ──────────────────────────────────────────────── */
 const PERIOD_OPTIONS = [
   { id: '1M', label: '1 Mois',  months: 1,  discountPct: 0  },
@@ -37,16 +34,22 @@ const OPERATORS = [
   { id: 'MTN',    label: 'MTN MoMo',     color: 'bg-yellow-400', ring: 'ring-yellow-400', text: 'text-yellow-700', bg: 'bg-yellow-50' },
 ];
 
-function getPeriodPrice(base: number, periodId: string): number {
+function getPeriodPrice(plan: SubscriptionPlan, periodId: string): number {
+  if (periodId === '3M' && plan.priceThreeMonths != null) return plan.priceThreeMonths;
+  if (periodId === '1Y' && plan.priceYearly != null) return plan.priceYearly;
+  // fallback: calcul avec remise si prix DB absent
+  const base = plan.priceMonthly ?? plan.price ?? 0;
   const opt = PERIOD_OPTIONS.find(p => p.id === periodId);
   if (!opt) return base;
   return Math.round(base * opt.months * (1 - opt.discountPct / 100));
 }
 
-function getSavings(base: number, periodId: string): number {
+function getSavings(plan: SubscriptionPlan, periodId: string): number {
+  const base = plan.priceMonthly ?? plan.price ?? 0;
+  const total = getPeriodPrice(plan, periodId);
   const opt = PERIOD_OPTIONS.find(p => p.id === periodId);
   if (!opt || opt.discountPct === 0) return 0;
-  return Math.round(base * opt.months * (opt.discountPct / 100));
+  return Math.round(base * opt.months) - total;
 }
 
 /* ─── Props ───────────────────────────────────────────────────── */
@@ -77,8 +80,8 @@ const Checkout: React.FC<CheckoutProps> = ({ planId, user, planObj, isUpgrade = 
   const [isStripeLoading, setIsStripeLoading] = useState(false);
 
   /* Prix */
-  const totalPrice = useMemo(() => getPeriodPrice(plan?.price || 0, selectedPeriod), [plan, selectedPeriod]);
-  const savings = useMemo(() => getSavings(plan?.price || 0, selectedPeriod), [plan, selectedPeriod]);
+  const totalPrice = useMemo(() => getPeriodPrice(plan, selectedPeriod), [plan, selectedPeriod]);
+  const savings = useMemo(() => getSavings(plan, selectedPeriod), [plan, selectedPeriod]);
   const periodOpt = PERIOD_OPTIONS.find(p => p.id === selectedPeriod)!;
   const operatorCfg = OPERATORS.find(o => o.id === operator)!;
 
@@ -396,8 +399,8 @@ const Checkout: React.FC<CheckoutProps> = ({ planId, user, planObj, isUpgrade = 
                 </div>
               )}
 
-              {/* ── Orange / MTN : numéro de téléphone ── */}
-              {(operator === 'ORANGE' || operator === 'MTN') && (
+              {/* ── Orange / MTN : numéro de téléphone ── 
+              /*{(operator === 'ORANGE' || operator === 'MTN') && (
                 <div className="space-y-4 animate-in fade-in duration-200">
                   <div className={`rounded-3xl p-5 ${operatorCfg.bg} border ${operator === 'ORANGE' ? 'border-orange-100' : 'border-yellow-100'}`}>
                     <div className="flex items-center gap-3 mb-3">
@@ -430,6 +433,7 @@ const Checkout: React.FC<CheckoutProps> = ({ planId, user, planObj, isUpgrade = 
                   </div>
                 </div>
               )}
+                */}
 
               {/* Bouton validation Mobile */}
               <button

@@ -464,92 +464,280 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLogin }) => {
       </section>
 
       {/* Pricing Section */}
-      <section id="pricing" className="py-8 md:py-16">
-        <div className="max-w-6xl mx-auto px-4 md:px-6">
-          <div className="text-center max-w-3xl mx-auto mb-12">
-            <h2 className="text-2xl md:text-3xl font-bold mb-4">Tarification</h2>
-            <p className="text-slate-600">Choisissez le plan qui correspond à votre entreprise.</p>
+      <section id="pricing" className="py-20 md:py-32 relative overflow-hidden" style={{ background: 'linear-gradient(160deg, #020617 0%, #0d0a2e 45%, #020617 100%)' }}>
+        {/* Ambient glows */}
+        <div className="absolute inset-0 pointer-events-none overflow-hidden">
+          <div className="absolute top-[-10%] left-[15%] w-[500px] h-[500px] rounded-full" style={{ background: 'radial-gradient(circle, rgba(99,102,241,0.12) 0%, transparent 70%)' }} />
+          <div className="absolute bottom-[-10%] right-[10%] w-[600px] h-[600px] rounded-full" style={{ background: 'radial-gradient(circle, rgba(139,92,246,0.10) 0%, transparent 70%)' }} />
+          <div className="absolute top-[40%] left-[50%] w-[800px] h-[400px] -translate-x-1/2 -translate-y-1/2 rounded-full" style={{ background: 'radial-gradient(ellipse, rgba(79,70,229,0.06) 0%, transparent 70%)' }} />
+          {/* Grid pattern */}
+          <div className="absolute inset-0 opacity-[0.03]" style={{ backgroundImage: 'linear-gradient(rgba(255,255,255,.5) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.5) 1px, transparent 1px)', backgroundSize: '60px 60px' }} />
+        </div>
+
+        <div className="max-w-7xl mx-auto px-4 md:px-6 relative z-10">
+
+          {/* Header */}
+          <div className="text-center mb-14">
+            <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full mb-6" style={{ border: '1px solid rgba(99,102,241,0.3)', background: 'rgba(99,102,241,0.08)' }}>
+              <Zap size={12} className="text-indigo-400" />
+              <span className="text-indigo-300 text-[10px] font-black uppercase tracking-widest">Tarification simple & transparente</span>
+            </div>
+            <h2 className="text-3xl md:text-5xl lg:text-6xl font-black tracking-tighter text-white mb-5 leading-none uppercase">
+              Investissez dans <br />
+              <span style={{ background: 'linear-gradient(135deg, #818cf8 0%, #a78bfa 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>votre croissance</span>
+            </h2>
+            <p className="text-slate-400 text-lg font-medium max-w-xl mx-auto leading-relaxed">
+              14 jours d'essai gratuit inclus. Aucune carte bancaire. Passez au niveau supérieur quand vous êtes prêt.
+            </p>
           </div>
-          {/* Sélecteur de durée */}
-          <div className="flex justify-center gap-3 mb-8">
-            {PERIOD_OPTIONS.map(opt => (
+
+          {/* Period Toggle */}
+          <div className="flex justify-center mb-10">
+            <div className="p-1 rounded-2xl flex gap-1" style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)' }}>
+              {PERIOD_OPTIONS.map(opt => (
+                <button
+                  key={opt.id}
+                  onClick={() => setSelectedPeriod(opt.id)}
+                  className="px-5 py-2.5 rounded-xl font-black text-[10px] uppercase tracking-widest transition-all flex items-center gap-2"
+                  style={selectedPeriod === opt.id
+                    ? { background: 'linear-gradient(135deg, #4f46e5, #7c3aed)', color: '#fff', boxShadow: '0 4px 20px rgba(99,102,241,0.4)' }
+                    : { color: 'rgba(148,163,184,1)', background: 'transparent' }
+                  }
+                >
+                  {opt.label}
+                  {opt.discountPct > 0 && (
+                    <span className="text-[8px] px-1.5 py-0.5 rounded-full font-black"
+                      style={selectedPeriod === opt.id
+                        ? { background: 'rgba(255,255,255,0.2)', color: '#fff' }
+                        : { background: 'rgba(16,185,129,0.15)', color: '#34d399' }
+                      }>
+                      -{opt.discountPct}%
+                    </span>
+                  )}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Free Trial Banner */}
+          <div className="max-w-3xl mx-auto mb-10 flex items-center justify-between gap-4 px-6 py-4 rounded-2xl flex-wrap" style={{ background: 'rgba(16,185,129,0.06)', border: '1px solid rgba(16,185,129,0.2)' }}>
+            <div className="flex items-center gap-4">
+              <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0" style={{ background: 'rgba(16,185,129,0.15)' }}>
+                <Star size={16} className="text-emerald-400" />
+              </div>
+              <div>
+                <p className="text-emerald-300 font-black text-sm uppercase tracking-wide">Essai gratuit · 14 jours</p>
+                <p className="text-emerald-600 text-xs font-semibold">Accès complet à toutes les fonctionnalités · Aucune carte requise</p>
+              </div>
+            </div>
+            <button
+              onClick={() => onLogin({ openRegister: true, planId: 'FREE_TRIAL', regStep: 1 })}
+              className="flex items-center gap-2 px-5 py-2 rounded-xl font-black text-[10px] uppercase tracking-widest transition-all shrink-0"
+              style={{ background: 'rgba(16,185,129,0.9)', color: '#fff' }}
+            >
+              Démarrer gratuit <ArrowRight size={13} />
+            </button>
+          </div>
+
+          {/* Plans Grid */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-center">
+
+            {/* ── BASIC / Starter AI ── */}
+            <div className="rounded-[2rem] p-8 flex flex-col h-full transition-all group hover:translate-y-[-4px]"
+              style={{ background: 'rgba(15,23,42,0.8)', border: '1px solid rgba(96,165,250,0.2)', backdropFilter: 'blur(12px)' }}>
+              {/* Plan icon + name */}
+              <div className="flex items-center gap-3 mb-6">
+                <div className="w-10 h-10 rounded-2xl flex items-center justify-center" style={{ background: 'rgba(96,165,250,0.15)' }}>
+                  <Zap size={18} className="text-blue-400" />
+                </div>
+                <div>
+                  <p className="text-[9px] font-black text-blue-400 uppercase tracking-widest">Starter AI</p>
+                  <p className="text-[9px] font-bold text-slate-600 uppercase tracking-widest">Pour les TPE & indépendants</p>
+                </div>
+              </div>
+              {/* Price */}
+              <div className="mb-6">
+                <div className="flex items-baseline gap-1.5 mb-1">
+                  <span className="text-4xl font-black text-white tracking-tighter">{getPeriodPrice(7900, selectedPeriod).toLocaleString()}</span>
+                  <span className="text-slate-400 font-bold text-sm">FCFA</span>
+                </div>
+                <p className="text-slate-500 text-xs font-bold">par {PERIOD_OPTIONS.find(p => p.id === selectedPeriod)?.label.toLowerCase()}</p>
+                {selectedPeriod !== '1M' && (
+                  <div className="mt-2 inline-flex items-center gap-1 px-2.5 py-1 rounded-lg" style={{ background: 'rgba(16,185,129,0.1)' }}>
+                    <span className="text-emerald-400 text-[10px] font-black">
+                      Économie {((7900 * (PERIOD_OPTIONS.find(p => p.id === selectedPeriod)?.months ?? 1)) - getPeriodPrice(7900, selectedPeriod)).toLocaleString()} FCFA
+                    </span>
+                  </div>
+                )}
+              </div>
+              <p className="text-slate-400 text-sm font-medium mb-7 leading-relaxed">L'essentiel pour piloter votre activité au quotidien sans complexité.</p>
+              {/* Features */}
+              <ul className="space-y-3 flex-1 mb-8">
+                {[
+                  { ok: true,  label: '3 utilisateur' },
+                  { ok: true,  label: 'Stock illimité' },
+                  { ok: true,  label: 'factures & devis illimités' },
+                  { ok: true,  label: 'Gestion clients & fournisseurs' },
+                  { ok: true,  label: 'Dashboard analytique' },
+                  { ok: true,  label: 'Support email inclus' },
+                  { ok: false, label: 'IA Chatbot & prévisions' },
+                  { ok: false, label: 'Module RH' },
+                ].map((f, i) => (
+                  <li key={i} className={`flex items-center gap-3 text-sm font-medium ${f.ok ? 'text-slate-300' : 'text-slate-600'}`}>
+                    {f.ok
+                      ? <CheckCircle2 size={15} className="text-blue-400 shrink-0" />
+                      : <span className="w-4 h-px bg-slate-700 shrink-0 ml-0.5" />
+                    }
+                    {f.label}
+                  </li>
+                ))}
+              </ul>
               <button
-                key={opt.id}
-                onClick={() => setSelectedPeriod(opt.id)}
-                className={`px-6 py-2 rounded-2xl font-black text-xs uppercase tracking-widest border transition-all ${selectedPeriod === opt.id ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600 border-slate-200 hover:bg-indigo-50'}`}
+                onClick={() => onLogin({ openRegister: true, planId: 'BASIC', regStep: 1, period: selectedPeriod })}
+                className="w-full py-3.5 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all hover:bg-blue-400/10"
+                style={{ border: '1px solid rgba(96,165,250,0.3)', color: '#93c5fd', background: 'rgba(96,165,250,0.05)' }}
               >
-                {opt.label} {opt.discountPct > 0 && <span className="ml-2 text-emerald-600 font-bold">-{opt.discountPct}%</span>}
+                Choisir Starter AI
               </button>
-            ))}
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {/* Starter */}
-            <div className="p-6 md:p-8 bg-white border border-slate-200 flex flex-col">
-              <div className="mb-6">
-                <span className="px-3 py-1 bg-slate-100 text-slate-600 text-xs font-medium">Starter</span>
-                <div className="mt-4 flex items-baseline gap-1">
-                  <span className="text-3xl font-bold">{getPeriodPrice(9900, selectedPeriod).toLocaleString()}</span>
-                  <span className="text-slate-600 text-sm">FCFA / {PERIOD_OPTIONS.find(p=>p.id===selectedPeriod)?.label.toLowerCase()}</span>
-                </div>
-                {selectedPeriod !== '1M' && (
-                  <div className="text-xs text-emerald-600 font-bold mt-1">Économie : {((9900 * PERIOD_OPTIONS.find(p=>p.id===selectedPeriod)?.months) - getPeriodPrice(9900, selectedPeriod)).toLocaleString()} FCFA</div>
-                )}
-              </div>
-              <ul className="space-y-3 mb-8 flex-grow">
-                {["3 Utilisateurs", "5 Clients", "Modules Essentiels", "Support Standard", "Dashboard Basique"].map((item, i) => (
-                  <li key={i} className="flex items-center gap-2 text-sm text-slate-600">
-                    <CheckCircle2 size={16} className="text-slate-600" /> {item}
-                  </li>
-                ))}
-              </ul>
-              <button onClick={() => onLogin({ openRegister: true, planId: 'BASIC', regStep: 1, period: selectedPeriod })} className="w-full py-3 bg-slate-900 text-white text-sm font-medium hover:bg-slate-800 transition-colors" style={{ fontSize: '14px', fontWeight: '500', fontFamily: 'inherit', border: 'none', cursor: 'pointer' }}>Commencer</button>
             </div>
 
-            {/* PRO */}
-            <div className="p-6 md:p-8 bg-slate-900 text-white border border-slate-800 relative flex flex-col">
-              <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-slate-800 text-white px-3 py-1 text-xs font-medium">Populaire</div>
-              <div className="mb-6">
-                <span className="px-3 py-1 bg-slate-800 text-slate-300 text-xs font-medium">PRO</span>
-                <div className="mt-4 flex items-baseline gap-1">
-                  <span className="text-3xl font-bold">{getPeriodPrice(49000, selectedPeriod).toLocaleString()}</span>
-                  <span className="text-slate-400 text-sm">FCFA / {PERIOD_OPTIONS.find(p=>p.id===selectedPeriod)?.label.toLowerCase()}</span>
+            {/* ── PRO / Business Pro — FEATURED ── */}
+            <div className="rounded-[2rem] flex flex-col relative md:-mt-6 md:-mb-6 transition-all hover:translate-y-[-4px]"
+              style={{ background: 'linear-gradient(145deg, #4338ca 0%, #5b21b6 60%, #4f46e5 100%)', boxShadow: '0 30px 80px rgba(79,70,229,0.45), 0 0 0 1px rgba(165,180,252,0.15) inset' }}>
+              {/* Shine line top */}
+              <div className="absolute inset-x-0 top-0 h-px rounded-t-[2rem]" style={{ background: 'linear-gradient(90deg, transparent, rgba(199,210,254,0.4), transparent)' }} />
+              {/* Popular badge — centré EN HAUT, en dehors du clip */}
+              <div className="flex justify-center pt-4 pb-0">
+                <div className="flex items-center gap-1.5 px-4 py-1.5 rounded-full font-black text-[9px] uppercase tracking-widest z-10"
+                  style={{ background: 'linear-gradient(135deg, #fbbf24, #f97316)', color: '#431407', boxShadow: '0 4px 16px rgba(251,191,36,0.5)' }}>
+                  <Star size={9} fill="#431407" /> Le Plus Populaire
                 </div>
-                {selectedPeriod !== '1M' && (
-                  <div className="text-xs text-emerald-400 font-bold mt-1">Économie : {((49000 * PERIOD_OPTIONS.find(p=>p.id===selectedPeriod)?.months) - getPeriodPrice(49000, selectedPeriod)).toLocaleString()} FCFA</div>
-                )}
               </div>
-              <ul className="space-y-3 mb-8 flex-grow">
-                {["10 Utilisateurs", "12 Clients", "Security + Recovery", "Support Prioritaire", "Chatbot", "Facturation Factur-X"].map((item, i) => (
-                  <li key={i} className="flex items-center gap-2 text-sm">
-                    <CheckCircle2 size={16} className="text-slate-400" /> {item}
-                  </li>
-                ))}
-              </ul>
-              <button onClick={() => onLogin({ openRegister: true, planId: 'PRO', regStep: 1, period: selectedPeriod })} className="w-full py-3 bg-white text-slate-900 text-sm font-medium hover:bg-slate-100 transition-colors" style={{ fontSize: '14px', fontWeight: '500', fontFamily: 'inherit', border: 'none', cursor: 'pointer' }}>Commencer</button>
+
+              <div className="p-8 pt-10 flex flex-col flex-1">
+                <div className="flex items-center gap-3 mb-6">
+                  <div className="w-10 h-10 rounded-2xl flex items-center justify-center" style={{ background: 'rgba(255,255,255,0.15)' }}>
+                    <BarChart3 size={18} className="text-white" />
+                  </div>
+                  <div>
+                    <p className="text-[9px] font-black text-indigo-200 uppercase tracking-widest">Business Pro</p>
+                    <p className="text-[9px] font-bold text-indigo-300/60 uppercase tracking-widest">Pour les PME en croissance</p>
+                  </div>
+                </div>
+                {/* Price */}
+                <div className="mb-6">
+                  <div className="flex items-baseline gap-1.5 mb-1">
+                    <span className="text-4xl font-black text-white tracking-tighter">{getPeriodPrice(19900, selectedPeriod).toLocaleString()}</span>
+                    <span className="text-indigo-200 font-bold text-sm">FCFA</span>
+                  </div>
+                  <p className="text-indigo-300/70 text-xs font-bold">par {PERIOD_OPTIONS.find(p => p.id === selectedPeriod)?.label.toLowerCase()}</p>
+                  {selectedPeriod !== '1M' && (
+                    <div className="mt-2 inline-flex items-center gap-1 px-2.5 py-1 rounded-lg" style={{ background: 'rgba(255,255,255,0.12)' }}>
+                      <span className="text-emerald-300 text-[10px] font-black">
+                        Économie {((19900 * (PERIOD_OPTIONS.find(p => p.id === selectedPeriod)?.months ?? 1)) - getPeriodPrice(19900, selectedPeriod)).toLocaleString()} FCFA
+                      </span>
+                    </div>
+                  )}
+                </div>
+                <p className="text-indigo-200 text-sm font-medium mb-7 leading-relaxed">Accélérez votre croissance avec l'IA intégrée et les analyses avancées.</p>
+                {/* Features */}
+                <ul className="space-y-3 flex-1 mb-8">
+                  {[
+                    '10 utilisateurs',
+                    'Transactions illimitées',
+                    'IA Chatbot intégré',
+                    'Prévisions de stock IA',
+                    'Recouvrement des créances',
+                    'Rapports avancés & exports',
+                    'Facturation Factur-X légale',
+                    'Support prioritaire',
+                  ].map((f, i) => (
+                    <li key={i} className="flex items-center gap-3 text-sm font-medium text-white/85">
+                      <CheckCircle2 size={15} className="text-indigo-200 shrink-0" /> {f}
+                    </li>
+                  ))}
+                </ul>
+                <button
+                  onClick={() => onLogin({ openRegister: true, planId: 'PRO', regStep: 1, period: selectedPeriod })}
+                  className="w-full py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest flex items-center justify-center gap-2 transition-all hover:bg-indigo-100"
+                  style={{ background: '#fff', color: '#3730a3', boxShadow: '0 8px 30px rgba(0,0,0,0.25)' }}
+                >
+                  Choisir Business Pro <ArrowRight size={13} />
+                </button>
+              </div>
             </div>
 
-            {/* Enterprise */}
-            <div className="p-6 md:p-10 bg-white border border-slate-100 rounded-[3rem] hover:shadow-2xl transition-all flex flex-col">
-              <div className="mb-8">
-                <span className="px-3 py-1 bg-purple-50 text-purple-600 rounded-full text-[10px] font-black uppercase tracking-widest">Enterprise Cloud</span>
-                <div className="mt-6 flex items-baseline gap-1">
-                  <span className="text-4xl font-black tracking-tighter">{getPeriodPrice(79000, selectedPeriod).toLocaleString()}</span>
-                  <span className="text-slate-500 font-bold text-sm">FCFA / {PERIOD_OPTIONS.find(p=>p.id===selectedPeriod)?.label.toLowerCase()}</span>
+            {/* ── ENTERPRISE ── */}
+            <div className="rounded-[2rem] p-8 flex flex-col h-full transition-all group hover:translate-y-[-4px]"
+              style={{ background: 'rgba(15,10,30,0.85)', border: '1px solid rgba(251,191,36,0.2)', backdropFilter: 'blur(12px)' }}>
+              <div className="flex items-center gap-3 mb-6">
+                <div className="w-10 h-10 rounded-2xl flex items-center justify-center" style={{ background: 'rgba(251,191,36,0.12)' }}>
+                  <Globe size={18} className="text-amber-400" />
                 </div>
+                <div>
+                  <p className="text-[9px] font-black text-amber-400 uppercase tracking-widest">Enterprise Cloud</p>
+                  <p className="text-[9px] font-bold text-slate-600 uppercase tracking-widest">Pour les grandes structures</p>
+                </div>
+              </div>
+              {/* Price */}
+              <div className="mb-6">
+                <div className="flex items-baseline gap-1.5 mb-1">
+                  <span className="text-4xl font-black text-white tracking-tighter">{getPeriodPrice(69000, selectedPeriod).toLocaleString()}</span>
+                  <span className="text-slate-400 font-bold text-sm">FCFA</span>
+                </div>
+                <p className="text-slate-500 text-xs font-bold">par {PERIOD_OPTIONS.find(p => p.id === selectedPeriod)?.label.toLowerCase()}</p>
                 {selectedPeriod !== '1M' && (
-                  <div className="text-xs text-emerald-600 font-bold mt-1">Économie : {((79000 * PERIOD_OPTIONS.find(p=>p.id===selectedPeriod)?.months) - getPeriodPrice(79000, selectedPeriod)).toLocaleString()} FCFA</div>
+                  <div className="mt-2 inline-flex items-center gap-1 px-2.5 py-1 rounded-lg" style={{ background: 'rgba(16,185,129,0.1)' }}>
+                    <span className="text-emerald-400 text-[10px] font-black">
+                      Économie {((69000 * (PERIOD_OPTIONS.find(p => p.id === selectedPeriod)?.months ?? 1)) - getPeriodPrice(69000, selectedPeriod)).toLocaleString()} FCFA
+                    </span>
+                  </div>
                 )}
               </div>
-              <ul className="space-y-4 mb-10 flex-grow">
-                {["Utilisateurs Illimités","Module RH Avancé","Inventory Campaigns", "Récouvrement", "Chatbot Intelligent", "Support Premium 24/7"].map((item, i) => (
-                  <li key={i} className="flex items-center gap-3 text-sm font-medium text-slate-600">
-                    <CheckCircle2 size={18} className="text-purple-500" /> {item}
+              <p className="text-slate-400 text-sm font-medium mb-7 leading-relaxed">La suite complète pour les grandes structures multi-entités avec RH intégré.</p>
+              {/* Features */}
+              <ul className="space-y-3 flex-1 mb-8">
+                {[
+                  'utilisateurs illimités',
+                  'Module RH complet (paie, congés)',
+                  'Inventory Campaigns IA',
+                  'Multi-entités & filiales',
+                  'Gouvernance & Audit complet',
+                  'Infrastructure dédiée',
+                  'Gestionnaire de compte dédié',
+                  'Support Premium 24/7',
+                ].map((f, i) => (
+                  <li key={i} className="flex items-center gap-3 text-sm font-medium text-slate-300">
+                    <CheckCircle2 size={15} className="text-amber-400 shrink-0" /> {f}
                   </li>
                 ))}
               </ul>
-              <button onClick={() => onLogin({ openRegister: true, planId: 'ENTERPRISE', regStep: 1, period: selectedPeriod })} className="w-full py-4 bg-slate-50 text-slate-900 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-slate-900 hover:text-white transition-all">Commencer</button>
-            </div>  
+              <button
+                onClick={() => onLogin({ openRegister: true, planId: 'ENTERPRISE', regStep: 1, period: selectedPeriod })}
+                className="w-full py-3.5 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all hover:bg-amber-400/10"
+                style={{ border: '1px solid rgba(251,191,36,0.3)', color: '#fcd34d', background: 'rgba(251,191,36,0.05)' }}
+              >
+                Choisir Enterprise
+              </button>
+            </div>
           </div>
+
+          {/* Trust footer */}
+          <div className="mt-14 text-center">
+            <p className="text-slate-600 text-sm font-medium mb-5">Tous les plans incluent SSL, sauvegardes automatiques et mises à jour continues.</p>
+            <div className="flex items-center justify-center gap-8 flex-wrap">
+              {[
+                { icon: <ShieldCheck size={15} />, label: 'SSL & Chiffrement AES-256' },
+                { icon: <RefreshCw size={15} />, label: 'Sauvegardes automatiques' },
+                { icon: <CreditCard size={15} />, label: 'Stripe & Mobile Money' },
+              ].map((item, i) => (
+                <div key={i} className="flex items-center gap-2 text-slate-500 text-xs font-bold">
+                  <span className="text-slate-600">{item.icon}</span>{item.label}
+                </div>
+              ))}
+            </div>
+          </div>
+
         </div>
       </section>
 

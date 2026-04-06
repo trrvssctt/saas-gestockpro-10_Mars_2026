@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { AppSettings, UserRole, Currency, Language } from '../types';
 import { apiClient } from '../services/api';
+import { uploadFile } from '../services/uploadService';
 
 interface SettingsProps {
   settings: AppSettings;
@@ -123,22 +124,10 @@ const Settings: React.FC<SettingsProps> = ({ settings, onSave }) => {
     if (!file) return;
 
     setIsUploading(field);
-    
-    const cloudinaryData = new FormData();
-    cloudinaryData.append('file', file);
-    cloudinaryData.append('upload_preset', 'ml_default'); 
-    cloudinaryData.append('cloud_name', 'dq7avew9h');
-
     try {
-      const response = await fetch(`https://api.cloudinary.com/v1_1/dq7avew9h/image/upload`, {
-        method: 'POST',
-        body: cloudinaryData
-      });
-      
-      const data = await response.json();
-      if (data.secure_url) {
-        setLocalTenant({ ...localTenant, [field]: data.secure_url });
-      }
+      const folder = field === 'logoUrl' ? 'logos' : field === 'cachetUrl' ? 'cachets' : 'uploads';
+      const result = await uploadFile(file, folder);
+      setLocalTenant({ ...localTenant, [field]: result.url });
     } catch (err) {
       console.error("Upload Error:", err);
       alert("Échec de l'envoi de l'image.");
