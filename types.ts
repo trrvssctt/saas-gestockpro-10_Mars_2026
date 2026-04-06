@@ -93,11 +93,53 @@ export interface StockItem {
   currentLevel: number;
   minThreshold: number;
   forecastedLevel: number;
+  purchasePrice: number;
   unitPrice: number;
   location: string;
   imageUrl?: string;
   subcategoryId?: string;
   movements?: StockMovement[];
+}
+
+export interface Supplier {
+  id: string;
+  companyName: string;
+  mainContact?: string;
+  email?: string;
+  phone: string;
+  address?: string;
+  siret?: string;
+  tvaIntra?: string;
+  website?: string;
+  paymentTerms: number;
+  status: string;
+  isActive: boolean;
+  createdAt?: string;
+}
+
+export interface DeliveryItem {
+  id: string;
+  deliveryId: string;
+  stockItemId: string;
+  stock_item?: StockItem;
+  quantityReceived: number;
+  purchasePrice: number;
+  totalHt: number;
+}
+
+export interface Delivery {
+  id: string;
+  tenantId: string;
+  reference: string;
+  supplierId: string;
+  supplier?: Supplier;
+  deliveryDate: string;
+  totalHt: number;
+  status: 'PENDING' | 'RECEIVED' | 'PARTIAL' | 'CANCELLED';
+  notes?: string;
+  purchaseOrderRef?: string;
+  items?: DeliveryItem[];
+  createdAt?: string;
 }
 
 export interface Service {
@@ -162,7 +204,10 @@ export interface SubscriptionPlan {
   id: string;
   name: string;
   level: number;
-  price: number;
+  price: number;          // alias priceMonthly pour compatibilité
+  priceMonthly: number;
+  priceThreeMonths: number;
+  priceYearly: number;
   features: string[];
   maxUsers: number;
   hasAiChatbot: boolean;

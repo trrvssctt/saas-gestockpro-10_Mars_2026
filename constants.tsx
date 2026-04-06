@@ -2,9 +2,9 @@
 import { UserRole, User, StockItem, Invoice, AuditLog, Customer, SubscriptionPlan, Subscription, Tenant, Employee, Contract, PayrollEntry, Leave, HRDocument, PayrollSettings } from './types';
 
 export const MOCK_TENANTS: Tenant[] = [
-  { id: 'T1', name: 'TechCorp Solutions', domain: 'techcorp.gestock.pro', isActive: true, plan: 'ENTERPRISE', mrr: 250000, lastPaymentDate: '2023-10-25', paymentStatus: 'UP_TO_DATE', createdAt: '2023-01-01' },
-  { id: 'T2', name: 'Global Logistics', domain: 'globallog.gestock.pro', isActive: true, plan: 'PRO', mrr: 85000, lastPaymentDate: '2023-10-20', paymentStatus: 'UP_TO_DATE', createdAt: '2023-05-15' },
-  { id: 'T3', name: 'Impayé SARL', domain: 'impaye.gestock.pro', isActive: true, plan: 'BASIC', mrr: 30000, lastPaymentDate: '2023-09-15', paymentStatus: 'FAILED', createdAt: '2023-09-01' },
+  { id: 'T1', name: 'TechCorp Solutions', domain: 'techcorp.gestock.pro', isActive: true, plan: 'ENTERPRISE', mrr: 69000, lastPaymentDate: '2023-10-25', paymentStatus: 'UP_TO_DATE', createdAt: '2023-01-01' },
+  { id: 'T2', name: 'Global Logistics', domain: 'globallog.gestock.pro', isActive: true, plan: 'PRO', mrr: 19900, lastPaymentDate: '2023-10-20', paymentStatus: 'UP_TO_DATE', createdAt: '2023-05-15' },
+  { id: 'T3', name: 'Impayé SARL', domain: 'impaye.gestock.pro', isActive: true, plan: 'BASIC', mrr: 7900, lastPaymentDate: '2023-09-15', paymentStatus: 'FAILED', createdAt: '2023-09-01' },
   { id: 'T-TRIAL', name: 'Nouveau Client', domain: 'test.gestock.pro', isActive: true, plan: 'FREE_TRIAL', mrr: 0, lastPaymentDate: '', paymentStatus: 'TRIAL', createdAt: new Date().toISOString() },
 ];
 
@@ -20,43 +20,43 @@ export const MOCK_USERS: User[] = [
 ];
 
 export const SUBSCRIPTION_PLANS: SubscriptionPlan[] = [
-  { 
-    id: 'FREE_TRIAL', 
-    name: 'Essai Gratuit', 
+  {
+    id: 'FREE_TRIAL',
+    name: 'Essai Gratuit',
     level: 0,
-    price: 0, 
+    price: 0, priceMonthly: 0, priceThreeMonths: 0, priceYearly: 0,
     features: ['14 jours complets', 'Quota: 1 Client, 5 Produits, 5 Ventes', '3 Catégories / 3 Sous-cat.'],
     maxUsers: 1,
     hasAiChatbot: true,
     hasStockForecast: true
   },
-  { 
-    id: 'BASIC', 
-    name: 'Starter AI', 
+  {
+    id: 'BASIC',
+    name: 'Starter AI',
     level: 1,
-    price: 30000, 
-    features: ['100 Factures/mois', '1 Utilisateur'],
+    price: 7900, priceMonthly: 7900, priceThreeMonths: 20145, priceYearly: 66360,
+    features: ['100 Factures/mois', '1 Utilisateur', 'Support email'],
     maxUsers: 1,
     hasAiChatbot: false,
     hasStockForecast: false
   },
-  { 
-    id: 'PRO', 
-    name: 'Business Pro', 
+  {
+    id: 'PRO',
+    name: 'Business Pro',
     level: 2,
-    price: 85000, 
-    features: ['Illimité', '5 Utilisateurs'], 
+    price: 19900, priceMonthly: 19900, priceThreeMonths: 50745, priceYearly: 167160,
+    features: ['Illimité', '5 Utilisateurs', 'IA Chatbot', 'Prévision Stock'],
     maxUsers: 5,
     hasAiChatbot: true,
     hasStockForecast: true,
-    isPopular: true 
+    isPopular: true
   },
-  { 
-    id: 'ENTERPRISE', 
-    name: 'Enterprise Cloud', 
+  {
+    id: 'ENTERPRISE',
+    name: 'Enterprise Cloud',
     level: 3,
-    price: 250000, 
-    features: ['Multi-Entités', '100 Utilisateurs'],
+    price: 69000, priceMonthly: 69000, priceThreeMonths: 175950, priceYearly: 579600,
+    features: ['Multi-Entités', '100 Utilisateurs', 'Support Premium 24/7'],
     maxUsers: 100,
     hasAiChatbot: true,
     hasStockForecast: true
