@@ -83,10 +83,56 @@ export const connectDB = async () => {
       console.warn('⚠️ Note sync ERP:', syncErr.message);
     }
 
-    // Garantir les colonnes de pointage dans attendances et payroll_settings (idempotent)
+    // Colonne stockage S3 sur la table tenants (idempotent)
     try {
       await sequelize.query(`
-        ALTER TABLE IF EXISTS attendances
+        ALTER TABLE tenants
+          ADD COLUMN IF NOT EXISTS storage_used_bytes BIGINT DEFAULT 0;
+      `, { type: QueryTypes.RAW });
+      console.log('✅ Colonne storage_used_bytes vérifiée');
+    } catch (storageErr) {
+      console.warn('⚠️ Note colonne storage_used_bytes:', storageErr.message);
+    }
+
+    // Garantir la création et les colonnes de pointage (idempotent)
+    try {
+      await sequelize.query(`
+        CREATE TABLE IF NOT EXISTS attendances (
+          id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+          tenant_id uuid NOT NULL,
+          employee_id uuid NOT NULL,
+          date date,
+          clock_in timestamptz,
+          clock_out timestamptz,
+          source varchar(50) DEFAULT 'manual',
+          status varchar(50) DEFAULT 'PRESENT',
+          overtime_minutes integer DEFAULT 0,
+          meta jsonb,
+          created_at timestamptz DEFAULT now(),
+          updated_at timestamptz DEFAULT now()
+        );
+        CREATE INDEX IF NOT EXISTS idx_attendances_employee_date ON attendances(employee_id, date);
+        CREATE INDEX IF NOT EXISTS idx_attendances_tenant_date ON attendances(tenant_id, date);
+        CREATE TABLE IF NOT EXISTS overtime_requests (
+          id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+          tenant_id uuid NOT NULL,
+          employee_id uuid NOT NULL,
+          requested_date date NOT NULL,
+          start_time varchar(5),
+          end_time varchar(5),
+          requested_minutes integer DEFAULT 0,
+          reason text,
+          status varchar(20) DEFAULT 'PENDING',
+          reviewed_by uuid,
+          review_note text,
+          actual_minutes integer DEFAULT 0,
+          meta jsonb,
+          created_at timestamptz DEFAULT now(),
+          updated_at timestamptz DEFAULT now()
+        );
+        CREATE INDEX IF NOT EXISTS idx_overtime_requests_employee ON overtime_requests(employee_id, requested_date);
+        CREATE INDEX IF NOT EXISTS idx_overtime_requests_tenant_status ON overtime_requests(tenant_id, status);
+        ALTER TABLE attendances
           ADD COLUMN IF NOT EXISTS overtime_minutes INTEGER DEFAULT 0,
           ADD COLUMN IF NOT EXISTS meta JSONB;
         ALTER TABLE IF EXISTS payroll_settings
@@ -98,6 +144,81 @@ export const connectDB = async () => {
       console.log('✅ Colonnes pointage vérifiées');
     } catch (colErr) {
       console.warn('⚠️ Note colonnes pointage:', colErr.message);
+    }
+
+    // Contraintes uniques anti-doublons (idempotent)
+    try {
+      await sequelize.query(`
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_unique
+          ON users (lower(email));
+
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_tenants_siret_unique
+          ON tenants (siret)
+          WHERE siret IS NOT NULL AND siret <> '';
+
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_tenants_phone_unique
+          ON tenants (phone)
+          WHERE phone IS NOT NULL AND phone <> '';
+
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_tenants_email_unique
+          ON tenants (lower(email))
+          WHERE email IS NOT NULL AND email <> '';
+      `, { type: QueryTypes.RAW });
+      console.log('✅ Indexes unicité inscrits');
+    } catch (idxErr) {
+      console.warn('⚠️ Note indexes unicité:', idxErr.message);
+    }
+
+    // Colonnes abonnement modulable (périodes 1M/3M/1Y)
+    try {
+      await sequelize.query(`
+        ALTER TABLE IF EXISTS plans
+          ADD COLUMN IF NOT EXISTS price_three_months FLOAT,
+          ADD COLUMN IF NOT EXISTS price_yearly FLOAT;
+
+        ALTER TABLE IF EXISTS subscriptions
+          ADD COLUMN IF NOT EXISTS current_period VARCHAR(10) DEFAULT '1M';
+
+        ALTER TABLE IF EXISTS tenants
+          ADD COLUMN IF NOT EXISTS plan_id VARCHAR(50),
+          ADD COLUMN IF NOT EXISTS subscription_ends_at TIMESTAMPTZ;
+
+        INSERT INTO plans (id, name, price_monthly, price_three_months, price_yearly, trial_days, max_users, has_ai_chatbot, has_stock_forecast, is_active, level, features, created_at, updated_at)
+        VALUES
+          ('FREE_TRIAL', 'Essai Gratuit',    0,     0,      0,       14, 5,   true, true,  true, 0, '["14 jours complets","Quota: 1 Client, 5 Produits, 5 Ventes","3 Catégories / 3 Sous-cat."]', NOW(), NOW()),
+          ('BASIC',      'Starter AI',       7900,  20145,  66360,   0,  1,   false, false, true, 1, '["100 Factures/mois","1 Utilisateur","Support email"]', NOW(), NOW()),
+          ('PRO',        'Business Pro',     19900, 50745,  167160,  0,  5,   true,  true,  true, 2, '["Illimité","5 Utilisateurs","IA Chatbot","Prévision Stock"]', NOW(), NOW()),
+          ('ENTERPRISE', 'Enterprise Cloud', 69000, 175950, 579600,  0,  100, true,  true,  true, 3, '["Multi-Entités","100 Utilisateurs","Support Premium 24/7"]', NOW(), NOW())
+        ON CONFLICT (id) DO UPDATE SET
+          price_monthly      = EXCLUDED.price_monthly,
+          price_three_months = EXCLUDED.price_three_months,
+          price_yearly       = EXCLUDED.price_yearly,
+          name               = EXCLUDED.name,
+          updated_at         = NOW();
+      `, { type: QueryTypes.RAW });
+      console.log('✅ Colonnes et plans abonnement vérifiés');
+    } catch (subErr) {
+      console.warn('⚠️ Note colonnes abonnement:', subErr.message);
+    }
+
+    // Table pour les inscriptions Stripe en attente (avant création de compte)
+    try {
+      await sequelize.query(`
+        CREATE TABLE IF NOT EXISTS registration_intents (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          stripe_session_id VARCHAR(255) UNIQUE,
+          registration_data TEXT NOT NULL,
+          status VARCHAR(20) NOT NULL DEFAULT 'PENDING',
+          expires_at TIMESTAMPTZ NOT NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        CREATE INDEX IF NOT EXISTS idx_reg_intents_session ON registration_intents(stripe_session_id);
+        CREATE INDEX IF NOT EXISTS idx_reg_intents_status ON registration_intents(status);
+      `, { type: QueryTypes.RAW });
+      console.log('✅ Table registration_intents vérifiée');
+    } catch (regErr) {
+      console.warn('⚠️ Note registration_intents:', regErr.message);
     }
 
     // Garantir la création des tables de notifications (idempotent)
@@ -132,6 +253,60 @@ export const connectDB = async () => {
       console.warn('⚠️ Note tables notifications:', notifErr.message);
     }
     
+    // Colonnes client de passage sur sales
+    try {
+      await sequelize.query(`
+        ALTER TABLE IF EXISTS sales
+          ADD COLUMN IF NOT EXISTS walkin_name VARCHAR(150),
+          ADD COLUMN IF NOT EXISTS walkin_phone VARCHAR(50);
+      `, { type: QueryTypes.RAW });
+      console.log('✅ Colonnes walkin_name / walkin_phone sur sales vérifiées');
+    } catch (walkinErr) {
+      console.warn('⚠️ Note colonnes walkin sales:', walkinErr.message);
+    }
+
+    // Colonnes chèque & preuve image sur payments
+    try {
+      await sequelize.query(`
+        ALTER TABLE IF EXISTS payments
+          ADD COLUMN IF NOT EXISTS proof_image TEXT,
+          ADD COLUMN IF NOT EXISTS cheque_number VARCHAR(50),
+          ADD COLUMN IF NOT EXISTS bank_name VARCHAR(100),
+          ADD COLUMN IF NOT EXISTS cheque_date DATE,
+          ADD COLUMN IF NOT EXISTS cheque_order VARCHAR(150);
+      `, { type: QueryTypes.RAW });
+      // Ajouter CHEQUE à l'enum PostgreSQL si pas déjà présent
+      await sequelize.query(`
+        DO $$
+        BEGIN
+          IF NOT EXISTS (
+            SELECT 1 FROM pg_enum
+            JOIN pg_type ON pg_enum.enumtypid = pg_type.oid
+            WHERE pg_type.typname = 'enum_payments_method' AND pg_enum.enumlabel = 'CHEQUE'
+          ) THEN
+            ALTER TYPE "enum_payments_method" ADD VALUE 'CHEQUE';
+          END IF;
+        END$$;
+      `, { type: QueryTypes.RAW });
+      console.log('✅ Colonnes paiement chèque/preuve vérifiées');
+    } catch (chqErr) {
+      console.warn('⚠️ Note colonnes paiement chèque:', chqErr.message);
+    }
+
+    // Correction historique : les paiements non-chèque existants ont statut='PENDING' (défaut)
+    // → les passer à PAID car ils ont toujours été encaissés immédiatement
+    try {
+      await sequelize.query(`
+        UPDATE payments
+        SET statut = 'PAID'
+        WHERE method != 'CHEQUE'
+          AND (statut IS NULL OR statut = 'PENDING');
+      `, { type: QueryTypes.RAW });
+      console.log('✅ Statuts paiements historiques corrigés');
+    } catch (statErr) {
+      console.warn('⚠️ Note correction statuts paiements:', statErr.message);
+    }
+
     // 2. Connexion & Sync Registry IA (MySQL)
     await sequelize_db_template.authenticate();
     console.log('✅ Registry IA Connecté (MySQL)');
