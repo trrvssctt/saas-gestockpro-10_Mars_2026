@@ -25,36 +25,67 @@ const contactRateLimit = rateLimit({
   legacyHeaders: false,
 });
 
+/**
+ * Supprime les balises HTML et les caractères de contrôle dangereux.
+ * Protège contre le XSS stocké sans dépendance externe.
+ */
+const stripHtml = (str) =>
+  str.replace(/<[^>]*>/g, '').replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '');
+
 // Middleware de validation pour les messages de contact
 const validateContactMessage = (req, res, next) => {
-  const { fullName, email, message } = req.body;
-  
+  const { fullName, email, message, phone, website } = req.body;
+
+  // Honeypot : champ caché rempli = bot
+  if (website && website.trim() !== '') {
+    // Répondre 200 pour ne pas alerter le bot
+    return res.status(200).json({ success: true, message: 'Message reçu.' });
+  }
+
   if (!fullName || fullName.trim().length < 2) {
-    return res.status(400).json({ 
-      error: 'Le nom complet est requis et doit contenir au moins 2 caractères.' 
+    return res.status(400).json({
+      error: 'Le nom complet est requis et doit contenir au moins 2 caractères.'
     });
   }
-  
+  if (fullName.trim().length > 100) {
+    return res.status(400).json({ error: 'Le nom complet ne peut pas dépasser 100 caractères.' });
+  }
+
   if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    return res.status(400).json({ 
-      error: 'Une adresse email valide est requise.' 
+    return res.status(400).json({
+      error: 'Une adresse email valide est requise.'
     });
   }
-  
+  if (email.trim().length > 254) {
+    return res.status(400).json({ error: 'L\'adresse email ne peut pas dépasser 254 caractères.' });
+  }
+
   if (!message || message.trim().length < 10) {
-    return res.status(400).json({ 
-      error: 'Le message doit contenir au moins 10 caractères.' 
+    return res.status(400).json({
+      error: 'Le message doit contenir au moins 10 caractères.'
     });
   }
-  
-  // Sanitiser les données
-  req.body.fullName = fullName.trim();
-  req.body.email = email.trim().toLowerCase();
-  req.body.message = message.trim();
-  if (req.body.phone) {
-    req.body.phone = req.body.phone.trim();
+  if (message.trim().length > 5000) {
+    return res.status(400).json({ error: 'Le message ne peut pas dépasser 5000 caractères.' });
   }
-  
+
+  if (phone && phone.trim().length > 0) {
+    if (phone.trim().length > 20) {
+      return res.status(400).json({ error: 'Le numéro de téléphone ne peut pas dépasser 20 caractères.' });
+    }
+    if (!/^[+\d\s\-().]{5,20}$/.test(phone.trim())) {
+      return res.status(400).json({ error: 'Le numéro de téléphone contient des caractères invalides.' });
+    }
+  }
+
+  // Sanitiser les données (suppression des balises HTML)
+  req.body.fullName = stripHtml(fullName.trim());
+  req.body.email = email.trim().toLowerCase();
+  req.body.message = stripHtml(message.trim());
+  if (req.body.phone) {
+    req.body.phone = stripHtml(req.body.phone.trim());
+  }
+
   next();
 };
 
@@ -320,6 +351,9 @@ adminRouter.post('/messages/:id/reply', async (req, res) => {
     });
   }
 });
+
+// Toutes les routes admin nécessitent le rôle ADMIN ou SUPER_ADMIN
+adminRouter.use(checkPermission(['ADMIN', 'SUPER_ADMIN']));
 
 // Configure the main router
 router.use('/', publicRouter);
