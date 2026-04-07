@@ -176,7 +176,7 @@ export const authBridge = {
   fetchMe: async (token: string): Promise<User | null> => {
     try {
       //const response = await fetch('http://localhost:3000/api/auth/me', {
-       const response = await fetch('https://gestock.realtechprint.com/api/auth/me', {
+      const response = await fetch('https://gestock.realtechprint.com/api/auth/me', {
         headers: { Authorization: `Bearer ${token}` }
       });
       if (!response.ok) return null;
@@ -253,7 +253,8 @@ export const authBridge = {
     
     try {
       if (sessionToken) {
-        await fetch('http://localhost:3000/api/auth/logout', {
+        //await fetch('http://localhost:3000/api/auth/logout', {
+         await fetch('https://gestock.realtechprint.com/api/auth/logout', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',

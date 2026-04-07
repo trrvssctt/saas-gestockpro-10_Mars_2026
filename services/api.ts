@@ -26,7 +26,7 @@ if (buildTimeBackend) {
       rawBackend = 'https://gestock.realtechprint.com';
     }
   } catch (e) {
-    //rawBackend = 'http://localhost:3000';
+   // rawBackend = 'http://localhost:3000';
     rawBackend = 'https://gestock.realtechprint.com';
   }
 }
