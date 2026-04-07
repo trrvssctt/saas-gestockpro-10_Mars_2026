@@ -129,11 +129,11 @@ const SADashboard: React.FC<Props> = ({
   const activeTenants = Number(data?.stats?.activeTenants || 0);
   const arpu = activeTenants > 0 ? mrr / activeTenants : 0;
   const upcomingAlerts: any[] = Array.isArray(data?.subscriptionAlerts) ? data.subscriptionAlerts : [];
-  const totalRevenue = Number(data?.stats?.totalRevenue || 0);
-  const totalCollected = Number(data?.stats?.totalCollected || 0);
-  const totalUnpaid = Number(data?.stats?.totalUnpaid || 0);
-  const benefice = totalCollected - (totalRevenue - totalCollected > 0 ? totalRevenue - totalCollected : 0);
-  const tauxRecouvrement = totalRevenue > 0 ? Math.round((totalCollected / totalRevenue) * 100) : 0;
+  // Revenus SaaS réels : paiements d'abonnement encaissés (saleId IS NULL, status COMPLETED/PAID)
+  const totalSubscriptionRevenue = Number(data?.stats?.totalSubscriptionRevenue || 0);
+  const totalSubscriptionPending = Number(data?.stats?.totalSubscriptionPending || 0);
+  const totalSaasExpected = totalSubscriptionRevenue + totalSubscriptionPending;
+  const tauxEncaissementSaas = totalSaasExpected > 0 ? Math.round((totalSubscriptionRevenue / totalSaasExpected) * 100) : (totalSubscriptionRevenue > 0 ? 100 : 0);
 
   const planRevenue = plans.map((p: any) => ({
     name: p.name,
@@ -172,65 +172,69 @@ const SADashboard: React.FC<Props> = ({
     : 31;
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-4 p-3 sm:p-6">
 
       {/* ══ PERIOD FILTER BAR ══ */}
-      <div className="bg-zinc-800/50 border border-zinc-700/50 rounded-2xl p-4">
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="flex items-center gap-2 text-zinc-400">
-            <Filter size={14} />
-            <span className="text-xs font-bold text-zinc-300">Période</span>
+      <div className="bg-zinc-800/50 border border-zinc-700/50 rounded-2xl p-3 sm:p-4">
+        <div className="space-y-3">
+          {/* Row 1 : label + presets + badge */}
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex items-center gap-2 text-zinc-400">
+              <Filter size={14} />
+              <span className="text-xs font-bold text-zinc-300">Période</span>
+            </div>
+
+            {/* Presets */}
+            <div className="flex flex-wrap gap-1">
+              {[
+                { key: 'all',      label: 'Tout' },
+                { key: 'today',    label: "Auj." },
+                { key: 'week',     label: 'Sem.' },
+                { key: 'month',    label: 'Mois' },
+                { key: 'semester', label: 'Sem.' },
+                { key: 'year',     label: 'An' },
+              ].map(p => (
+                <button key={p.key} onClick={() => applyPreset(p.key)}
+                  className={`px-2.5 py-1.5 text-[11px] font-bold rounded-xl transition-all ${activePreset === p.key ? 'bg-indigo-500 text-white shadow-lg shadow-indigo-500/20' : 'text-zinc-400 bg-zinc-900/50 border border-zinc-700/50 hover:text-white hover:bg-zinc-700/50'}`}>
+                  {p.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Active period badge */}
+            <div className="ml-auto flex items-center gap-2 bg-indigo-500/10 border border-indigo-500/20 rounded-xl px-2.5 py-1.5">
+              <Calendar size={11} className="text-indigo-400" />
+              <span className="text-[10px] font-bold text-indigo-300 truncate max-w-[120px] sm:max-w-none">{periodLabel}</span>
+            </div>
           </div>
 
-          {/* Presets */}
-          <div className="flex flex-wrap gap-1">
-            {[
-              { key: 'all',      label: 'Tout' },
-              { key: 'today',    label: "Auj." },
-              { key: 'week',     label: 'Semaine' },
-              { key: 'month',    label: 'Mois' },
-              { key: 'semester', label: 'Semestre' },
-              { key: 'year',     label: 'Année' },
-            ].map(p => (
-              <button key={p.key} onClick={() => applyPreset(p.key)}
-                className={`px-3 py-2 text-xs font-bold rounded-xl transition-all ${activePreset === p.key ? 'bg-indigo-500 text-white shadow-lg shadow-indigo-500/20' : 'text-zinc-400 bg-zinc-900/50 border border-zinc-700/50 hover:text-white hover:bg-zinc-700/50'}`}>
-                {p.label}
-              </button>
-            ))}
-          </div>
-
-          {/* Custom selects */}
-          <div className="flex items-center gap-2 flex-wrap">
+          {/* Row 2 : Custom selects */}
+          <div className="flex flex-wrap items-center gap-2">
             <select value={selectedYear} onChange={e => { setSelectedYear(e.target.value ? Number(e.target.value) : ''); setActivePreset('custom'); }}
-              className="bg-zinc-900/50 border border-zinc-700/50 text-xs text-zinc-300 px-3 py-2 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500/30">
+              className="bg-zinc-900/50 border border-zinc-700/50 text-xs text-zinc-300 px-2.5 py-2 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500/30 flex-1 min-w-[80px]">
               <option value="">Année</option>
               {YEARS.map(y => <option key={y} value={y}>{y}</option>)}
             </select>
             <select value={selectedMonth} onChange={e => { setSelectedMonth(e.target.value ? Number(e.target.value) : ''); setActivePreset('custom'); }}
-              className="bg-zinc-900/50 border border-zinc-700/50 text-xs text-zinc-300 px-3 py-2 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500/30">
+              className="bg-zinc-900/50 border border-zinc-700/50 text-xs text-zinc-300 px-2.5 py-2 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500/30 flex-1 min-w-[90px]">
               <option value="">Mois</option>
               {MONTHS_FR.map((m, i) => <option key={i+1} value={i+1}>{m}</option>)}
             </select>
             <select value={selectedDay} onChange={e => { setSelectedDay(e.target.value ? Number(e.target.value) : ''); setActivePreset('custom'); }}
-              className="bg-zinc-900/50 border border-zinc-700/50 text-xs text-zinc-300 px-3 py-2 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500/30">
+              className="bg-zinc-900/50 border border-zinc-700/50 text-xs text-zinc-300 px-2.5 py-2 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500/30 flex-1 min-w-[70px]">
               <option value="">Jour</option>
               {Array.from({ length: daysInMonth }, (_, i) => i + 1).map(d => <option key={d} value={d}>{d}</option>)}
             </select>
             <button onClick={applyCustomFilter}
-              className="px-4 py-2 bg-indigo-500 hover:bg-indigo-400 text-white text-xs font-bold rounded-xl transition-all flex items-center gap-1.5">
-              <RefreshCw size={11} className={loading ? 'animate-spin' : ''} /> Appliquer
+              className="px-3 py-2 bg-indigo-500 hover:bg-indigo-400 text-white text-xs font-bold rounded-xl transition-all flex items-center gap-1.5 flex-shrink-0">
+              <RefreshCw size={11} className={loading ? 'animate-spin' : ''} />
+              <span className="hidden sm:inline">Appliquer</span>
             </button>
             {(selectedYear || selectedMonth || selectedDay) && (
-              <button onClick={resetFilters} className="px-3 py-2 text-xs text-zinc-400 hover:text-rose-400 transition-colors">
+              <button onClick={resetFilters} className="px-2.5 py-2 text-xs text-zinc-400 hover:text-rose-400 transition-colors flex-shrink-0">
                 Réinitialiser
               </button>
             )}
-          </div>
-
-          {/* Active period badge */}
-          <div className="ml-auto flex items-center gap-2 bg-indigo-500/10 border border-indigo-500/20 rounded-xl px-3 py-1.5">
-            <Calendar size={11} className="text-indigo-400" />
-            <span className="text-[10px] font-bold text-indigo-300">{periodLabel}</span>
           </div>
         </div>
       </div>
@@ -252,74 +256,74 @@ const SADashboard: React.FC<Props> = ({
           <span className="ml-auto text-[10px] text-zinc-500 font-normal">{periodLabel}</span>
         </h4>
 
-        {/* Summary cards */}
+        {/* Summary cards — revenus SaaS (abonnements) */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-          {/* Chiffre d'affaires */}
-          <div className="bg-zinc-900/60 border border-zinc-700/50 rounded-xl p-4">
-            <div className="flex items-center gap-2 mb-2">
-              <div className="p-1.5 bg-indigo-500/20 rounded-lg"><DollarSign size={13} className="text-indigo-400" /></div>
-              <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Chiffre d'affaires</p>
-            </div>
-            <p className="text-xl font-black text-white">{fmt(totalRevenue)} F</p>
-            <p className="text-[10px] text-zinc-500 mt-1">Total facturé (période)</p>
-          </div>
-
-          {/* Bénéfices (collected) */}
+          {/* Encaissements SaaS */}
           <div className="bg-emerald-500/5 border border-emerald-500/20 rounded-xl p-4">
             <div className="flex items-center gap-2 mb-2">
               <div className="p-1.5 bg-emerald-500/20 rounded-lg"><ArrowUp size={13} className="text-emerald-400" /></div>
+              <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Encaissements SaaS</p>
+            </div>
+            <p className="text-xl font-black text-emerald-400">{fmt(totalSubscriptionRevenue)} F</p>
+            <p className="text-[10px] text-zinc-500 mt-1">Abonnements validés (période)</p>
+          </div>
+
+          {/* Bénéfices = encaissements abonnements */}
+          <div className="bg-indigo-500/5 border border-indigo-500/20 rounded-xl p-4">
+            <div className="flex items-center gap-2 mb-2">
+              <div className="p-1.5 bg-indigo-500/20 rounded-lg"><DollarSign size={13} className="text-indigo-400" /></div>
               <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Bénéfices</p>
             </div>
-            <p className="text-xl font-black text-emerald-400">{fmt(totalCollected)} F</p>
-            <p className="text-[10px] text-zinc-500 mt-1">Encaissé</p>
+            <p className="text-xl font-black text-indigo-300">{fmt(totalSubscriptionRevenue)} F</p>
+            <p className="text-[10px] text-zinc-500 mt-1">Revenus réels encaissés</p>
           </div>
 
-          {/* Pertes / impayés */}
-          <div className={`${totalUnpaid > 0 ? 'bg-rose-500/5 border-rose-500/20' : 'bg-zinc-900/60 border-zinc-700/50'} border rounded-xl p-4`}>
+          {/* En attente de validation */}
+          <div className={`${totalSubscriptionPending > 0 ? 'bg-amber-500/5 border-amber-500/20' : 'bg-zinc-900/60 border-zinc-700/50'} border rounded-xl p-4`}>
             <div className="flex items-center gap-2 mb-2">
-              <div className={`p-1.5 rounded-lg ${totalUnpaid > 0 ? 'bg-rose-500/20' : 'bg-zinc-700/50'}`}>
-                <ArrowDown size={13} className={totalUnpaid > 0 ? 'text-rose-400' : 'text-zinc-400'} />
+              <div className={`p-1.5 rounded-lg ${totalSubscriptionPending > 0 ? 'bg-amber-500/20' : 'bg-zinc-700/50'}`}>
+                <ArrowDown size={13} className={totalSubscriptionPending > 0 ? 'text-amber-400' : 'text-zinc-400'} />
               </div>
-              <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Pertes / Impayés</p>
+              <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">En attente</p>
             </div>
-            <p className={`text-xl font-black ${totalUnpaid > 0 ? 'text-rose-400' : 'text-zinc-400'}`}>{fmt(totalUnpaid)} F</p>
-            <p className="text-[10px] text-zinc-500 mt-1">Non encaissé</p>
+            <p className={`text-xl font-black ${totalSubscriptionPending > 0 ? 'text-amber-400' : 'text-zinc-400'}`}>{fmt(totalSubscriptionPending)} F</p>
+            <p className="text-[10px] text-zinc-500 mt-1">Abonnements à valider</p>
           </div>
 
-          {/* Taux de recouvrement */}
-          <div className={`${tauxRecouvrement >= 80 ? 'bg-emerald-500/5 border-emerald-500/20' : tauxRecouvrement >= 50 ? 'bg-amber-500/5 border-amber-500/20' : 'bg-rose-500/5 border-rose-500/20'} border rounded-xl p-4`}>
+          {/* Taux d'encaissement SaaS */}
+          <div className={`${tauxEncaissementSaas >= 80 ? 'bg-emerald-500/5 border-emerald-500/20' : tauxEncaissementSaas >= 50 ? 'bg-amber-500/5 border-amber-500/20' : 'bg-rose-500/5 border-rose-500/20'} border rounded-xl p-4`}>
             <div className="flex items-center gap-2 mb-2">
-              <div className={`p-1.5 rounded-lg ${tauxRecouvrement >= 80 ? 'bg-emerald-500/20' : tauxRecouvrement >= 50 ? 'bg-amber-500/20' : 'bg-rose-500/20'}`}>
-                <Minus size={13} className={tauxRecouvrement >= 80 ? 'text-emerald-400' : tauxRecouvrement >= 50 ? 'text-amber-400' : 'text-rose-400'} />
+              <div className={`p-1.5 rounded-lg ${tauxEncaissementSaas >= 80 ? 'bg-emerald-500/20' : tauxEncaissementSaas >= 50 ? 'bg-amber-500/20' : 'bg-rose-500/20'}`}>
+                <Minus size={13} className={tauxEncaissementSaas >= 80 ? 'text-emerald-400' : tauxEncaissementSaas >= 50 ? 'text-amber-400' : 'text-rose-400'} />
               </div>
-              <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Taux recouvrement</p>
+              <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Taux encaissement</p>
             </div>
-            <p className={`text-xl font-black ${tauxRecouvrement >= 80 ? 'text-emerald-400' : tauxRecouvrement >= 50 ? 'text-amber-400' : 'text-rose-400'}`}>{tauxRecouvrement}%</p>
-            <p className="text-[10px] text-zinc-500 mt-1">{totalCollected > 0 ? 'du CA encaissé' : 'Aucun paiement'}</p>
+            <p className={`text-xl font-black ${tauxEncaissementSaas >= 80 ? 'text-emerald-400' : tauxEncaissementSaas >= 50 ? 'text-amber-400' : 'text-rose-400'}`}>{tauxEncaissementSaas}%</p>
+            <p className="text-[10px] text-zinc-500 mt-1">{totalSubscriptionRevenue > 0 ? 'des abonnements encaissés' : 'Aucun encaissement'}</p>
           </div>
         </div>
 
         {/* Visual bar */}
-        {totalRevenue > 0 && (
+        {totalSaasExpected > 0 && (
           <div className="space-y-3">
             <div>
               <div className="flex justify-between text-[10px] text-zinc-400 mb-1">
                 <span>Encaissé</span>
-                <span className="text-emerald-400 font-bold">{tauxRecouvrement}%</span>
+                <span className="text-emerald-400 font-bold">{tauxEncaissementSaas}%</span>
               </div>
               <div className="h-3 bg-zinc-700 rounded-full overflow-hidden">
                 <div className="h-3 bg-gradient-to-r from-emerald-500 to-emerald-400 rounded-full transition-all duration-700"
-                  style={{ width: `${Math.min(100, tauxRecouvrement)}%` }} />
+                  style={{ width: `${Math.min(100, tauxEncaissementSaas)}%` }} />
               </div>
             </div>
             <div>
               <div className="flex justify-between text-[10px] text-zinc-400 mb-1">
-                <span>Impayés</span>
-                <span className="text-rose-400 font-bold">{totalRevenue > 0 ? Math.round((totalUnpaid / totalRevenue) * 100) : 0}%</span>
+                <span>En attente</span>
+                <span className="text-amber-400 font-bold">{totalSaasExpected > 0 ? Math.round((totalSubscriptionPending / totalSaasExpected) * 100) : 0}%</span>
               </div>
               <div className="h-3 bg-zinc-700 rounded-full overflow-hidden">
-                <div className="h-3 bg-gradient-to-r from-rose-500 to-rose-400 rounded-full transition-all duration-700"
-                  style={{ width: `${totalRevenue > 0 ? Math.min(100, Math.round((totalUnpaid / totalRevenue) * 100)) : 0}%` }} />
+                <div className="h-3 bg-gradient-to-r from-amber-500 to-amber-400 rounded-full transition-all duration-700"
+                  style={{ width: `${totalSaasExpected > 0 ? Math.min(100, Math.round((totalSubscriptionPending / totalSaasExpected) * 100)) : 0}%` }} />
               </div>
             </div>
           </div>
@@ -416,20 +420,21 @@ const SADashboard: React.FC<Props> = ({
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
         {/* Revenue Area Chart */}
         <div className="xl:col-span-2 bg-zinc-800/50 border border-zinc-700/50 rounded-2xl p-6">
-          <div className="flex items-center justify-between mb-4">
+          <div className="flex flex-wrap items-start justify-between gap-2 mb-4">
             <div>
               <h4 className="font-bold text-white flex items-center gap-2">
-                <Activity size={16} className="text-indigo-400" /> Revenus — {periodLabel}
+                <Activity size={16} className="text-indigo-400" />
+                <span className="truncate">Revenus — {periodLabel}</span>
               </h4>
               <p className="text-[11px] text-zinc-400 mt-0.5">{chartSubtitle}</p>
             </div>
-            <div className="flex items-center gap-4">
+            <div className="flex items-center gap-3">
               <div className="flex items-center gap-1.5">
-                <span className="w-2 h-2 rounded-full bg-indigo-500" />
+                <span className="w-2 h-2 rounded-full bg-indigo-500 flex-shrink-0" />
                 <span className="text-[10px] text-zinc-400">Facturé</span>
               </div>
               <div className="flex items-center gap-1.5">
-                <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                <span className="w-2 h-2 rounded-full bg-emerald-500 flex-shrink-0" />
                 <span className="text-[10px] text-zinc-400">Encaissé</span>
               </div>
             </div>
@@ -437,12 +442,12 @@ const SADashboard: React.FC<Props> = ({
           {/* Totaux de la période */}
           <div className="grid grid-cols-2 gap-3 mb-4">
             <div className="bg-indigo-500/10 border border-indigo-500/20 rounded-xl px-4 py-2.5 flex items-center justify-between">
-              <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Facturé</span>
-              <span className="text-sm font-black text-indigo-300">{fmt(totalRevenue)} F</span>
+              <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Abonnements SaaS</span>
+              <span className="text-sm font-black text-indigo-300">{fmt(totalSubscriptionRevenue)} F</span>
             </div>
-            <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-xl px-4 py-2.5 flex items-center justify-between">
-              <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Encaissé</span>
-              <span className="text-sm font-black text-emerald-400">{fmt(totalCollected)} F</span>
+            <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl px-4 py-2.5 flex items-center justify-between">
+              <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">En attente</span>
+              <span className="text-sm font-black text-amber-400">{fmt(totalSubscriptionPending)} F</span>
             </div>
           </div>
           <div className="h-52">

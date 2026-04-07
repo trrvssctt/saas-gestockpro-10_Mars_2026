@@ -79,9 +79,9 @@ const SALogs: React.FC<Props> = ({ tenants }) => {
   });
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-4 p-3 sm:p-6">
       {/* Stats */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
         <div className="bg-zinc-800/50 border border-zinc-700/50 rounded-2xl p-4">
           <p className="text-[10px] text-zinc-400 uppercase tracking-wider mb-1">Total logs</p>
           <p className="text-2xl font-black text-white">{logs.length}</p>
@@ -107,66 +107,66 @@ const SALogs: React.FC<Props> = ({ tenants }) => {
       </div>
 
       {/* Filters */}
-      <div className="bg-zinc-800/50 border border-zinc-700/50 rounded-2xl p-4 flex flex-wrap items-center gap-3">
-        <div className="relative flex-1 min-w-[180px]">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" size={13} />
-          <input
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            placeholder="Rechercher action, tenant, utilisateur..."
-            className="w-full pl-8 pr-3 py-2 bg-zinc-900/50 border border-zinc-700/50 text-xs text-white placeholder-zinc-500 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500/30"
-          />
-        </div>
-        <select
-          value={tenantFilter || ''}
-          onChange={e => { setTenantFilter(e.target.value || null); setUserFilter(null); }}
-          className="bg-zinc-900/50 border border-zinc-700/50 text-xs text-zinc-300 px-3 py-2 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500/30"
-        >
-          <option value="">Tous les comptes</option>
-          {tenants.map((t: any) => <option key={t.id} value={t.id}>{t.name}</option>)}
-        </select>
-        {users.length > 0 && (
+      <div className="bg-zinc-800/50 border border-zinc-700/50 rounded-2xl p-3 sm:p-4 space-y-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="relative flex-1 min-w-[150px]">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" size={13} />
+            <input
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="Rechercher action, tenant..."
+              className="w-full pl-8 pr-3 py-2 bg-zinc-900/50 border border-zinc-700/50 text-xs text-white placeholder-zinc-500 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500/30"
+            />
+          </div>
           <select
-            value={userFilter || ''}
-            onChange={e => setUserFilter(e.target.value || null)}
-            className="bg-zinc-900/50 border border-zinc-700/50 text-xs text-zinc-300 px-3 py-2 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500/30"
+            value={tenantFilter || ''}
+            onChange={e => { setTenantFilter(e.target.value || null); setUserFilter(null); }}
+            className="bg-zinc-900/50 border border-zinc-700/50 text-xs text-zinc-300 px-2.5 py-2 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500/30 flex-1 min-w-[120px]"
           >
-            <option value="">Tous les utilisateurs</option>
-            {users.map((u: any) => <option key={u.id} value={u.id}>{u.name} ({u.role})</option>)}
+            <option value="">Tous comptes</option>
+            {tenants.map((t: any) => <option key={t.id} value={t.id}>{t.name}</option>)}
           </select>
-        )}
-        {/* Action type filter */}
-        <select value={actionType} onChange={e => setActionType(e.target.value)}
-          className="bg-zinc-900/50 border border-zinc-700/50 text-xs text-zinc-300 px-3 py-2 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500/30">
-          <option value="ALL">Toutes actions</option>
-          <option value="CREATE">Créations</option>
-          <option value="DELETE">Suppressions / Locks</option>
-          <option value="UPDATE">Modifications</option>
-          <option value="LOGIN">Connexions</option>
-        </select>
-        {/* Date range */}
-        <div className="flex items-center gap-2">
-          <label className="text-[10px] text-zinc-500">Du</label>
-          <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
-            className="bg-zinc-900/50 border border-zinc-700/50 text-xs text-zinc-300 px-2 py-2 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500/30" />
-          <label className="text-[10px] text-zinc-500">au</label>
-          <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
-            className="bg-zinc-900/50 border border-zinc-700/50 text-xs text-zinc-300 px-2 py-2 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500/30" />
+          {users.length > 0 && (
+            <select
+              value={userFilter || ''}
+              onChange={e => setUserFilter(e.target.value || null)}
+              className="bg-zinc-900/50 border border-zinc-700/50 text-xs text-zinc-300 px-2.5 py-2 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500/30 flex-1 min-w-[120px]"
+            >
+              <option value="">Tous utilisateurs</option>
+              {users.map((u: any) => <option key={u.id} value={u.id}>{u.name} ({u.role})</option>)}
+            </select>
+          )}
+          <select value={actionType} onChange={e => setActionType(e.target.value)}
+            className="bg-zinc-900/50 border border-zinc-700/50 text-xs text-zinc-300 px-2.5 py-2 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500/30">
+            <option value="ALL">Toutes actions</option>
+            <option value="CREATE">Créations</option>
+            <option value="DELETE">Suppressions</option>
+            <option value="UPDATE">Modifications</option>
+            <option value="LOGIN">Connexions</option>
+          </select>
         </div>
-        {(tenantFilter || userFilter || actionType !== 'ALL' || dateFrom || dateTo) && (
-          <button onClick={() => { setTenantFilter(null); setUserFilter(null); setUsers([]); setActionType('ALL'); setDateFrom(''); setDateTo(''); }}
-            className="flex items-center gap-1 text-xs text-rose-400 hover:text-rose-300 transition-colors">
-            <X size={12} /> Réinitialiser
+        <div className="flex flex-wrap items-center gap-2">
+          <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
+            title="Date début"
+            className="bg-zinc-900/50 border border-zinc-700/50 text-xs text-zinc-300 px-2.5 py-2 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500/30 w-[130px]" />
+          <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
+            title="Date fin"
+            className="bg-zinc-900/50 border border-zinc-700/50 text-xs text-zinc-300 px-2.5 py-2 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500/30 w-[130px]" />
+          {(tenantFilter || userFilter || actionType !== 'ALL' || dateFrom || dateTo) && (
+            <button onClick={() => { setTenantFilter(null); setUserFilter(null); setUsers([]); setActionType('ALL'); setDateFrom(''); setDateTo(''); }}
+              className="flex items-center gap-1 text-xs text-rose-400 hover:text-rose-300 transition-colors">
+              <X size={12} /> Réinitialiser
+            </button>
+          )}
+          <button onClick={fetchLogs} className="p-2 bg-zinc-700/50 hover:bg-zinc-600 rounded-xl text-zinc-400 hover:text-white transition-all ml-auto">
+            <RefreshCw size={13} className={loading ? 'animate-spin' : ''} />
           </button>
-        )}
-        <button onClick={fetchLogs} className="p-2.5 bg-zinc-700/50 hover:bg-zinc-600 rounded-xl text-zinc-400 hover:text-white transition-all ml-auto">
-          <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
-        </button>
+        </div>
       </div>
 
-      {/* Logs table */}
+      {/* Logs list */}
       <div className="bg-zinc-800/50 border border-zinc-700/50 rounded-2xl overflow-hidden">
-        <div className="px-5 py-3 border-b border-zinc-700/50 flex items-center gap-2">
+        <div className="px-4 py-3 border-b border-zinc-700/50 flex items-center gap-2">
           <Terminal size={14} className="text-zinc-400" />
           <span className="text-xs font-bold text-zinc-400">{filtered.length} entrée(s) affichée(s)</span>
         </div>
@@ -186,15 +186,15 @@ const SALogs: React.FC<Props> = ({ tenants }) => {
               <div key={l.id} className="group">
                 <div
                   onClick={() => setExpanded(expanded === l.id ? null : l.id)}
-                  className="px-5 py-3.5 flex items-center gap-4 hover:bg-zinc-700/20 cursor-pointer transition-colors"
+                  className="px-3 sm:px-5 py-3 flex items-start sm:items-center gap-2 sm:gap-4 hover:bg-zinc-700/20 cursor-pointer transition-colors"
                 >
                   {/* Timestamp */}
-                  <span className="text-[10px] text-zinc-500 font-mono w-28 shrink-0">
+                  <span className="text-[10px] text-zinc-500 font-mono shrink-0 w-24 sm:w-28">
                     {l.createdAt ? new Date(l.createdAt).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—'}
                   </span>
 
                   {/* Action */}
-                  <span className={`text-[10px] font-black font-mono w-40 shrink-0 truncate ${getActionColor(l.action)}`}>
+                  <span className={`text-[10px] font-black font-mono shrink-0 w-32 sm:w-40 truncate ${getActionColor(l.action)}`}>
                     {l.action || '?'}
                   </span>
 

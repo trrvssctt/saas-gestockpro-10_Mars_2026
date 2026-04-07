@@ -58,9 +58,9 @@ const SAPayments: React.FC<Props> = ({
   const displayTenants = pageSize === -1 ? filteredTenants : filteredTenants.slice(0, pageSize);
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-4 p-3 sm:p-6">
       {/* Stats rapides */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
         <div className="bg-amber-500/10 border border-amber-500/20 rounded-2xl p-4">
           <div className="flex items-center gap-2 mb-2">
             <Clock size={16} className="text-amber-400" />
@@ -207,14 +207,14 @@ const SAPayments: React.FC<Props> = ({
             </div>
           </div>
           {/* Filter row */}
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="relative flex-1 min-w-[140px]">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="relative flex-1 min-w-[130px]">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" size={13} />
               <input placeholder="Rechercher..." value={search} onChange={e => setSearch(e.target.value)}
                 className="w-full pl-8 pr-3 py-2 bg-zinc-900/50 border border-zinc-700/50 text-xs text-white placeholder-zinc-500 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500/30" />
             </div>
             <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}
-              className="bg-zinc-900/50 border border-zinc-700/50 text-xs text-zinc-300 px-3 py-2 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500/30">
+              className="bg-zinc-900/50 border border-zinc-700/50 text-xs text-zinc-300 px-2.5 py-2 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500/30">
               <option value="ALL">Tous statuts</option>
               <option value="ACTIVE">Actif</option>
               <option value="TRIAL">Essai</option>
@@ -222,13 +222,13 @@ const SAPayments: React.FC<Props> = ({
               <option value="EXPIRED">Expiré</option>
               <option value="REJECTED">Rejeté</option>
             </select>
-            <div className="flex items-center gap-2">
-              <label className="text-[10px] text-zinc-500">Du</label>
+            <div className="flex flex-wrap items-center gap-2">
               <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
-                className="bg-zinc-900/50 border border-zinc-700/50 text-xs text-zinc-300 px-3 py-2 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500/30" />
-              <label className="text-[10px] text-zinc-500">au</label>
+                title="Date début"
+                className="bg-zinc-900/50 border border-zinc-700/50 text-xs text-zinc-300 px-2.5 py-2 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500/30 w-[130px]" />
               <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
-                className="bg-zinc-900/50 border border-zinc-700/50 text-xs text-zinc-300 px-3 py-2 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500/30" />
+                title="Date fin"
+                className="bg-zinc-900/50 border border-zinc-700/50 text-xs text-zinc-300 px-2.5 py-2 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500/30 w-[130px]" />
             </div>
             {(search || statusFilter !== 'ALL' || dateFrom || dateTo) && (
               <button onClick={resetFilters} className="text-xs text-rose-400 hover:text-rose-300 transition-colors flex items-center gap-1">

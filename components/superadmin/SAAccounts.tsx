@@ -112,7 +112,7 @@ const SAAccounts: React.FC<Props> = ({
 
   return (
     <>
-    <div className="space-y-5 p-6">
+    <div className="space-y-4 p-3 sm:p-6">
       {/* Stats bar */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {[
@@ -183,9 +183,67 @@ const SAAccounts: React.FC<Props> = ({
         </div>
       </div>
 
-      {/* Table */}
+      {/* ── Mobile: cards ── Desktop: table ── */}
       <div className="bg-zinc-800/50 border border-zinc-700/50 rounded-2xl overflow-hidden">
-        <div className="overflow-x-auto">
+
+        {/* Mobile card list (< md) */}
+        <div className="md:hidden">
+          {loading ? (
+            <div className="py-12 flex flex-col items-center gap-3">
+              <div className="w-8 h-8 border-2 border-indigo-500/20 border-t-indigo-500 rounded-full animate-spin" />
+              <p className="text-sm text-zinc-500">Chargement...</p>
+            </div>
+          ) : filtered.length === 0 ? (
+            <div className="py-12 flex flex-col items-center gap-2">
+              <Globe size={32} className="text-zinc-600" />
+              <p className="text-sm text-zinc-500">Aucun compte trouvé</p>
+            </div>
+          ) : (
+            <div className="divide-y divide-zinc-700/30">
+              {filtered.map((t: any) => (
+                <div key={t.id} className="p-4 space-y-3">
+                  {/* Top row */}
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 mt-0.5 ${t.isActive ? 'bg-emerald-400' : 'bg-rose-400'}`} />
+                      <div className="min-w-0">
+                        <p className="text-sm font-bold text-white truncate">{t.name}</p>
+                        <p className="text-[10px] text-zinc-500 font-mono truncate">{t.domain}</p>
+                      </div>
+                    </div>
+                    <PaymentBadge status={t.paymentStatus} />
+                  </div>
+                  {/* Info row */}
+                  <div className="flex items-center gap-3 flex-wrap">
+                    <span className="text-xs font-bold text-indigo-400 bg-indigo-500/10 border border-indigo-500/20 px-2 py-0.5 rounded-lg">{t.planName || 'N/A'}</span>
+                    <span className="text-[10px] text-zinc-400">{t.userCount} / {t.planMaxUsers || '∞'} users</span>
+                    <span className="text-[10px] text-zinc-500">{fmtDate(t.lastPaymentDate)}</span>
+                  </div>
+                  {/* Actions */}
+                  <div className="flex items-center gap-2">
+                    <button onClick={() => openUsersPanel(t)} className="p-2 bg-violet-500/10 rounded-lg text-violet-400" title="Utilisateurs"><Users size={13} /></button>
+                    <button onClick={() => onOpenBilling(t.id)} className="p-2 bg-zinc-700/50 rounded-lg text-zinc-400" title="Billing"><Eye size={13} /></button>
+                    <button onClick={() => onEmail(t.id, t.name)} className="p-2 bg-indigo-500/10 rounded-lg text-indigo-400" title="Email"><Mail size={13} /></button>
+                    {t.paymentStatus === 'PENDING' && (
+                      <button onClick={() => onValidate({ tenantId: t.id, tenantName: t.name, planId: t.subscription?.planId })}
+                        className="flex-1 py-2 bg-emerald-500/20 rounded-xl text-emerald-400 text-xs font-bold flex items-center justify-center gap-1.5">
+                        <Check size={12} /> Valider
+                      </button>
+                    )}
+                    <button onClick={() => onToggleLock(t.id, t.name, t.isActive)}
+                      className={`p-2 rounded-lg ml-auto ${t.isActive ? 'bg-rose-500/10 text-rose-400' : 'bg-emerald-500/10 text-emerald-400'}`}
+                      title={t.isActive ? 'Verrouiller' : 'Déverrouiller'}>
+                      {t.isActive ? <Ban size={13} /> : <Power size={13} />}
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Desktop table (>= md) */}
+        <div className="hidden md:block overflow-x-auto">
           <table className="w-full text-left">
             <thead>
               <tr className="border-b border-zinc-700/50 text-[10px] font-bold text-zinc-400 uppercase tracking-wider">
@@ -249,41 +307,13 @@ const SAAccounts: React.FC<Props> = ({
                   </td>
                   <td className="px-5 py-4">
                     <div className="flex items-center justify-end gap-1.5 opacity-60 group-hover:opacity-100 transition-opacity">
-                      <button
-                        onClick={() => openUsersPanel(t)}
-                        className="p-2 bg-violet-500/10 hover:bg-violet-500/20 rounded-lg text-violet-400 hover:text-violet-300 transition-all"
-                        title="Gérer les utilisateurs"
-                      >
-                        <Users size={13} />
-                      </button>
-                      <button
-                        onClick={() => onOpenBilling(t.id)}
-                        className="p-2 bg-zinc-700/50 hover:bg-zinc-600 rounded-lg text-zinc-400 hover:text-white transition-all"
-                        title="Détails billing"
-                      >
-                        <Eye size={13} />
-                      </button>
-                      <button
-                        onClick={() => onEmail(t.id, t.name)}
-                        className="p-2 bg-indigo-500/10 hover:bg-indigo-500/20 rounded-lg text-indigo-400 hover:text-indigo-300 transition-all"
-                        title="Envoyer email"
-                      >
-                        <Mail size={13} />
-                      </button>
+                      <button onClick={() => openUsersPanel(t)} className="p-2 bg-violet-500/10 hover:bg-violet-500/20 rounded-lg text-violet-400 hover:text-violet-300 transition-all" title="Gérer les utilisateurs"><Users size={13} /></button>
+                      <button onClick={() => onOpenBilling(t.id)} className="p-2 bg-zinc-700/50 hover:bg-zinc-600 rounded-lg text-zinc-400 hover:text-white transition-all" title="Détails billing"><Eye size={13} /></button>
+                      <button onClick={() => onEmail(t.id, t.name)} className="p-2 bg-indigo-500/10 hover:bg-indigo-500/20 rounded-lg text-indigo-400 hover:text-indigo-300 transition-all" title="Envoyer email"><Mail size={13} /></button>
                       {t.paymentStatus === 'PENDING' && (
-                        <button
-                          onClick={() => onValidate({ tenantId: t.id, tenantName: t.name, planId: t.subscription?.planId })}
-                          className="p-2 bg-emerald-500/10 hover:bg-emerald-500/20 rounded-lg text-emerald-400 hover:text-emerald-300 transition-all"
-                          title="Valider paiement"
-                        >
-                          <Check size={13} />
-                        </button>
+                        <button onClick={() => onValidate({ tenantId: t.id, tenantName: t.name, planId: t.subscription?.planId })} className="p-2 bg-emerald-500/10 hover:bg-emerald-500/20 rounded-lg text-emerald-400 hover:text-emerald-300 transition-all" title="Valider paiement"><Check size={13} /></button>
                       )}
-                      <button
-                        onClick={() => onToggleLock(t.id, t.name, t.isActive)}
-                        className={`p-2 rounded-lg transition-all ${t.isActive ? 'bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 hover:text-rose-300' : 'bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 hover:text-emerald-300'}`}
-                        title={t.isActive ? 'Verrouiller' : 'Déverrouiller'}
-                      >
+                      <button onClick={() => onToggleLock(t.id, t.name, t.isActive)} className={`p-2 rounded-lg transition-all ${t.isActive ? 'bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 hover:text-rose-300' : 'bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 hover:text-emerald-300'}`} title={t.isActive ? 'Verrouiller' : 'Déverrouiller'}>
                         {t.isActive ? <Ban size={13} /> : <Power size={13} />}
                       </button>
                     </div>
@@ -298,8 +328,8 @@ const SAAccounts: React.FC<Props> = ({
 
     {/* ══ USERS PANEL (slide-in) ══ */}
     {usersPanel && (
-      <div className="fixed inset-0 z-50 flex items-stretch justify-end bg-black/60 backdrop-blur-sm">
-        <div className="w-full max-w-lg h-full bg-zinc-900 border-l border-zinc-700/50 flex flex-col shadow-2xl">
+      <div className="fixed inset-0 z-50 flex items-end sm:items-stretch justify-end bg-black/60 backdrop-blur-sm">
+        <div className="w-full sm:max-w-lg sm:h-full bg-zinc-900 border-t sm:border-t-0 sm:border-l border-zinc-700/50 flex flex-col shadow-2xl rounded-t-3xl sm:rounded-none max-h-[90vh] sm:max-h-full">
           {/* Header */}
           <div className="px-6 py-5 border-b border-zinc-700/50 flex items-center justify-between">
             <div>
