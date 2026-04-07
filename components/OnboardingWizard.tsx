@@ -126,6 +126,14 @@ const OnboardingWizard: React.FC<Props> = ({ onComplete, onExit, companyName, us
   const [error, setError] = useState<string | null>(null);
   const [formData, setFormData] = useState(initial.formData);
 
+  // Sauvegarder la session dès le montage du wizard pour que les uploads fonctionnent
+  useEffect(() => {
+    const token = user?.token;
+    if (token) {
+      authBridge.saveSession(user, token);
+    }
+  }, []);  // eslint-disable-line react-hooks/exhaustive-deps
+
   // Mark wizard as started in localStorage (so we know progress vs not started)
   useEffect(() => {
     try {
@@ -157,6 +165,9 @@ const OnboardingWizard: React.FC<Props> = ({ onComplete, onExit, companyName, us
     if (!file) return;
     setIsUploading(field);
     setError(null);
+    // S'assurer que la session est bien enregistrée avant l'upload
+    const token = user?.token;
+    if (token) authBridge.saveSession(user, token);
     try {
       const folder = field === 'logoUrl' ? 'logos' : field === 'cachetUrl' ? 'cachets' : 'documents';
       const result = await uploadFile(file, folder);
