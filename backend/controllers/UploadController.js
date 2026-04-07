@@ -1,6 +1,10 @@
 import multer from 'multer';
-import { uploadToS3, getStorageInfo } from '../services/S3Service.js';
+import { uploadToS3, getStorageInfo, s3Client } from '../services/S3Service.js';
+import { GetObjectCommand } from '@aws-sdk/client-s3';
 import { Tenant } from '../models/Tenant.js';
+import process from 'node:process';
+
+const S3_BUCKET = process.env.S3_BUCKET || 'bucket-gestockpro';
 
 // Multer en mémoire — pas de disque, tout passe en buffer vers S3
 const upload = multer({
@@ -60,8 +64,14 @@ export class UploadController {
         folder
       );
 
+      // URL proxy : passe par le backend qui génère une URL signée S3 à la volée
+      // Fonctionne en dev (localhost:3000) et prod (domaine réel) automatiquement
+      const host = req.get('host');
+      const protocol = req.headers['x-forwarded-proto'] || req.protocol;
+      const proxyUrl = `${protocol}://${host}/api/files?key=${encodeURIComponent(result.key)}`;
+
       return res.status(200).json({
-        url:       result.url,
+        url:       proxyUrl,
         key:       result.key,
         sizeBytes: result.sizeBytes,
         mimeType:  req.file.mimetype,
@@ -70,6 +80,33 @@ export class UploadController {
     } catch (err) {
       console.error('[UploadController] uploadFile error:', err);
       return res.status(500).json({ error: 'Erreur lors de l\'upload : ' + err.message });
+    }
+  }
+
+  /**
+   * GET /api/files?key=tenantId/dossier/fichier.ext
+   * Endpoint PUBLIC — proxy direct vers S3 (pas de redirect, évite les incompatibilités
+   * de paramètres de signature avec les S3-compatibles comme MamuteCloud).
+   */
+  static async serveFile(req, res) {
+    const { key } = req.query;
+    if (!key) return res.status(400).json({ error: 'Paramètre "key" manquant.' });
+
+    try {
+      const decodedKey = decodeURIComponent(key);
+      const command = new GetObjectCommand({ Bucket: S3_BUCKET, Key: decodedKey });
+      const data = await s3Client.send(command);
+
+      // Propager les headers utiles
+      if (data.ContentType)   res.set('Content-Type',   data.ContentType);
+      if (data.ContentLength) res.set('Content-Length', String(data.ContentLength));
+      res.set('Cache-Control', 'public, max-age=3600');
+
+      // Pipe directement le stream S3 vers le client
+      data.Body.pipe(res);
+    } catch (err) {
+      console.error('[UploadController] serveFile error:', err.message);
+      return res.status(404).json({ error: 'Fichier introuvable.' });
     }
   }
 
