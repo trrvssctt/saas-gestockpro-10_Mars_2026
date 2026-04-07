@@ -214,6 +214,7 @@ export const authBridge = {
     }
 
     try {
+      //const response = await fetch('http://localhost:3000/api/auth/validate-session', {
       const response = await fetch('https://gestock.realtechprint.com/api/auth/validate-session', {
         method: 'POST',
         headers: {
