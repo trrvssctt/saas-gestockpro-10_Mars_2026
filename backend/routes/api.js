@@ -25,6 +25,7 @@ import { PaymentController } from '../controllers/PaymentController.js';
 import { AnnouncementController } from '../controllers/AnnouncementController.js';
 import hrRoutes from './hr.routes.js';
 import uploadRoutes from './upload.routes.js';
+import { UploadController } from '../controllers/UploadController.js';
 import contactRoutes, { adminRouter as contactAdminRoutes } from './contact.routes.js';
 import supportRoutes from './support.routes.js';
 import supplierRoutes from './suppliers.routes.js';
@@ -48,6 +49,10 @@ router.get('/plans', SubscriptionController.listPlans);
 router.post('/ai/bridge', AIController.bridgeWebhook);
 // Route publique pour l'envoi de messages de contact depuis la landing page
 router.use('/contact', contactRoutes);
+
+// Route publique pour servir les fichiers S3 (génère une URL signée + redirige)
+// DOIT être avant authenticateJWT pour que les <img src="/api/files?key=..."> fonctionnent
+router.get('/files', UploadController.serveFile);
 
 // --- PROTECTION JWT ---
 router.use(authenticateJWT);
