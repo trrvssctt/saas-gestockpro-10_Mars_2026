@@ -24,6 +24,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import HRModal from './HRModal';
 import { apiClient } from '../../services/api';
 import { authBridge } from '../../services/authBridge';
+import { uploadFile } from '../../services/uploadService';
 
 interface DocumentCenterProps {
   onNavigate: (tab: string, meta?: any) => void;
@@ -110,12 +111,6 @@ const DocumentCenter: React.FC<DocumentCenterProps> = ({ onNavigate }) => {
   const totalDocuments = documents.length;
   const averageDocSize = totalDocuments > 0 ? totalSize / totalDocuments : 0;
   
-  // Configuration Cloudinary
-  const CLOUDINARY_CONFIG = {
-    cloudName: 'dq7avew9h',
-    uploadPreset: 'ml_default',
-    apiUrl: 'https://api.cloudinary.com/v1_1/dq7avew9h/auto/upload'
-  };
 
   // Charger les documents
   const fetchDocuments = useCallback(async () => {
@@ -278,98 +273,27 @@ const DocumentCenter: React.FC<DocumentCenterProps> = ({ onNavigate }) => {
         throw new Error('Session expirée. Veuillez vous reconnecter.');
       }
       
-      // Tentative d'upload vers Cloudinary
-      try {
-        const cloudinaryData = new FormData();
-        cloudinaryData.append('file', uploadData.file);
-        cloudinaryData.append('upload_preset', CLOUDINARY_CONFIG.uploadPreset);
-        cloudinaryData.append('cloud_name', CLOUDINARY_CONFIG.cloudName);
-        cloudinaryData.append('resource_type', 'auto');
-        cloudinaryData.append('folder', 'employee_documents');
-        cloudinaryData.append('public_id', `doc_${Date.now()}`);
-        
-        const uploadResponse = await fetch(CLOUDINARY_CONFIG.apiUrl, {
-          method: 'POST',
-          body: cloudinaryData
-        });
-        
-        const uploadData_result = await uploadResponse.json();
-        
-        if (!uploadResponse.ok || !uploadData_result.secure_url) {
-          console.error('Erreur Cloudinary:', uploadData_result);
-          throw new Error(`Erreur Cloudinary: ${uploadData_result.error?.message || 'Upload impossible'}`);
-        }
+      // Upload vers S3 MamuteCloud via le backend
+      const uploadResult = await uploadFile(uploadData.file, 'employee_documents');
 
-        // Sauvegarder les métadonnées en base via l'API
-        const documentData = {
-          employeeId: uploadData.employeeId, // Utilisé comme UUID tel quel
-          name: uploadData.name.trim(),
-          type: uploadData.type || 'OTHER',
-          category: uploadData.category,
-          fileUrl: uploadData_result.secure_url,
-          mimeType: uploadData.file.type,
-          fileSize: uploadData_result.bytes,
-          cloudinaryId: uploadData_result.public_id
-        };
-        
-        await apiClient.post('/hr/employee-documents', documentData);
-        
-        setIsModalOpen(false);
-        setUploadData({
-          employeeId: '',
-          name: '',
-          type: '',
-          category: '',
-          file: null
-        });
-        setShowSuccessAlert(true);
-        setTimeout(() => setShowSuccessAlert(false), 3000);
-        
-        // Recharger la liste
-        fetchDocuments();
-        
-      } catch (cloudinaryError: any) {
-        console.error('Erreur Cloudinary, tentative upload local...', cloudinaryError);
-        
-        // Fallback: Upload vers le serveur local (comme dans EmployeeProfile.tsx)
-        const localFormData = new FormData();
-        localFormData.append('file', uploadData.file);
-        localFormData.append('employeeId', uploadData.employeeId);
-        localFormData.append('name', uploadData.name.trim());
-        localFormData.append('type', uploadData.type || 'OTHER');
-        localFormData.append('category', uploadData.category);
-        
-        const backendUrl = (import.meta as any).env?.VITE_BACKEND_URL || 
-                         (window.location.origin.includes('localhost') ? 'http://localhost:3000' : window.location.origin);
-        const apiUrl = backendUrl.endsWith('/api') ? backendUrl : `${backendUrl}/api`;
-        
-        const localUploadResponse = await fetch(`${apiUrl}/hr/employee-documents/upload-local`, {
-          method: 'POST',
-          body: localFormData,
-          headers: {
-            'Authorization': `Bearer ${session.token}`
-          }
-        });
-        
-        if (!localUploadResponse.ok) {
-          const errorData = await localUploadResponse.json().catch(() => ({}));
-          throw new Error(errorData.message || errorData.error || 'Erreur lors de l\'upload local');
-        }
-        
-        setIsModalOpen(false);
-        setUploadData({
-          employeeId: '',
-          name: '',
-          type: '',
-          category: '',
-          file: null
-        });
-        setShowSuccessAlert(true);
-        setTimeout(() => setShowSuccessAlert(false), 3000);
-        
-        // Recharger la liste
-        fetchDocuments();
-      }
+      // Sauvegarder les métadonnées en base via l'API
+      const documentData = {
+        employeeId: uploadData.employeeId,
+        name: uploadData.name.trim(),
+        type: uploadData.type || 'OTHER',
+        category: uploadData.category,
+        fileUrl: uploadResult.url,
+        mimeType: uploadData.file.type,
+        fileSize: uploadData.file.size
+      };
+
+      await apiClient.post('/hr/employee-documents', documentData);
+
+      setIsModalOpen(false);
+      setUploadData({ employeeId: '', name: '', type: '', category: '', file: null });
+      setShowSuccessAlert(true);
+      setTimeout(() => setShowSuccessAlert(false), 3000);
+      fetchDocuments();
       
     } catch (error: any) {
       console.error('Erreur lors de l\'upload:', error);
