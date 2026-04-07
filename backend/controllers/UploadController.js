@@ -1,10 +1,7 @@
 import multer from 'multer';
-import { uploadToS3, getStorageInfo, s3Client } from '../services/S3Service.js';
+import { uploadToS3, getStorageInfo, s3Client, getS3Config } from '../services/S3Service.js';
 import { GetObjectCommand } from '@aws-sdk/client-s3';
 import { Tenant } from '../models/Tenant.js';
-import process from 'node:process';
-
-const S3_BUCKET = process.env.S3_BUCKET || 'bucket-gestockpro';
 
 // Multer en mémoire — pas de disque, tout passe en buffer vers S3
 const upload = multer({
@@ -94,7 +91,8 @@ export class UploadController {
 
     try {
       const decodedKey = decodeURIComponent(key);
-      const command = new GetObjectCommand({ Bucket: S3_BUCKET, Key: decodedKey });
+      const { bucket } = getS3Config();
+      const command = new GetObjectCommand({ Bucket: bucket, Key: decodedKey });
       const data = await s3Client.send(command);
 
       // Propager les headers utiles
