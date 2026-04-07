@@ -86,6 +86,22 @@ export class AdminController {
       };
       const totalChequesPending = parseFloat(await Payment.sum('amount', { where: chequesPendingWhere }) || 0);
 
+      // ── Revenus SaaS abonnements (paiements sans vente liée = paiements d'abonnement) ────
+      // Ces paiements ont saleId IS NULL. COMPLETED = encaissé, PENDING = en attente de validation.
+      const subsCollectedWhere = {
+        saleId: null,
+        status: { [Op.in]: ['COMPLETED', 'PAID'] },
+        ...(periodStart ? { createdAt: { [Op.gte]: periodStart, [Op.lt]: periodEnd } } : {})
+      };
+      const totalSubscriptionRevenue = parseFloat(await Payment.sum('amount', { where: subsCollectedWhere }) || 0);
+
+      const subsPendingWhere = {
+        saleId: null,
+        status: 'PENDING',
+        ...(periodStart ? { createdAt: { [Op.gte]: periodStart, [Op.lt]: periodEnd } } : {})
+      };
+      const totalSubscriptionPending = parseFloat(await Payment.sum('amount', { where: subsPendingWhere }) || 0);
+
       // ── Créances : dettes non réglées à la fin de la période ────────────
       // On charge TOUTES les ventes créées avant la fin de la période,
       // et les paiements reçus avant la fin de la période pour calculer le solde réel.
@@ -316,7 +332,8 @@ export class AdminController {
           totalTenants, activeTenants, mrr, latePayments, pendingSub,
           totalSalesCount, totalRevenue, totalCollected, totalChequesPending, totalUnpaid,
           overdueCount, customersCount, stocksTotal, stocksRupture,
-          stocksLow, categoriesCount, subcategoriesCount, usersCount
+          stocksLow, categoriesCount, subcategoriesCount, usersCount,
+          totalSubscriptionRevenue, totalSubscriptionPending
         },
         topDebtors,
         latestPayments: latestPayments.map(p => ({ id: p.id, amount: p.amount, createdAt: p.createdAt, saleId: p.saleId, customer: p.Sale?.Customer?.companyName || null })),
