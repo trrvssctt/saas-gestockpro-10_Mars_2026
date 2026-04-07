@@ -1,5 +1,12 @@
 
-import 'dotenv/config'; // DOIT être le premier import — charge .env avant tout autre module
+// Charger .env depuis le dossier de server.js (pas depuis process.cwd())
+// Évite les problèmes quand PM2/systemd démarre depuis un autre répertoire
+import { config as loadEnv } from 'dotenv';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
+const __serverDir = dirname(fileURLToPath(import.meta.url));
+loadEnv({ path: join(__serverDir, '.env') });
+
 import express from 'express';
 import path from 'path';
 import cors from 'cors';
