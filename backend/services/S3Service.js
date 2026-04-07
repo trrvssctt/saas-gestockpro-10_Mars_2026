@@ -8,18 +8,39 @@ import {
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { sequelize } from '../config/database.js';
 
-const S3_ENDPOINT  = process.env.S3_ENDPOINT  || 'https://s3-us-east-1.mamutecloud.com';
-const S3_REGION    = process.env.S3_REGION    || 'us-east-1';
-const S3_BUCKET    = process.env.S3_BUCKET    || 'bucket-gestockpro';
+export const getS3Config = () => {
+  const accessKeyId     = process.env.AWS_ACCESS_KEY_ID;
+  const secretAccessKey = process.env.AWS_SECRET_ACCESS_KEY;
+  const endpoint        = process.env.S3_ENDPOINT  || 'https://s3-us-east-1.mamutecloud.com';
+  const region          = process.env.S3_REGION    || 'us-east-1';
+  const bucket          = process.env.S3_BUCKET    || 'bucket-gestockpro';
 
-export const s3Client = new S3Client({
-  endpoint: S3_ENDPOINT,
-  region:   S3_REGION,
-  credentials: {
-    accessKeyId:     process.env.AWS_ACCESS_KEY_ID,
-    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY
-  },
-  forcePathStyle: true  // Obligatoire pour les S3-compatible (non-AWS)
+  if (!accessKeyId || !secretAccessKey) {
+    throw new Error(
+      `Variables S3 manquantes en production. ` +
+      `AWS_ACCESS_KEY_ID=${accessKeyId ? '✓' : '✗'} ` +
+      `AWS_SECRET_ACCESS_KEY=${secretAccessKey ? '✓' : '✗'}`
+    );
+  }
+
+  return { accessKeyId, secretAccessKey, endpoint, region, bucket };
+};
+
+// Lazy singleton — instancié à la première utilisation, pas au démarrage du module
+let _s3Client = null;
+export const s3Client = new Proxy({}, {
+  get(_, prop) {
+    if (!_s3Client) {
+      const { accessKeyId, secretAccessKey, endpoint, region } = getS3Config();
+      _s3Client = new S3Client({
+        endpoint,
+        region,
+        credentials: { accessKeyId, secretAccessKey },
+        forcePathStyle: true,
+      });
+    }
+    return _s3Client[prop];
+  }
 });
 
 /**
@@ -34,12 +55,12 @@ export const s3Client = new S3Client({
  * @returns {{ url: string, key: string, sizeBytes: number }}
  */
 export const uploadToS3 = async (fileBuffer, originalName, mimeType, tenantId, folder = 'uploads') => {
-  const ext       = originalName.split('.').pop() || '';
+  const { bucket } = getS3Config();
   const safeName  = originalName.replace(/[^a-zA-Z0-9._-]/g, '_');
   const key       = `${tenantId}/${folder}/${Date.now()}_${safeName}`;
 
   const command = new PutObjectCommand({
-    Bucket:      S3_BUCKET,
+    Bucket:      bucket,
     Key:         key,
     Body:        fileBuffer,
     ContentType: mimeType
@@ -58,7 +79,8 @@ export const uploadToS3 = async (fileBuffer, originalName, mimeType, tenantId, f
  * Génère une URL signée temporaire (1 heure) pour un objet privé.
  */
 export const getSignedObjectUrl = async (key, expiresIn = 3600) => {
-  const command = new GetObjectCommand({ Bucket: S3_BUCKET, Key: key });
+  const { bucket } = getS3Config();
+  const command = new GetObjectCommand({ Bucket: bucket, Key: key });
   return getSignedUrl(s3Client, command, { expiresIn });
 };
 
@@ -67,14 +89,15 @@ export const getSignedObjectUrl = async (key, expiresIn = 3600) => {
  */
 export const deleteFromS3 = async (key, tenantId) => {
   try {
+    const { bucket } = getS3Config();
     // Récupérer la taille avant suppression
     let sizeBytes = 0;
     try {
-      const head = await s3Client.send(new HeadObjectCommand({ Bucket: S3_BUCKET, Key: key }));
+      const head = await s3Client.send(new HeadObjectCommand({ Bucket: bucket, Key: key }));
       sizeBytes = head.ContentLength || 0;
     } catch (_) {}
 
-    await s3Client.send(new DeleteObjectCommand({ Bucket: S3_BUCKET, Key: key }));
+    await s3Client.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
 
     if (tenantId && sizeBytes > 0) {
       await decrementStorageUsed(tenantId, sizeBytes);
