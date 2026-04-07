@@ -42,19 +42,16 @@ export const uploadToS3 = async (fileBuffer, originalName, mimeType, tenantId, f
     Bucket:      S3_BUCKET,
     Key:         key,
     Body:        fileBuffer,
-    ContentType: mimeType,
-    ACL:         'public-read'   // Accès public (fallback sur URL signée si ACL non supporté)
+    ContentType: mimeType
   });
 
   await s3Client.send(command);
 
-  // URL publique directe (path-style)
-  const url = `${S3_ENDPOINT}/${S3_BUCKET}/${key}`;
-
   // Mettre à jour le stockage utilisé par le tenant
   await incrementStorageUsed(tenantId, fileBuffer.length);
 
-  return { url, key, sizeBytes: fileBuffer.length };
+  // On retourne seulement la clé — l'URL proxy est construite par le contrôleur
+  return { key, sizeBytes: fileBuffer.length };
 };
 
 /**
