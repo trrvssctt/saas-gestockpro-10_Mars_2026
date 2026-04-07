@@ -244,7 +244,7 @@ const Checkout: React.FC<CheckoutProps> = ({ planId, user, planObj, isUpgrade = 
             <p className="text-[9px] font-black text-indigo-300 uppercase tracking-widest mb-3">Durée d'abonnement</p>
             <div className="flex flex-col gap-2">
               {PERIOD_OPTIONS.map(opt => {
-                const price = getPeriodPrice(plan?.price || 0, opt.id);
+                const price = getPeriodPrice(plan, opt.id);
                 return (
                   <button
                     key={opt.id}
