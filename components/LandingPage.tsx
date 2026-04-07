@@ -92,6 +92,8 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLogin }) => {
     phone: '',
     message: ''
   });
+  // Champ honeypot anti-bot (doit rester vide)
+  const [honeypot, setHoneypot] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitStatus, setSubmitStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const [submitMessage, setSubmitMessage] = useState('');
@@ -108,7 +110,10 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLogin }) => {
   // Fonction pour envoyer le message de contact
   const handleContactSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
+    // Honeypot : si ce champ est rempli, c'est un bot — on abandonne silencieusement
+    if (honeypot.trim() !== '') return;
+
     // Validation basique côté client
     if (!contactForm.fullName.trim() || contactForm.fullName.trim().length < 2) {
       setSubmitStatus('error');
@@ -138,7 +143,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLogin }) => {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(contactForm),
+        body: JSON.stringify({ ...contactForm, website: honeypot }),
       });
 
       const data = await response.json();
@@ -950,57 +955,74 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLogin }) => {
               )}
               
               <form onSubmit={handleContactSubmit} className="space-y-6">
+                {/* Honeypot anti-bot : caché visuellement, jamais rempli par un humain */}
+                <div style={{ position: 'absolute', left: '-9999px', width: '1px', height: '1px', overflow: 'hidden' }} aria-hidden="true">
+                  <label htmlFor="website">Ne pas remplir</label>
+                  <input
+                    id="website"
+                    type="text"
+                    name="website"
+                    value={honeypot}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setHoneypot(e.target.value)}
+                    tabIndex={-1}
+                    autoComplete="off"
+                  />
+                </div>
                 <div className="grid sm:grid-cols-2 gap-6">
                   <div className="space-y-2">
                     <label className="text-[10px] font-black uppercase tracking-widest text-slate-400" style={{ fontSize: '10px', fontWeight: '900', fontFamily: 'inherit' }}>Nom complet *</label>
-                    <input 
-                      type="text" 
+                    <input
+                      type="text"
                       name="fullName"
                       value={contactForm.fullName}
                       onChange={handleContactInputChange}
                       disabled={isSubmitting}
                       required
-                      className="w-full px-6 py-4 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-indigo-500 transition-all font-medium disabled:opacity-50 disabled:cursor-not-allowed" 
+                      maxLength={100}
+                      className="w-full px-6 py-4 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-indigo-500 transition-all font-medium disabled:opacity-50 disabled:cursor-not-allowed"
                       placeholder="Ex: Moussa Diop"
-                      style={{ fontSize: '14px', fontWeight: '500', fontFamily: 'inherit' }} 
+                      style={{ fontSize: '14px', fontWeight: '500', fontFamily: 'inherit' }}
                     />
                   </div>
                   <div className="space-y-2">
                     <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Email *</label>
-                    <input 
-                      type="email" 
+                    <input
+                      type="email"
                       name="email"
                       value={contactForm.email}
                       onChange={handleContactInputChange}
                       disabled={isSubmitting}
                       required
-                      className="w-full px-6 py-4 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-indigo-500 transition-all font-medium disabled:opacity-50 disabled:cursor-not-allowed" 
-                      placeholder="Ex: m.diop@tech.com" 
+                      maxLength={254}
+                      className="w-full px-6 py-4 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-indigo-500 transition-all font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                      placeholder="Ex: m.diop@tech.com"
                     />
                   </div>
                 </div>
                 <div className="space-y-2">
                   <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Téléphone</label>
-                  <input 
-                    type="tel" 
+                  <input
+                    type="tel"
                     name="phone"
                     value={contactForm.phone}
                     onChange={handleContactInputChange}
                     disabled={isSubmitting}
-                    className="w-full px-6 py-4 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-indigo-500 transition-all font-medium disabled:opacity-50 disabled:cursor-not-allowed" 
-                    placeholder="+221 ..." 
+                    maxLength={20}
+                    className="w-full px-6 py-4 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-indigo-500 transition-all font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                    placeholder="+221 ..."
                   />
                 </div>
                 <div className="space-y-2">
                   <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Message *</label>
-                  <textarea 
+                  <textarea
                     name="message"
                     value={contactForm.message}
                     onChange={handleContactInputChange}
                     disabled={isSubmitting}
                     required
-                    rows={4} 
-                    className="w-full px-6 py-4 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-indigo-500 transition-all font-medium resize-none disabled:opacity-50 disabled:cursor-not-allowed" 
+                    rows={4}
+                    maxLength={5000}
+                    className="w-full px-6 py-4 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-indigo-500 transition-all font-medium resize-none disabled:opacity-50 disabled:cursor-not-allowed"
                     placeholder="Comment pouvons-nous vous aider ?"
                   />
                 </div>
