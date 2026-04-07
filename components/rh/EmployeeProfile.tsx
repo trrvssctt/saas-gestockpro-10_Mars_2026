@@ -967,7 +967,8 @@ const EmployeeProfile: React.FC<EmployeeProfileProps> = ({ employeeId, onNavigat
         
         // Utiliser fetch directement pour éviter les problèmes de Content-Type avec FormData
         const session = authBridge.getSession();
-        const backendUrl = 'http://localhost:3000'; // Utiliser la même URL que dans api.ts
+        //const backendUrl = 'http://localhost:3000'; // Utiliser la même URL que dans api.ts
+        const backendUrl = 'https://gestock.realtechprint.com'; // Utiliser la même URL que dans api.ts
         const uploadResponse = await fetch(`${backendUrl}/api/hr/employee-documents/upload-local`, {
           method: 'POST',
           body: localFormData,
@@ -1707,6 +1708,47 @@ const EmployeeProfile: React.FC<EmployeeProfileProps> = ({ employeeId, onNavigat
   };
 
   // ──────────────────────────────────────────────────────────────────────────────
+  // Utilitaire : capture un élément DOM → PDF A4 avec numéros de page
+  // ──────────────────────────────────────────────────────────────────────────────
+  const domToPdfBlob = async (el: HTMLElement, bgColor = '#f8fafc', docLabel = ''): Promise<Blob> => {
+    const { default: jsPDFLib } = await import('jspdf');
+    const { default: h2c } = await import('html2canvas');
+
+    await new Promise(r => setTimeout(r, 200));
+
+    const canvas = await h2c(el, {
+      scale: 2,
+      useCORS: true,
+      allowTaint: true,
+      logging: false,
+      width: 820,
+      windowWidth: 820,
+      height: el.scrollHeight,
+      windowHeight: el.scrollHeight,
+      backgroundColor: bgColor,
+    });
+
+    const imgData = canvas.toDataURL('image/png');
+    const pdf = new jsPDFLib({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+    const pdfW = 210, pdfH = 297;
+    const imgH = (canvas.height * pdfW) / canvas.width;
+    const totalPages = Math.max(1, Math.ceil(imgH / pdfH));
+
+    for (let p = 0; p < totalPages; p++) {
+      if (p > 0) pdf.addPage();
+      pdf.addImage(imgData, 'PNG', 0, -(p * pdfH), pdfW, imgH);
+      // Numéro de page centré en bas
+      pdf.setFontSize(7.5);
+      pdf.setTextColor(160, 160, 160);
+      const pageText = docLabel
+        ? `${docLabel}  —  Page ${p + 1} / ${totalPages}`
+        : `Page ${p + 1} / ${totalPages}`;
+      pdf.text(pageText, 105, 292.5, { align: 'center' });
+    }
+    return pdf.output('blob') as Blob;
+  };
+
+  // ──────────────────────────────────────────────────────────────────────────────
   // Téléchargement du dossier complet (ZIP)
   // ──────────────────────────────────────────────────────────────────────────────
   const handleDownloadDossierComplet = async () => {
@@ -1718,113 +1760,128 @@ const EmployeeProfile: React.FC<EmployeeProfileProps> = ({ employeeId, onNavigat
 
       const empName = `${employee.firstName}_${employee.lastName}`;
       const currency = contract?.currency || 'F CFA';
+      const today = new Date().toLocaleDateString('fr-FR', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+      const dept = departments.find((d: any) => d.id === employee.departmentId)?.name || 'Non spécifié';
 
       // ── 1. Fiche identitaire ──────────────────────────────────────────────
-      const dept = departments.find((d: any) => d.id === employee.departmentId)?.name || 'Non spécifié';
-      const profileHtml = `<!DOCTYPE html>
-<html lang="fr">
-<head>
-<meta charset="UTF-8"/>
-<title>Profil - ${employee.firstName} ${employee.lastName}</title>
-<style>
-  *{box-sizing:border-box;margin:0;padding:0}
-  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f8fafc;color:#1e293b;padding:40px}
-  .card{background:#fff;border-radius:24px;padding:40px;max-width:800px;margin:0 auto;box-shadow:0 4px 24px rgba(0,0,0,.07)}
-  h1{font-size:28px;font-weight:900;color:#0f172a;margin-bottom:4px}
-  .subtitle{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:2px;color:#6366f1;margin-bottom:32px}
-  .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:24px}
-  .field label{font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:1.5px;color:#94a3b8;display:block;margin-bottom:4px}
-  .field p{font-size:15px;font-weight:700;color:#1e293b}
-  .section-title{font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:2px;color:#6366f1;border-bottom:2px solid #e0e7ff;padding-bottom:8px;margin:28px 0 16px}
-  .badge{display:inline-block;padding:4px 14px;border-radius:999px;font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:1px}
-  .badge-active{background:#dcfce7;color:#16a34a}
-  .badge-inactive{background:#fee2e2;color:#dc2626}
-  .badge-info{background:#e0e7ff;color:#4338ca}
-  .footer{margin-top:40px;padding-top:20px;border-top:1px solid #e2e8f0;text-align:center;font-size:11px;color:#94a3b8}
-</style>
-</head>
-<body>
-<div class="card">
-  <h1>${employee.firstName} ${employee.lastName}</h1>
-  <p class="subtitle">${employee.position || 'Employé'} — ${dept}</p>
-  <p class="section-title">Informations personnelles</p>
-  <div class="grid">
-    <div class="field"><label>Email</label><p>${employee.email || '—'}</p></div>
-    <div class="field"><label>Téléphone</label><p>${employee.phone || '—'}</p></div>
-    <div class="field"><label>Adresse</label><p>${employee.address || '—'}</p></div>
-    <div class="field"><label>Date d'embauche</label><p>${employee.hireDate ? new Date(employee.hireDate).toLocaleDateString('fr-FR',{year:'numeric',month:'long',day:'numeric'}) : '—'}</p></div>
-    <div class="field"><label>Numéro employé</label><p>${employee.employeeNumber || '—'}</p></div>
-    <div class="field"><label>Statut</label><p><span class="badge ${employee.status === 'ACTIVE' ? 'badge-active' : 'badge-inactive'}">${employee.status || '—'}</span></p></div>
+      const profileEl = document.createElement('div');
+      profileEl.style.cssText = 'position:fixed;left:-10000px;top:0;z-index:-1;width:820px;padding:48px;box-sizing:border-box;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#1e293b;font-size:13px;line-height:1.5;';
+      const logoHtml = tenant?.logoUrl
+        ? `<img src="${tenant.logoUrl}" style="height:52px;width:auto;object-fit:contain;margin-bottom:10px;max-width:180px;" />`
+        : `<div style="font-size:20px;font-weight:900;color:#4f46e5;text-transform:uppercase;letter-spacing:-0.5px;margin-bottom:6px;">${tenant?.name || 'GESTOCKPRO'}</div>`;
+      const statusBg = employee.status === 'ACTIVE' ? '#dcfce7' : '#fee2e2';
+      const statusClr = employee.status === 'ACTIVE' ? '#16a34a' : '#dc2626';
+      profileEl.innerHTML = `
+<div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid #0f172a;padding-bottom:28px;margin-bottom:36px;">
+  <div>${logoHtml}<div style="font-size:8.5px;font-weight:700;text-transform:uppercase;color:#64748b;line-height:1.9;margin-top:4px;">
+    ${tenant?.address ? `<div>${tenant.address}</div>` : ''}
+    ${tenant?.phone ? `<div>Tél : ${tenant.phone}</div>` : ''}
+    ${tenant?.email ? `<div>${tenant.email}</div>` : ''}
+    ${tenant?.registrationNumber ? `<div>RCCM : ${tenant.registrationNumber}</div>` : ''}
+  </div></div>
+  <div style="text-align:right;">
+    <h1 style="font-size:24px;font-weight:900;color:#0f172a;text-transform:uppercase;letter-spacing:-0.5px;margin:0 0 8px;">FICHE EMPLOYÉ</h1>
+    <span style="font-size:9px;font-weight:700;color:#6366f1;background:#e0e7ff;padding:4px 14px;border-radius:8px;display:inline-block;">${today}</span>
   </div>
-  <p class="section-title">Contrat actif</p>
-  ${contract ? `
-  <div class="grid">
-    <div class="field"><label>Type</label><p><span class="badge badge-info">${contract.type}</span></p></div>
-    <div class="field"><label>Salaire de base</label><p>${formatAmount(contract.salary, currency)}</p></div>
-    <div class="field"><label>Date de début</label><p>${contract.startDate ? new Date(contract.startDate).toLocaleDateString('fr-FR') : '—'}</p></div>
-    <div class="field"><label>Date de fin</label><p>${contract.endDate ? new Date(contract.endDate).toLocaleDateString('fr-FR') : 'Indéterminé'}</p></div>
-  </div>` : '<p style="color:#94a3b8;font-weight:700">Aucun contrat actif</p>'}
-  <p class="section-title">Bulletins de paie (${payslips.length})</p>
-  ${payslips.length > 0 ? `<table style="width:100%;border-collapse:collapse">
-    <thead><tr style="background:#0f172a;color:#fff">
-      <th style="padding:12px 16px;text-align:left;font-size:10px;letter-spacing:1px;border-radius:8px 0 0 0">Mois</th>
-      <th style="padding:12px 16px;text-align:right;font-size:10px;letter-spacing:1px">Net à payer</th>
-      <th style="padding:12px 16px;text-align:center;font-size:10px;letter-spacing:1px;border-radius:0 8px 0 0">Statut</th>
-    </tr></thead>
-    <tbody>${payslips.map(s => `<tr style="border-bottom:1px solid #e2e8f0">
-      <td style="padding:12px 16px;font-weight:700">${new Date(s.month+'-01').toLocaleDateString('fr-FR',{month:'long',year:'numeric'})}</td>
-      <td style="padding:12px 16px;text-align:right;font-weight:900">${formatAmount(s.netSalary, currency)}</td>
-      <td style="padding:12px 16px;text-align:center"><span class="badge ${s.status==='VALIDATED'?'badge-active':'badge-info'}">${s.status||'—'}</span></td>
-    </tr>`).join('')}
-    </tbody>
-  </table>` : '<p style="color:#94a3b8;font-weight:700">Aucun bulletin disponible</p>'}
-  <div class="footer">Généré le ${new Date().toLocaleDateString('fr-FR',{weekday:'long',year:'numeric',month:'long',day:'numeric'})} — GeStockPro ERP</div>
 </div>
-</body></html>`;
-      zip.file(`01_Profil_${empName}.html`, profileHtml);
+<div style="margin-bottom:28px;">
+  <h2 style="font-size:22px;font-weight:900;color:#0f172a;margin:0 0 4px;">${employee.firstName} ${employee.lastName}</h2>
+  <p style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:2px;color:#6366f1;margin:0 0 12px;">${employee.position || 'Employé'} — ${dept}</p>
+  <span style="display:inline-block;padding:4px 16px;border-radius:999px;font-size:9px;font-weight:900;text-transform:uppercase;background:${statusBg};color:${statusClr};">${employee.status === 'ACTIVE' ? 'Actif' : employee.status || '—'}</span>
+</div>
+<div style="font-size:8.5px;font-weight:900;text-transform:uppercase;letter-spacing:2px;color:#6366f1;border-bottom:2px solid #e0e7ff;padding-bottom:7px;margin:0 0 14px;">Informations personnelles</div>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px 20px;margin-bottom:28px;">
+  <div><div style="font-size:8px;font-weight:900;text-transform:uppercase;letter-spacing:1.5px;color:#94a3b8;margin-bottom:3px;">Email</div><div style="font-weight:700;">${employee.email || '—'}</div></div>
+  <div><div style="font-size:8px;font-weight:900;text-transform:uppercase;letter-spacing:1.5px;color:#94a3b8;margin-bottom:3px;">Téléphone</div><div style="font-weight:700;">${employee.phone || '—'}</div></div>
+  <div><div style="font-size:8px;font-weight:900;text-transform:uppercase;letter-spacing:1.5px;color:#94a3b8;margin-bottom:3px;">Adresse</div><div style="font-weight:700;">${employee.address || '—'}</div></div>
+  <div><div style="font-size:8px;font-weight:900;text-transform:uppercase;letter-spacing:1.5px;color:#94a3b8;margin-bottom:3px;">Date d'embauche</div><div style="font-weight:700;">${employee.hireDate ? new Date(employee.hireDate).toLocaleDateString('fr-FR',{year:'numeric',month:'long',day:'numeric'}) : '—'}</div></div>
+  <div><div style="font-size:8px;font-weight:900;text-transform:uppercase;letter-spacing:1.5px;color:#94a3b8;margin-bottom:3px;">N° Employé</div><div style="font-weight:700;">${employee.employeeNumber || '—'}</div></div>
+  <div><div style="font-size:8px;font-weight:900;text-transform:uppercase;letter-spacing:1.5px;color:#94a3b8;margin-bottom:3px;">Département</div><div style="font-weight:700;">${dept}</div></div>
+</div>
+<div style="font-size:8.5px;font-weight:900;text-transform:uppercase;letter-spacing:2px;color:#6366f1;border-bottom:2px solid #e0e7ff;padding-bottom:7px;margin:0 0 14px;">Contrat actif</div>
+${contract ? `<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px 20px;margin-bottom:28px;">
+  <div><div style="font-size:8px;font-weight:900;text-transform:uppercase;letter-spacing:1.5px;color:#94a3b8;margin-bottom:3px;">Type</div><div style="font-weight:700;">${contract.type}</div></div>
+  <div><div style="font-size:8px;font-weight:900;text-transform:uppercase;letter-spacing:1.5px;color:#94a3b8;margin-bottom:3px;">Salaire de base</div><div style="font-weight:700;">${formatAmount(contract.salary, currency)}</div></div>
+  <div><div style="font-size:8px;font-weight:900;text-transform:uppercase;letter-spacing:1.5px;color:#94a3b8;margin-bottom:3px;">Date de début</div><div style="font-weight:700;">${contract.startDate ? new Date(contract.startDate).toLocaleDateString('fr-FR') : '—'}</div></div>
+  <div><div style="font-size:8px;font-weight:900;text-transform:uppercase;letter-spacing:1.5px;color:#94a3b8;margin-bottom:3px;">Date de fin</div><div style="font-weight:700;">${contract.endDate ? new Date(contract.endDate).toLocaleDateString('fr-FR') : 'Durée indéterminée'}</div></div>
+</div>` : '<p style="color:#94a3b8;font-weight:700;margin-bottom:28px;">Aucun contrat actif</p>'}
+<div style="font-size:8.5px;font-weight:900;text-transform:uppercase;letter-spacing:2px;color:#6366f1;border-bottom:2px solid #e0e7ff;padding-bottom:7px;margin:0 0 14px;">Bulletins de paie (${payslips.length})</div>
+${payslips.length > 0 ? `<table style="width:100%;border-collapse:collapse;margin-bottom:28px;">
+  <thead><tr style="background:#0f172a;color:#fff;">
+    <th style="padding:10px 14px;text-align:left;font-size:8px;font-weight:900;letter-spacing:1.5px;text-transform:uppercase;">Mois</th>
+    <th style="padding:10px 14px;text-align:right;font-size:8px;font-weight:900;letter-spacing:1.5px;text-transform:uppercase;">Net à payer</th>
+    <th style="padding:10px 14px;text-align:center;font-size:8px;font-weight:900;letter-spacing:1.5px;text-transform:uppercase;">Statut</th>
+  </tr></thead>
+  <tbody>${payslips.map((s: any) => `<tr style="border-bottom:1px solid #e2e8f0;">
+    <td style="padding:10px 14px;font-weight:700;">${new Date(s.month+'-01').toLocaleDateString('fr-FR',{month:'long',year:'numeric'})}</td>
+    <td style="padding:10px 14px;text-align:right;font-weight:900;">${formatAmount(s.netSalary, currency)}</td>
+    <td style="padding:10px 14px;text-align:center;"><span style="display:inline-block;padding:2px 10px;border-radius:999px;font-size:8px;font-weight:900;text-transform:uppercase;background:${s.status==='VALIDATED'?'#dcfce7':'#e0e7ff'};color:${s.status==='VALIDATED'?'#16a34a':'#4338ca'};">${s.status||'—'}</span></td>
+  </tr>`).join('')}</tbody>
+</table>` : '<p style="color:#94a3b8;font-weight:700;margin-bottom:28px;">Aucun bulletin disponible</p>'}
+<div style="margin-top:28px;padding-top:14px;border-top:1px solid #e2e8f0;display:flex;justify-content:space-between;align-items:center;">
+  <span style="font-size:8px;color:#94a3b8;font-weight:700;text-transform:uppercase;letter-spacing:1px;">${tenant?.name || 'GeStockPro'} • Système RH</span>
+  <span style="font-size:8px;color:#94a3b8;font-weight:700;text-transform:uppercase;letter-spacing:1px;">Généré le ${today}</span>
+</div>`;
+      document.body.appendChild(profileEl);
+      const profilePdf = await domToPdfBlob(profileEl, '#f8fafc', `Fiche — ${employee.firstName} ${employee.lastName}`);
+      document.body.removeChild(profileEl);
+      zip.file(`01_Profil_${empName}.pdf`, profilePdf);
 
       // ── 2. Contrat actif ─────────────────────────────────────────────────
       if (contract) {
-        const contractHtml = `<!DOCTYPE html>
-<html lang="fr">
-<head>
-<meta charset="UTF-8"/>
-<title>Contrat - ${employee.firstName} ${employee.lastName}</title>
-<style>
-  *{box-sizing:border-box;margin:0;padding:0}
-  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f8fafc;color:#1e293b;padding:40px}
-  .card{background:#0f172a;border-radius:24px;padding:40px;max-width:800px;margin:0 auto}
-  h1{font-size:26px;font-weight:900;color:#fff;margin-bottom:4px}
-  .subtitle{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:2px;color:#6366f1;margin-bottom:32px}
-  .grid{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:28px}
-  .field label{font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:1.5px;color:rgba(255,255,255,.4);display:block;margin-bottom:4px}
-  .field p{font-size:15px;font-weight:700;color:#fff}
-  .section-title{font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:2px;color:rgba(255,255,255,.4);border-bottom:1px solid rgba(255,255,255,.1);padding-bottom:8px;margin:24px 0 16px}
-  .badge{display:inline-block;padding:5px 16px;border-radius:999px;font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:1px}
-  .badge-active{background:#dcfce7;color:#16a34a}
-  .salary{font-size:36px;font-weight:900;color:#fff;margin:8px 0}
-  .footer{margin-top:40px;padding-top:20px;border-top:1px solid rgba(255,255,255,.1);text-align:center;font-size:11px;color:rgba(255,255,255,.3)}
-</style>
-</head>
-<body>
-<div class="card">
-  <h1>Contrat de travail</h1>
-  <p class="subtitle">${employee.firstName} ${employee.lastName} — <span class="badge badge-active">${contract.status}</span></p>
-  <p class="section-title">Informations du contrat</p>
-  <div class="grid">
-    <div class="field"><label>Type de contrat</label><p>${contract.type}</p></div>
-    <div class="field"><label>Date de début</label><p>${contract.startDate ? new Date(contract.startDate).toLocaleDateString('fr-FR',{year:'numeric',month:'long',day:'numeric'}) : '—'}</p></div>
-    <div class="field"><label>Date de fin</label><p>${contract.endDate ? new Date(contract.endDate).toLocaleDateString('fr-FR',{year:'numeric',month:'long',day:'numeric'}) : 'Durée indéterminée'}</p></div>
-    ${contract.trialPeriodEnd ? `<div class="field"><label>Fin période d'essai</label><p>${new Date(contract.trialPeriodEnd).toLocaleDateString('fr-FR',{year:'numeric',month:'long',day:'numeric'})}</p></div>` : ''}
+        const contractEl = document.createElement('div');
+        contractEl.style.cssText = 'position:fixed;left:-10000px;top:0;z-index:-1;width:820px;padding:48px;box-sizing:border-box;min-height:1060px;background:#0f172a;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#fff;font-size:13px;line-height:1.5;';
+        const logoContractHtml = tenant?.logoUrl
+          ? `<img src="${tenant.logoUrl}" style="height:48px;width:auto;object-fit:contain;margin-bottom:10px;max-width:180px;filter:brightness(0) invert(1);" />`
+          : `<div style="font-size:20px;font-weight:900;color:#818cf8;text-transform:uppercase;letter-spacing:-0.5px;margin-bottom:6px;">${tenant?.name || 'GESTOCKPRO'}</div>`;
+        contractEl.innerHTML = `
+<div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:1px solid rgba(255,255,255,0.12);padding-bottom:28px;margin-bottom:36px;">
+  <div>${logoContractHtml}<div style="font-size:8.5px;font-weight:700;text-transform:uppercase;color:rgba(255,255,255,0.4);line-height:1.9;margin-top:4px;">
+    ${tenant?.address ? `<div>${tenant.address}</div>` : ''}
+    ${tenant?.phone ? `<div>Tél : ${tenant.phone}</div>` : ''}
+    ${tenant?.email ? `<div>${tenant.email}</div>` : ''}
+    ${tenant?.registrationNumber ? `<div>RCCM : ${tenant.registrationNumber}</div>` : ''}
+  </div></div>
+  <div style="text-align:right;">
+    <h1 style="font-size:22px;font-weight:900;color:#fff;text-transform:uppercase;letter-spacing:-0.5px;margin:0 0 8px;">CONTRAT DE TRAVAIL</h1>
+    <span style="font-size:9px;font-weight:700;color:#818cf8;background:rgba(99,102,241,0.2);padding:4px 14px;border-radius:8px;display:inline-block;">${today}</span>
   </div>
-  <p class="section-title">Rémunération</p>
-  <p class="salary">${formatAmount(contract.salary, currency)}</p>
-  <p style="color:rgba(255,255,255,.4);font-size:12px;font-weight:700">${currency} / mois brut</p>
-  ${contract.reason ? `<p class="section-title">Motif / Notes</p><p style="color:rgba(255,255,255,.7);font-size:14px;line-height:1.6">${contract.reason}</p>` : ''}
-  <div class="footer">Document généré le ${new Date().toLocaleDateString('fr-FR',{weekday:'long',year:'numeric',month:'long',day:'numeric'})} — GeStockPro ERP</div>
 </div>
-</body></html>`;
-        zip.file(`02_Contrat_${empName}.html`, contractHtml);
+<div style="margin-bottom:28px;">
+  <h2 style="font-size:22px;font-weight:900;color:#fff;margin:0 0 4px;">${employee.firstName} ${employee.lastName}</h2>
+  <p style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:2px;color:#818cf8;margin:0 0 12px;">${employee.position || 'Employé'}</p>
+  <span style="display:inline-block;padding:4px 16px;border-radius:999px;font-size:9px;font-weight:900;text-transform:uppercase;background:#dcfce7;color:#16a34a;">${contract.status || 'ACTIVE'}</span>
+</div>
+<div style="font-size:8.5px;font-weight:900;text-transform:uppercase;letter-spacing:2px;color:rgba(255,255,255,0.4);border-bottom:1px solid rgba(255,255,255,0.1);padding-bottom:7px;margin:0 0 14px;">Informations du contrat</div>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px 20px;margin-bottom:28px;">
+  <div><div style="font-size:8px;font-weight:900;text-transform:uppercase;letter-spacing:1.5px;color:rgba(255,255,255,0.35);margin-bottom:3px;">Type de contrat</div><div style="font-weight:700;color:#fff;">${contract.type}</div></div>
+  <div><div style="font-size:8px;font-weight:900;text-transform:uppercase;letter-spacing:1.5px;color:rgba(255,255,255,0.35);margin-bottom:3px;">Date de début</div><div style="font-weight:700;color:#fff;">${contract.startDate ? new Date(contract.startDate).toLocaleDateString('fr-FR',{year:'numeric',month:'long',day:'numeric'}) : '—'}</div></div>
+  <div><div style="font-size:8px;font-weight:900;text-transform:uppercase;letter-spacing:1.5px;color:rgba(255,255,255,0.35);margin-bottom:3px;">Date de fin</div><div style="font-weight:700;color:#fff;">${contract.endDate ? new Date(contract.endDate).toLocaleDateString('fr-FR',{year:'numeric',month:'long',day:'numeric'}) : 'Durée indéterminée'}</div></div>
+  ${contract.trialPeriodEnd ? `<div><div style="font-size:8px;font-weight:900;text-transform:uppercase;letter-spacing:1.5px;color:rgba(255,255,255,0.35);margin-bottom:3px;">Fin période d'essai</div><div style="font-weight:700;color:#fff;">${new Date(contract.trialPeriodEnd).toLocaleDateString('fr-FR',{year:'numeric',month:'long',day:'numeric'})}</div></div>` : ''}
+</div>
+<div style="font-size:8.5px;font-weight:900;text-transform:uppercase;letter-spacing:2px;color:rgba(255,255,255,0.4);border-bottom:1px solid rgba(255,255,255,0.1);padding-bottom:7px;margin:0 0 14px;">Rémunération</div>
+<p style="font-size:38px;font-weight:900;color:#fff;margin:6px 0 3px;">${formatAmount(contract.salary, currency)}</p>
+<p style="font-size:10px;font-weight:700;text-transform:uppercase;color:rgba(255,255,255,0.4);margin:0 0 28px;">${currency} / mois brut</p>
+${contract.reason ? `<div style="font-size:8.5px;font-weight:900;text-transform:uppercase;letter-spacing:2px;color:rgba(255,255,255,0.4);border-bottom:1px solid rgba(255,255,255,0.1);padding-bottom:7px;margin:0 0 14px;">Motif / Notes</div><p style="color:rgba(255,255,255,0.7);font-size:13px;line-height:1.6;margin-bottom:28px;">${contract.reason}</p>` : ''}
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:32px;margin-top:48px;padding-top:28px;border-top:1px solid rgba(255,255,255,0.1);">
+  <div>
+    <p style="font-size:8.5px;font-weight:900;text-transform:uppercase;letter-spacing:2px;color:rgba(255,255,255,0.4);margin-bottom:56px;">Signature de l'employé</p>
+    <div style="border-bottom:1px solid rgba(255,255,255,0.2);padding-bottom:4px;margin-bottom:6px;"></div>
+    <p style="font-size:9px;color:rgba(255,255,255,0.4);font-weight:700;">${employee.firstName} ${employee.lastName}</p>
+  </div>
+  <div>
+    <p style="font-size:8.5px;font-weight:900;text-transform:uppercase;letter-spacing:2px;color:rgba(255,255,255,0.4);margin-bottom:56px;">Signature &amp; cachet employeur</p>
+    <div style="border-bottom:1px solid rgba(255,255,255,0.2);padding-bottom:4px;margin-bottom:6px;"></div>
+    <p style="font-size:9px;color:rgba(255,255,255,0.4);font-weight:700;">${tenant?.name || 'Employeur'}</p>
+  </div>
+</div>
+<div style="margin-top:28px;text-align:center;">
+  <p style="font-size:7.5px;color:rgba(255,255,255,0.2);font-weight:700;text-transform:uppercase;letter-spacing:1px;">Document officiel — GeStockPro ERP • ${tenant?.name || ''}</p>
+</div>`;
+        document.body.appendChild(contractEl);
+        const contractPdf = await domToPdfBlob(contractEl, '#0f172a', `Contrat — ${employee.firstName} ${employee.lastName}`);
+        document.body.removeChild(contractEl);
+        zip.file(`02_Contrat_${empName}.pdf`, contractPdf);
       }
 
       // ── 3. Bulletins de paie ─────────────────────────────────────────────
@@ -1869,21 +1926,50 @@ const EmployeeProfile: React.FC<EmployeeProfileProps> = ({ employeeId, onNavigat
               currency
             };
 
-            // Rendre le composant PayslipPreview
+            // Rendre le composant PayslipPreview et capturer en PDF
+            const { default: jsPDFSlip } = await import('jspdf');
+            const { default: html2canvasSlip } = await import('html2canvas');
+
+            const slipStyleEl = document.createElement('style');
+            slipStyleEl.textContent = `body{margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;}${getPayslipStyles()}`;
+            document.head.appendChild(slipStyleEl);
+
             const container = document.createElement('div');
-            container.style.cssText = 'position:absolute;left:-10000px;top:-10000px';
+            container.style.cssText = 'position:fixed;left:-10000px;top:0;width:860px;background:#fff;z-index:-1';
             document.body.appendChild(container);
             const root = createRoot(container);
             root.render(React.createElement(PayslipPreview, { employee, contract, tenant, salaryCalculation: salaryCalc, month, year }));
-            await new Promise(r => setTimeout(r, 120));
-            const slipHtml = `<!DOCTYPE html>
-<html lang="fr"><head><meta charset="UTF-8"/><title>Bulletin ${monthLabel}/${year}</title>
-<style>body{margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;}${getPayslipStyles()}</style>
-</head><body>${container.innerHTML}</body></html>`;
+            await new Promise(r => setTimeout(r, 180));
+
+            const slipCanvas = await html2canvasSlip(container, {
+              scale: 2,
+              useCORS: true,
+              logging: false,
+              width: 860,
+              windowWidth: 860,
+              backgroundColor: '#ffffff',
+            });
+
             root.unmount();
             document.body.removeChild(container);
+            document.head.removeChild(slipStyleEl);
 
-            bulletinsFolder?.file(`Bulletin_${monthLabel}_${year}.html`, slipHtml);
+            const slipImgData = slipCanvas.toDataURL('image/png');
+            const slipPdf = new jsPDFSlip({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+            const spW = 210, spH = 297;
+            const spImgH = (slipCanvas.height * spW) / slipCanvas.width;
+            let spLeft = spImgH;
+            let spY = 0;
+            slipPdf.addImage(slipImgData, 'PNG', 0, spY, spW, spImgH);
+            spLeft -= spH;
+            while (spLeft > 0) {
+              spY -= spH;
+              slipPdf.addPage();
+              slipPdf.addImage(slipImgData, 'PNG', 0, spY, spW, spImgH);
+              spLeft -= spH;
+            }
+            const slipPdfBlob = slipPdf.output('blob') as Blob;
+            bulletinsFolder?.file(`Bulletin_${monthLabel}_${year}.pdf`, slipPdfBlob);
           } catch (slipErr) {
             console.warn('Erreur bulletin', slip.month, slipErr);
           }
@@ -1913,12 +1999,11 @@ const EmployeeProfile: React.FC<EmployeeProfileProps> = ({ employeeId, onNavigat
 Généré le ${new Date().toLocaleDateString('fr-FR', { weekday:'long', year:'numeric', month:'long', day:'numeric' })}
 
 Contenu du dossier :
-  01_Profil_${empName}.html     — Fiche identitaire complète
-  02_Contrat_${empName}.html    — Contrat de travail actif
-  03_Bulletins/                 — Bulletins de paie (${payslips.length} bulletin${payslips.length > 1 ? 's' : ''})
+  01_Profil_${empName}.pdf      — Fiche identitaire complète
+  02_Contrat_${empName}.pdf     — Contrat de travail actif
+  03_Bulletins/                 — Bulletins de paie en PDF (${payslips.length} bulletin${payslips.length > 1 ? 's' : ''})
   04_Documents/                 — Documents RH uploadés (${documents.length} fichier${documents.length > 1 ? 's' : ''})
 
-Ouvrir les fichiers .html dans un navigateur pour afficher ou imprimer en PDF.
 GeStockPro ERP — Tous droits réservés`);
 
       // ── 6. Générer et télécharger le ZIP ─────────────────────────────────
