@@ -94,6 +94,67 @@ export const connectDB = async () => {
       console.warn('⚠️ Note colonne storage_used_bytes:', storageErr.message);
     }
 
+    // Colonnes suspension de compte (idempotent)
+    try {
+      await sequelize.query(`
+        ALTER TABLE tenants
+          ADD COLUMN IF NOT EXISTS is_suspended BOOLEAN NOT NULL DEFAULT false,
+          ADD COLUMN IF NOT EXISTS suspended_at TIMESTAMPTZ,
+          ADD COLUMN IF NOT EXISTS suspension_reason TEXT;
+      `, { type: QueryTypes.RAW });
+      console.log('✅ Colonnes suspension compte vérifiées');
+    } catch (suspendErr) {
+      console.warn('⚠️ Note colonnes suspension:', suspendErr.message);
+    }
+
+    // Évolutions table backups : tenant_id nullable (backups système) + retain_until + storage_path
+    try {
+      await sequelize.query(`
+        ALTER TABLE IF EXISTS backups
+          ALTER COLUMN tenant_id DROP NOT NULL,
+          ADD COLUMN IF NOT EXISTS retain_until TIMESTAMPTZ,
+          ADD COLUMN IF NOT EXISTS storage_path VARCHAR(500);
+      `, { type: QueryTypes.RAW });
+      console.log('✅ Table backups mise à jour (tenant_id nullable, retain_until, storage_path)');
+    } catch (backupErr) {
+      console.warn('⚠️ Note table backups:', backupErr.message);
+    }
+
+    // Ajout valeur DELETION à l'enum type des backups (idempotent via DO $$)
+    try {
+      await sequelize.query(`
+        DO $$
+        BEGIN
+          IF NOT EXISTS (
+            SELECT 1 FROM pg_enum
+            JOIN pg_type ON pg_enum.enumtypid = pg_type.oid
+            WHERE pg_type.typname = 'enum_backups_type'
+              AND pg_enum.enumlabel = 'DELETION'
+          ) THEN
+            ALTER TYPE "enum_backups_type" ADD VALUE 'DELETION';
+          END IF;
+        END$$;
+      `, { type: QueryTypes.RAW });
+      console.log('✅ Valeur DELETION ajoutée à enum_backups_type');
+    } catch (enumErr) {
+      console.warn('⚠️ Note enum backups type:', enumErr.message);
+    }
+
+    // Colonnes suppression planifiée du compte (idempotent)
+    try {
+      await sequelize.query(`
+        ALTER TABLE tenants
+          ADD COLUMN IF NOT EXISTS pending_deletion      BOOLEAN NOT NULL DEFAULT false,
+          ADD COLUMN IF NOT EXISTS deletion_requested_at TIMESTAMPTZ,
+          ADD COLUMN IF NOT EXISTS deletion_scheduled_for TIMESTAMPTZ,
+          ADD COLUMN IF NOT EXISTS deletion_reason        TEXT,
+          ADD COLUMN IF NOT EXISTS deletion_backup_path   VARCHAR(500);
+      `, { type: QueryTypes.RAW });
+      console.log('✅ Colonnes suppression compte vérifiées');
+    } catch (delErr) {
+      console.warn('⚠️ Note colonnes deletion:', delErr.message);
+    }
+
     // Garantir la création et les colonnes de pointage (idempotent)
     try {
       await sequelize.query(`
@@ -293,13 +354,33 @@ export const connectDB = async () => {
       console.warn('⚠️ Note colonnes paiement chèque:', chqErr.message);
     }
 
-    // Correction historique : les paiements non-chèque existants ont statut='PENDING' (défaut)
+    // Ajouter BROUILLON à l'enum des statuts de vente (idempotent)
+    try {
+      await sequelize.query(`
+        DO $$
+        BEGIN
+          IF NOT EXISTS (
+            SELECT 1 FROM pg_enum
+            JOIN pg_type ON pg_enum.enumtypid = pg_type.oid
+            WHERE pg_type.typname = 'enum_sales_status' AND pg_enum.enumlabel = 'BROUILLON'
+          ) THEN
+            ALTER TYPE "enum_sales_status" ADD VALUE 'BROUILLON';
+          END IF;
+        END$$;
+      `, { type: QueryTypes.RAW });
+      console.log('✅ Valeur BROUILLON ajoutée à enum_sales_status');
+    } catch (brouillonErr) {
+      console.warn('⚠️ Note enum BROUILLON:', brouillonErr.message);
+    }
+
+    // Correction historique : les paiements ni CHEQUE ni TRANSFER existants avec statut PENDING
     // → les passer à PAID car ils ont toujours été encaissés immédiatement
+    // TRANSFER est désormais traité comme CHEQUE (PENDING jusqu'à encaissement)
     try {
       await sequelize.query(`
         UPDATE payments
         SET statut = 'PAID'
-        WHERE method != 'CHEQUE'
+        WHERE method NOT IN ('CHEQUE', 'TRANSFER')
           AND (statut IS NULL OR statut = 'PENDING');
       `, { type: QueryTypes.RAW });
       console.log('✅ Statuts paiements historiques corrigés');
