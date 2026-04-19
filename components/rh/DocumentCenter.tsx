@@ -1,13 +1,12 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { 
-  FolderOpen, 
-  Search, 
-  Filter, 
-  Download, 
-  Plus, 
-  MoreVertical, 
-  FileText, 
+import {
+  FolderOpen,
+  Search,
+  Filter,
+  Download,
+  Plus,
+  FileText,
   ArrowLeft,
   CheckCircle2,
   AlertCircle,
@@ -18,13 +17,15 @@ import {
   Eye,
   Users,
   Loader2,
-  Upload
+  Upload,
+  Lock,
+  Send
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import HRModal from './HRModal';
 import { apiClient } from '../../services/api';
 import { authBridge } from '../../services/authBridge';
-import { uploadFile } from '../../services/uploadService';
+import { uploadFile, getStorageUsage, StorageInfo } from '../../services/uploadService';
 
 interface DocumentCenterProps {
   onNavigate: (tab: string, meta?: any) => void;
@@ -91,7 +92,15 @@ const DocumentCenter: React.FC<DocumentCenterProps> = ({ onNavigate }) => {
   const [showErrorModal, setShowErrorModal] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [documentToDelete, setDocumentToDelete] = useState<EmployeeDocument | null>(null);
-  
+
+  // État quota de stockage
+  const [storageInfo, setStorageInfo] = useState<(StorageInfo & { documentQuotaBytes?: number; documentQuotaExceeded?: boolean; documentUsedPercent?: number }) | null>(null);
+  const [quotaExceeded, setQuotaExceeded] = useState(false);
+  const [showStorageRequestModal, setShowStorageRequestModal] = useState(false);
+  const [storageRequestMsg, setStorageRequestMsg] = useState('');
+  const [requestingStorage, setRequestingStorage] = useState(false);
+  const [storageRequestSent, setStorageRequestSent] = useState(false);
+
   // État pour le formulaire d'upload
   const [uploadData, setUploadData] = useState<UploadFormData>({
     employeeId: '',
@@ -157,11 +166,46 @@ const DocumentCenter: React.FC<DocumentCenterProps> = ({ onNavigate }) => {
     }
   }, []);
 
+  // Charger le quota de stockage réel depuis l'API
+  const fetchStorageInfo = useCallback(async () => {
+    try {
+      const info = await getStorageUsage() as StorageInfo & {
+        documentQuotaBytes?: number;
+        documentQuotaExceeded?: boolean;
+        documentUsedPercent?: number;
+      };
+      setStorageInfo(info);
+      setQuotaExceeded(info.documentQuotaExceeded ?? false);
+    } catch {
+      // Silencieux — le blocage backend reste actif
+    }
+  }, []);
+
+  // Soumettre la demande d'extension de stockage
+  const handleRequestStorage = async () => {
+    setRequestingStorage(true);
+    try {
+      await apiClient.post('/upload/request-storage', { message: storageRequestMsg });
+      setStorageRequestSent(true);
+      setTimeout(() => {
+        setShowStorageRequestModal(false);
+        setStorageRequestSent(false);
+        setStorageRequestMsg('');
+      }, 3000);
+    } catch (err: any) {
+      showStyledError(err.message || 'Erreur lors de l\'envoi de la demande.');
+      setShowStorageRequestModal(false);
+    } finally {
+      setRequestingStorage(false);
+    }
+  };
+
   // Charger les documents au montage et quand les filtres changent
   useEffect(() => {
     fetchDocuments();
     fetchEmployees();
-  }, [fetchDocuments, fetchEmployees]);
+    fetchStorageInfo();
+  }, [fetchDocuments, fetchEmployees, fetchStorageInfo]);
 
   // Reset page when filters change
   useEffect(() => {
@@ -348,45 +392,74 @@ const DocumentCenter: React.FC<DocumentCenterProps> = ({ onNavigate }) => {
             <ShieldCheck size={16} className="text-emerald-500" />
             <span className="text-[10px] font-black uppercase tracking-widest">Stockage Sécurisé AES-256</span>
           </div>
-          <button 
-            onClick={() => setIsModalOpen(true)}
-            className="px-6 py-3 bg-slate-900 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest flex items-center gap-2 hover:bg-indigo-600 transition-all shadow-xl active:scale-95"
+          <button
+            onClick={() => { if (!quotaExceeded) setIsModalOpen(true); else setShowStorageRequestModal(true); }}
+            className={`px-6 py-3 rounded-2xl font-black text-[10px] uppercase tracking-widest flex items-center gap-2 transition-all shadow-xl active:scale-95 ${
+              quotaExceeded
+                ? 'bg-rose-500 text-white hover:bg-rose-600 cursor-not-allowed'
+                : 'bg-slate-900 text-white hover:bg-indigo-600'
+            }`}
           >
-            <Plus size={16} /> Ajouter un Fichier
+            {quotaExceeded ? <Lock size={16} /> : <Plus size={16} />}
+            {quotaExceeded ? 'Quota Atteint' : 'Ajouter un Fichier'}
           </button>
         </div>
       </div>
 
-      {/* Storage Overview */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-        <div className="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm">
-          <div className="flex items-center justify-between mb-4">
-            <div className="w-12 h-12 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center">
+      {/* Bannière quota atteint */}
+      <AnimatePresence>
+        {quotaExceeded && (
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            className="bg-rose-50 border border-rose-200 rounded-3xl p-6 flex flex-col md:flex-row items-center gap-4"
+          >
+            <div className="w-12 h-12 bg-rose-100 text-rose-500 rounded-2xl flex items-center justify-center shrink-0">
               <HardDrive size={24} />
             </div>
-            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
-              {(() => {
-                const totalUsed = documents.reduce((sum, doc) => sum + (doc.fileSize || 0), 0);
-                const maxStorage = 5 * 1024 * 1024 * 1024; // 5 GB
-                return Math.round((totalUsed / maxStorage) * 100);
-              })()}% utilisé
+            <div className="flex-1 text-center md:text-left">
+              <p className="text-sm font-black text-rose-800 uppercase tracking-tight">
+                Quota de stockage atteint — 5 Go utilisés
+              </p>
+              <p className="text-[10px] font-bold text-rose-600 mt-1">
+                Les nouveaux uploads sont bloqués. Demandez une extension d'espace pour continuer.
+              </p>
+            </div>
+            <button
+              onClick={() => setShowStorageRequestModal(true)}
+              className="px-6 py-3 bg-rose-500 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest flex items-center gap-2 hover:bg-rose-600 transition-all shadow-lg shrink-0"
+            >
+              <Send size={14} /> Demander plus d'espace
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Storage Overview */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+        <div className={`bg-white p-6 rounded-[2rem] border shadow-sm ${quotaExceeded ? 'border-rose-200' : 'border-slate-100'}`}>
+          <div className="flex items-center justify-between mb-4">
+            <div className={`w-12 h-12 rounded-2xl flex items-center justify-center ${quotaExceeded ? 'bg-rose-50 text-rose-500' : 'bg-indigo-50 text-indigo-600'}`}>
+              <HardDrive size={24} />
+            </div>
+            <span className={`text-[10px] font-black uppercase tracking-widest ${quotaExceeded ? 'text-rose-500' : 'text-slate-400'}`}>
+              {storageInfo ? storageInfo.documentUsedPercent : Math.round((storageInfo?.usedBytes ?? 0) / (5 * 1024 * 1024 * 1024) * 100)}% utilisé
             </span>
           </div>
           <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Stockage Utilisé</p>
           <p className="text-2xl font-black text-slate-900">
-            {formatFileSize(documents.reduce((sum, doc) => sum + (doc.fileSize || 0), 0))} / 5 GB
+            {storageInfo ? `${storageInfo.usedMB >= 1024 ? (storageInfo.usedMB / 1024).toFixed(2) + ' Go' : storageInfo.usedMB + ' Mo'}` : '…'} / 5 Go
           </p>
           <div className="mt-4 h-1.5 bg-slate-100 rounded-full overflow-hidden">
-            <div 
-              className="h-full bg-indigo-500 transition-all duration-500" 
-              style={{ 
-                width: `${Math.min(
-                  Math.round((documents.reduce((sum, doc) => sum + (doc.fileSize || 0), 0) / (5 * 1024 * 1024 * 1024)) * 100), 
-                  100
-                )}%` 
-              }}
-            ></div>
+            <div
+              className={`h-full transition-all duration-500 ${quotaExceeded ? 'bg-rose-500' : 'bg-indigo-500'}`}
+              style={{ width: `${Math.min(storageInfo?.documentUsedPercent ?? 0, 100)}%` }}
+            />
           </div>
+          {quotaExceeded && (
+            <p className="text-[9px] font-black text-rose-500 uppercase tracking-widest mt-2">⚠ Quota 5 Go atteint</p>
+          )}
         </div>
         
         {['Identité', 'Contrat', 'Diplôme'].map((cat, i) => {
@@ -879,6 +952,92 @@ const DocumentCenter: React.FC<DocumentCenterProps> = ({ onNavigate }) => {
             ⚠️ Cette action est irréversible
           </p>
         </div>
+      </HRModal>
+
+      {/* Modal demande d'extension de stockage */}
+      <HRModal
+        isOpen={showStorageRequestModal}
+        onClose={() => {
+          if (!requestingStorage) {
+            setShowStorageRequestModal(false);
+            setStorageRequestMsg('');
+            setStorageRequestSent(false);
+          }
+        }}
+        title="Demande d'extension de stockage"
+        size="sm"
+        footer={
+          storageRequestSent ? null : (
+            <div className="flex justify-end gap-4">
+              <button
+                onClick={() => {
+                  setShowStorageRequestModal(false);
+                  setStorageRequestMsg('');
+                }}
+                disabled={requestingStorage}
+                className="px-8 py-3 text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-slate-900 transition-all disabled:opacity-50"
+              >
+                Annuler
+              </button>
+              <button
+                onClick={handleRequestStorage}
+                disabled={requestingStorage}
+                className="px-8 py-3 bg-rose-500 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-rose-600 transition-all shadow-xl disabled:opacity-50 flex items-center gap-2"
+              >
+                {requestingStorage ? (
+                  <><Loader2 size={14} className="animate-spin" /> Envoi en cours…</>
+                ) : (
+                  <><Send size={14} /> Envoyer la demande</>
+                )}
+              </button>
+            </div>
+          )
+        }
+      >
+        {storageRequestSent ? (
+          <div className="text-center py-8">
+            <div className="w-16 h-16 bg-emerald-100 text-emerald-500 rounded-full flex items-center justify-center mx-auto mb-4">
+              <CheckCircle2 size={32} />
+            </div>
+            <h3 className="text-lg font-black text-slate-900 mb-2 uppercase tracking-tight">Demande envoyée !</h3>
+            <p className="text-sm text-slate-500 font-medium">
+              Notre équipe traitera votre demande sous 24h.
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-6 py-2">
+            <div className="bg-rose-50 border border-rose-200 rounded-2xl p-4 flex items-start gap-3">
+              <HardDrive size={18} className="text-rose-500 shrink-0 mt-0.5" />
+              <div>
+                <p className="text-xs font-black text-rose-800 uppercase tracking-tight mb-1">
+                  Quota de 5 Go atteint
+                </p>
+                <p className="text-[10px] text-rose-600 font-bold">
+                  Utilisation actuelle : {storageInfo
+                    ? (storageInfo.usedMB >= 1024
+                      ? (storageInfo.usedMB / 1024).toFixed(2) + ' Go'
+                      : storageInfo.usedMB + ' Mo')
+                    : '–'} / 5 Go
+                </p>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                Message (optionnel)
+              </label>
+              <textarea
+                className="w-full px-5 py-4 bg-slate-50 border border-slate-100 rounded-2xl focus:ring-2 focus:ring-rose-400 transition-all font-medium text-sm resize-none"
+                rows={4}
+                placeholder="Décrivez vos besoins (ex. : volume estimé, contexte métier…)"
+                value={storageRequestMsg}
+                onChange={(e) => setStorageRequestMsg(e.target.value)}
+              />
+            </div>
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+              Un ticket de support sera automatiquement créé et transmis à notre équipe.
+            </p>
+          </div>
+        )}
       </HRModal>
     </div>
   );

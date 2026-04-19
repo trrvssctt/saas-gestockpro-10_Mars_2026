@@ -160,7 +160,8 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
       const session = authBridge.getSession();
       const token = session?.token;
 
-      const url = new URL('http://localhost:3000/api/hr/payslips/download-all-zip');
+      //const url = new URL('http://localhost:3000/api/hr/payslips/download-all-zip');
+      const url = new URL('https://gestock.realtechprint.com/api/hr/payslips/download-all-zip');
       url.searchParams.set('month', month);
 
       const response = await fetch(url.toString(), {
@@ -485,16 +486,20 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
       const grossSalary = baseSalary + totalPrimes;
       const socialChargeRate = validateAmount(payrollSettings?.employeeSocialChargeRate) || 8.2;
       const employerChargeRate = validateAmount(payrollSettings?.employerSocialChargeRate) || 18.5;
+      const taxRate = validateAmount(payrollSettings?.taxRate) || 10.0;
       const socialChargesEmployee = Math.round(grossSalary * socialChargeRate) / 100;
       const socialChargesEmployer = Math.round(grossSalary * employerChargeRate) / 100;
+      // Impôt sur le revenu (base imposable = brut - charges sociales salarié)
+      const taxableBase = Math.max(0, grossSalary - socialChargesEmployee);
+      const incomeTax = Math.round(taxableBase * taxRate) / 100;
       // Calculer les déductions mensuelles des avances correctement
       const totalAdvanceDeductions = employeeAdvances.reduce((sum, a) => {
-        const monthlyDeduction = validateAmount(a.monthlyDeduction) > 0 
+        const monthlyDeduction = validateAmount(a.monthlyDeduction) > 0
           ? validateAmount(a.monthlyDeduction)
           : validateAmount(a.amount) / Math.max(1, a.months || 1);
         return sum + monthlyDeduction;
       }, 0);
-      const netSalary = grossSalary - socialChargesEmployee - totalAdvanceDeductions;
+      const netSalary = Math.max(0, grossSalary - socialChargesEmployee - incomeTax - totalAdvanceDeductions);
       
       // Préparer les données pour PayslipPreview
       const payslipData = {
@@ -531,6 +536,8 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
           socialChargesEmployee: socialChargesEmployee,
           socialChargesEmployer: socialChargesEmployer,
           totalAdvanceDeductions: totalAdvanceDeductions,
+          incomeTax: incomeTax,
+          ruleDeductions: 0,
           currency: payrollSettings?.currency || 'F CFA'
         },
         month: currentPeriod.month,
@@ -569,7 +576,8 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
       const session = authBridge.getSession();
       const token = session?.token;
       
-      const url = new URL('http://localhost:3000/api/hr/payslips/download');
+      const url = new URL('https://gestock.realtechprint.com/api/hr/payslips/download');
+      //const url = new URL('http://localhost:3000/api/hr/payslips/download');
       url.searchParams.set('employeeId', payslip.employeeId);
       url.searchParams.set('month', payslip.month);
       url.searchParams.set('format', format);

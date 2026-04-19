@@ -3,7 +3,7 @@ import {
   Clock, LogIn, LogOut, CheckCircle2, AlertCircle, Loader2,
   Calendar, Timer, Sun, Moon, Coffee, TrendingUp, History,
   ArrowLeft, RefreshCw, Zap, TrendingDown, Scale, ChevronDown, ChevronUp,
-  Plus, FileText, XCircle, Send
+  Plus, FileText, XCircle, Send, Umbrella, X
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { apiClient } from '../../services/api';
@@ -94,6 +94,12 @@ const EmployeePointage: React.FC<EmployeePointageProps> = ({ onNavigate }) => {
   const [otLoading,        setOtLoading]       = useState(false);
   const [otForm,           setOtForm]          = useState({ requestedDate: '', startTime: '', endTime: '', reason: '' });
 
+  // Justification d'absence par congé
+  const [justifyRecord,    setJustifyRecord]   = useState<AttendanceRecord | null>(null);
+  const [justifyType,      setJustifyType]     = useState<string>('PAID');
+  const [justifyReason,    setJustifyReason]   = useState<string>('');
+  const [justifyLoading,   setJustifyLoading]  = useState(false);
+
   const session   = authBridge.getSession();
   const userName  = (session?.user as any)?.firstName || (session?.user as any)?.name || 'Employé';
 
@@ -102,29 +108,6 @@ const EmployeePointage: React.FC<EmployeePointageProps> = ({ onNavigate }) => {
     const id = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(id);
   }, []);
-
-  // ── auto clock-out check every minute ───────────────────────────────────────
-  useEffect(() => {
-    if (!settings?.deductionEnabled || !today?.clockIn || today.clockOut) return;
-
-    const checkAutoClockout = async () => {
-      const [hEnd, mEnd] = (settings.workEndTime || '17:00').split(':').map(Number);
-      const endToday = new Date();
-      endToday.setHours(hEnd, mEnd, 0, 0);
-
-      if (new Date() >= endToday) {
-        try {
-          await apiClient.post('/hr/attendance/auto-clockout', {});
-          await loadData();
-          showToast('Dépointage automatique effectué à ' + settings.workEndTime, true);
-        } catch { /* silencieux */ }
-      }
-    };
-
-    checkAutoClockout(); // immediate check on mount
-    const id = setInterval(checkAutoClockout, 60_000);
-    return () => clearInterval(id);
-  }, [settings, today]);
 
   // ── load ────────────────────────────────────────────────────────────────────
   const loadData = useCallback(async () => {
@@ -171,7 +154,35 @@ const EmployeePointage: React.FC<EmployeePointageProps> = ({ onNavigate }) => {
     }
   };
 
+  const handleJustifyAbsence = async () => {
+    if (!justifyRecord) return;
+    setJustifyLoading(true);
+    try {
+      await apiClient.post('/hr/leaves/my/justify-absence', {
+        type:   justifyType,
+        date:   justifyRecord.date,
+        reason: justifyReason.trim() || undefined,
+      });
+      showToast('Demande de justification envoyée — en attente d\'approbation', true);
+      setJustifyRecord(null);
+      setJustifyReason('');
+      setJustifyType('PAID');
+      await loadData();
+    } catch (err: any) {
+      showToast(err.message || 'Erreur lors de l\'envoi', false);
+    } finally {
+      setJustifyLoading(false);
+    }
+  };
+
   useEffect(() => { loadData(); }, [loadData]);
+
+  // Le dépointage automatique est géré côté serveur (cron toutes les minutes).
+  // On rafraîchit les données toutes les 2 minutes pour refléter un éventuel auto-dépointage.
+  useEffect(() => {
+    const id = setInterval(() => { loadData(); }, 120_000);
+    return () => clearInterval(id);
+  }, [loadData]);
 
   // ── toast ───────────────────────────────────────────────────────────────────
   const showToast = (msg: string, ok: boolean) => {
@@ -216,6 +227,18 @@ const EmployeePointage: React.FC<EmployeePointageProps> = ({ onNavigate }) => {
   const lateMinutes = today?.meta?.lateMinutes ?? 0;
   const isLate      = lateMinutes > 0;
 
+  // ── Vérification plage horaire ──────────────────────────────────────────────
+  const workHoursStatus = (() => {
+    if (!settings) return 'ok';
+    const [sh, sm] = settings.workStartTime.split(':').map(Number);
+    const [eh, em] = settings.workEndTime.split(':').map(Number);
+    const currentMin = now.getHours() * 60 + now.getMinutes();
+    if (currentMin < sh * 60 + sm) return 'before';
+    if (currentMin > eh * 60 + em) return 'after';
+    return 'ok';
+  })();
+  const outsideWorkHours = workHoursStatus !== 'ok';
+
   const workingMinutes = (() => {
     if (!today?.clockIn) return 0;
     const from = new Date(today.clockIn).getTime();
@@ -249,6 +272,114 @@ const EmployeePointage: React.FC<EmployeePointageProps> = ({ onNavigate }) => {
             className={`fixed top-6 left-1/2 -translate-x-1/2 z-[200] px-8 py-4 rounded-2xl shadow-2xl flex items-center gap-3 font-black uppercase text-[10px] tracking-widest ${toast.ok ? 'bg-emerald-500 text-white' : 'bg-rose-500 text-white'}`}
           >
             {toast.ok ? <CheckCircle2 size={18} /> : <AlertCircle size={18} />} {toast.msg}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ── Modale justification absence ── */}
+      <AnimatePresence>
+        {justifyRecord && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[300] bg-black/50 flex items-end sm:items-center justify-center p-4"
+            onClick={e => { if (e.target === e.currentTarget) setJustifyRecord(null); }}
+          >
+            <motion.div
+              initial={{ y: 60, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: 60, opacity: 0 }}
+              className="bg-white rounded-[2rem] w-full max-w-md shadow-2xl overflow-hidden"
+            >
+              {/* En-tête */}
+              <div className="bg-indigo-600 px-6 py-5 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <Umbrella size={18} className="text-indigo-200" />
+                  <span className="text-xs font-black text-white uppercase tracking-widest">Justifier une absence</span>
+                </div>
+                <button
+                  onClick={() => setJustifyRecord(null)}
+                  className="w-8 h-8 rounded-xl bg-white/20 hover:bg-white/30 flex items-center justify-center transition-colors"
+                >
+                  <X size={14} className="text-white" />
+                </button>
+              </div>
+
+              {/* Corps */}
+              <div className="p-6 space-y-5">
+                {/* Date de l'absence */}
+                <div className="bg-rose-50 border border-rose-100 rounded-2xl px-5 py-4">
+                  <p className="text-[9px] font-black text-rose-400 uppercase tracking-widest mb-1">Absence concernée</p>
+                  <p className="text-sm font-black text-rose-700">
+                    {new Date(justifyRecord.date + 'T00:00:00').toLocaleDateString('fr-FR', {
+                      weekday: 'long', day: 'numeric', month: 'long', year: 'numeric'
+                    })}
+                  </p>
+                </div>
+
+                <p className="text-[10px] font-bold text-slate-500 leading-relaxed">
+                  Cette absence sera convertie en demande de congé. Un jour sera déduit de votre solde si approuvé — et la retenue salariale n'aura pas lieu.
+                </p>
+
+                {/* Type de congé */}
+                <div className="space-y-2">
+                  <label className="text-[9px] font-black uppercase tracking-widest text-slate-400">
+                    Type de congé à imputer <span className="text-red-500">*</span>
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {[
+                      { value: 'PAID',      label: 'Congé payé' },
+                      { value: 'ANNUAL',    label: 'Congé annuel' },
+                      { value: 'SICK',      label: 'Maladie' },
+                      { value: 'UNPAID',    label: 'Sans solde' },
+                    ].map(opt => (
+                      <button
+                        key={opt.value}
+                        onClick={() => setJustifyType(opt.value)}
+                        className={`px-4 py-3 rounded-2xl text-[9px] font-black uppercase tracking-widest border-2 transition-all ${
+                          justifyType === opt.value
+                            ? 'bg-indigo-600 text-white border-indigo-600'
+                            : 'bg-white text-slate-600 border-slate-200 hover:border-indigo-300'
+                        }`}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Motif optionnel */}
+                <div className="space-y-2">
+                  <label className="text-[9px] font-black uppercase tracking-widest text-slate-400">Motif (optionnel)</label>
+                  <textarea
+                    value={justifyReason}
+                    onChange={e => setJustifyReason(e.target.value)}
+                    rows={2}
+                    placeholder="Ex : rendez-vous médical, urgence familiale…"
+                    className="w-full px-4 py-3 bg-slate-50 border border-slate-100 rounded-2xl font-medium text-sm focus:ring-2 focus:ring-indigo-500 outline-none resize-none"
+                  />
+                </div>
+
+                {/* Actions */}
+                <div className="flex gap-3 pt-1">
+                  <button
+                    onClick={handleJustifyAbsence}
+                    disabled={justifyLoading}
+                    className="flex-1 flex items-center justify-center gap-2 py-4 bg-indigo-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-indigo-700 transition-all disabled:opacity-50"
+                  >
+                    {justifyLoading ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+                    Envoyer la demande
+                  </button>
+                  <button
+                    onClick={() => setJustifyRecord(null)}
+                    className="px-5 py-4 bg-slate-100 text-slate-600 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-slate-200 transition-all"
+                  >
+                    Annuler
+                  </button>
+                </div>
+              </div>
+            </motion.div>
           </motion.div>
         )}
       </AnimatePresence>
@@ -395,12 +526,29 @@ const EmployeePointage: React.FC<EmployeePointageProps> = ({ onNavigate }) => {
                 </div>
               )}
 
+              {/* Message hors heures de travail */}
+              {outsideWorkHours && state !== 'done' && settings && (
+                <div className="flex items-center gap-3 px-5 py-4 bg-amber-50 border border-amber-200 rounded-2xl">
+                  <AlertCircle size={16} className="text-amber-500 shrink-0" />
+                  <div>
+                    <p className="text-[10px] font-black text-amber-700 uppercase tracking-widest">
+                      {workHoursStatus === 'before'
+                        ? `Pointage disponible à partir de ${settings.workStartTime}`
+                        : `Heures de travail terminées à ${settings.workEndTime}`}
+                    </p>
+                    <p className="text-[9px] text-amber-600 mt-0.5">
+                      Plage autorisée : {settings.workStartTime} – {settings.workEndTime}
+                    </p>
+                  </div>
+                </div>
+              )}
+
               {/* Boutons d'action */}
               {state === 'idle' && (
                 <button
                   onClick={handleClockIn}
-                  disabled={actionLoading}
-                  className="w-full py-5 bg-emerald-600 text-white rounded-2xl font-black text-sm uppercase tracking-widest hover:bg-emerald-700 transition-all shadow-xl flex items-center justify-center gap-3 disabled:opacity-50 active:scale-95"
+                  disabled={actionLoading || outsideWorkHours}
+                  className="w-full py-5 bg-emerald-600 text-white rounded-2xl font-black text-sm uppercase tracking-widest hover:bg-emerald-700 transition-all shadow-xl flex items-center justify-center gap-3 disabled:opacity-50 disabled:cursor-not-allowed active:scale-95"
                 >
                   {actionLoading ? <Loader2 size={20} className="animate-spin" /> : <LogIn size={20} />}
                   Pointer l'Arrivée
@@ -410,8 +558,8 @@ const EmployeePointage: React.FC<EmployeePointageProps> = ({ onNavigate }) => {
               {state === 'in' && (
                 <button
                   onClick={handleClockOut}
-                  disabled={actionLoading}
-                  className="w-full py-5 bg-rose-600 text-white rounded-2xl font-black text-sm uppercase tracking-widest hover:bg-rose-700 transition-all shadow-xl flex items-center justify-center gap-3 disabled:opacity-50 active:scale-95"
+                  disabled={actionLoading || outsideWorkHours}
+                  className="w-full py-5 bg-rose-600 text-white rounded-2xl font-black text-sm uppercase tracking-widest hover:bg-rose-700 transition-all shadow-xl flex items-center justify-center gap-3 disabled:opacity-50 disabled:cursor-not-allowed active:scale-95"
                 >
                   {actionLoading ? <Loader2 size={20} className="animate-spin" /> : <LogOut size={20} />}
                   Pointer le Départ
@@ -440,10 +588,10 @@ const EmployeePointage: React.FC<EmployeePointageProps> = ({ onNavigate }) => {
                   const wkMin = rec.clockIn && rec.clockOut
                     ? Math.floor((new Date(rec.clockOut).getTime() - new Date(rec.clockIn).getTime()) / 60000) : 0;
                   return (
-                    <div key={rec.id} className="flex items-center justify-between bg-white border border-slate-100 rounded-2xl px-5 py-4 shadow-sm">
+                    <div key={rec.id} className={`flex items-center justify-between bg-white border rounded-2xl px-5 py-4 shadow-sm ${rec.status === 'ABSENT' ? 'border-rose-100' : 'border-slate-100'}`}>
                       <div className="flex items-center gap-4">
-                        <div className="w-10 h-10 bg-slate-50 rounded-xl flex items-center justify-center">
-                          <Calendar size={16} className="text-slate-400" />
+                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${rec.status === 'ABSENT' ? 'bg-rose-50' : 'bg-slate-50'}`}>
+                          <Calendar size={16} className={rec.status === 'ABSENT' ? 'text-rose-400' : 'text-slate-400'} />
                         </div>
                         <div>
                           <p className="text-xs font-black text-slate-900 uppercase tracking-tight">{fmtDate(rec.date)}</p>
@@ -452,7 +600,7 @@ const EmployeePointage: React.FC<EmployeePointageProps> = ({ onNavigate }) => {
                           </p>
                         </div>
                       </div>
-                      <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-2">
                         {wkMin > 0 && (
                           <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest tabular-nums">
                             {Math.floor(wkMin/60)}h{String(wkMin%60).padStart(2,'0')}
@@ -461,6 +609,16 @@ const EmployeePointage: React.FC<EmployeePointageProps> = ({ onNavigate }) => {
                         <span className={`px-2.5 py-1 rounded-lg text-[8px] font-black uppercase tracking-widest border ${s.color}`}>
                           {s.label}
                         </span>
+                        {rec.status === 'ABSENT' && (
+                          <button
+                            onClick={() => { setJustifyRecord(rec); setJustifyType('PAID'); setJustifyReason(''); }}
+                            className="flex items-center gap-1 px-2.5 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 rounded-xl text-[8px] font-black uppercase tracking-widest border border-indigo-200 transition-all"
+                            title="Justifier cette absence par un congé"
+                          >
+                            <Umbrella size={10} />
+                            Justifier
+                          </button>
+                        )}
                       </div>
                     </div>
                   );

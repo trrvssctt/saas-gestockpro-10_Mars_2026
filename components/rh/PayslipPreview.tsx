@@ -9,6 +9,8 @@ interface SalaryCalculation {
   socialChargesEmployee: number;
   socialChargesEmployer: number;
   totalAdvanceDeductions: number;
+  incomeTax?: number;
+  ruleDeductions?: number;
   currency: string;
 }
 
@@ -232,15 +234,23 @@ const PayslipPreview: React.FC<PayslipPreviewProps> = ({
     });
   };
 
+  const incomeTaxAmt     = salary.incomeTax     ?? 0;
+  const ruleDeductionsAmt = salary.ruleDeductions ?? 0;
+
   // Toutes les lignes de rubriques dans l'ordre logique
-  const allRows: SalaryRow[] = [
+  const baseRows: SalaryRow[] = [
     { label: 'Salaire de base',           value: salary.baseSalary,            color: 'text-slate-900',   sign: '',  nature: 'Gain',    dotColor: 'bg-emerald-500' },
     { label: 'Primes du mois',            value: salary.totalPrimes,           color: 'text-emerald-600', sign: '+', nature: 'Gain',    dotColor: 'bg-emerald-500' },
     { label: 'Salaire Brut',              value: salary.grossSalary,           color: 'text-slate-900',   sign: '',  nature: 'Brut',    dotColor: 'bg-slate-400'   },
     { label: 'Charges sociales salarié',  value: salary.socialChargesEmployee, color: 'text-rose-600',    sign: '-', nature: 'Retenue', dotColor: 'bg-rose-500'    },
+    { label: 'Impôt sur le revenu',       value: incomeTaxAmt,                 color: 'text-rose-600',    sign: '-', nature: 'Retenue', dotColor: 'bg-rose-500'    },
     { label: 'Avances déduites',          value: salary.totalAdvanceDeductions,color: 'text-rose-600',    sign: '-', nature: 'Retenue', dotColor: 'bg-rose-500'    },
-    { label: 'Charges patronales (info)', value: salary.socialChargesEmployer, color: 'text-slate-500',   sign: '',  nature: 'Info',    dotColor: 'bg-slate-400'   },
   ];
+  if (ruleDeductionsAmt > 0) {
+    baseRows.push({ label: 'Déductions règles RH',     value: ruleDeductionsAmt,            color: 'text-rose-600',    sign: '-', nature: 'Retenue', dotColor: 'bg-rose-500'    });
+  }
+  baseRows.push({ label: 'Charges patronales (info)', value: salary.socialChargesEmployer, color: 'text-slate-500',   sign: '',  nature: 'Info',    dotColor: 'bg-slate-400'   });
+  const allRows: SalaryRow[] = baseRows;
 
   // Découpage en pages
   const pages: SalaryRow[][] = [];
