@@ -4,6 +4,7 @@ import { Router } from 'express';
 import { AdminController } from '../controllers/AdminController.js';
 import { SupportController } from '../controllers/SupportController.js';
 import { AnnouncementController } from '../controllers/AnnouncementController.js';
+import { BackupController } from '../controllers/BackupController.js';
 import { checkRole } from '../middlewares/rbac.js';
 
 
@@ -30,6 +31,12 @@ router.post('/tenants/:id/toggle-lock', AdminController.toggleTenantLock);
 router.post('/tenants/:id/subscription/validate', AdminController.validateSubscription);
 router.post('/tenants/:id/subscription/reject', AdminController.rejectSubscription);
 
+// ── Gestion des suppressions de compte ──
+// IMPORTANT : /tenants/pending-deletions AVANT /tenants/:id pour éviter le conflit de route
+router.get( '/tenants/pending-deletions',        checkRole(['SUPER_ADMIN']), AdminController.listPendingDeletions);
+router.post('/tenants/:id/force-delete',          checkRole(['SUPER_ADMIN']), AdminController.forceDeleteTenant);
+router.post('/tenants/:id/cancel-deletion',       checkRole(['SUPER_ADMIN']), AdminController.cancelTenantDeletion);
+
 // Plans CRUD
 router.get('/plans', AdminController.listPlans);
 router.post('/plans', AdminController.createPlan);
@@ -51,5 +58,14 @@ router.post('/announcements', AnnouncementController.create);
 router.patch('/announcements/:id', AnnouncementController.update);
 router.delete('/announcements/:id', AnnouncementController.remove);
 
+// ── Sauvegardes système (SUPER_ADMIN uniquement) ──
+// IMPORTANT : /backups/stats et /backups/trigger AVANT /backups/:id
+router.get(   '/backups/stats',         checkRole(['SUPER_ADMIN']), BackupController.getBackupStats);
+router.get(   '/backups',               checkRole(['SUPER_ADMIN']), BackupController.listBackups);
+router.post(  '/backups/trigger',       checkRole(['SUPER_ADMIN']), BackupController.triggerBackup);
+router.get(   '/backups/:id',           checkRole(['SUPER_ADMIN']), BackupController.getBackup);
+router.get(   '/backups/:id/download',  checkRole(['SUPER_ADMIN']), BackupController.downloadBackup);
+router.post(  '/backups/:id/restore',   checkRole(['SUPER_ADMIN']), BackupController.restoreBackup);
+router.delete('/backups/:id',           checkRole(['SUPER_ADMIN']), BackupController.deleteBackup);
 
 export default router;

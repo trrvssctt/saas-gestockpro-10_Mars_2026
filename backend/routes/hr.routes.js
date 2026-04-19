@@ -147,6 +147,7 @@ router.post('/overtime/:id/reject',     checkPermission(['ADMIN','HR_MANAGER']),
 router.post('/overtime/:id/complete',   checkPermission(['ADMIN','HR_MANAGER']),       OvertimeController.complete);
 
 // ========== LEAVES (CONGÉS) ==========
+router.post('/leaves/my/justify-absence', checkPermission(['ADMIN','HR_MANAGER','EMPLOYEE','STOCK_MANAGER','SALES','ACCOUNTANT']), LeaveController.justifyAbsence);
 router.get('/leaves', checkPermission(['ADMIN','HR_MANAGER','EMPLOYEE','STOCK_MANAGER','SALES','ACCOUNTANT']), LeaveController.list);
 router.post('/leaves', checkPermission(['ADMIN','HR_MANAGER','EMPLOYEE','STOCK_MANAGER','SALES','ACCOUNTANT']), leaveDocumentUpload, LeaveController.create);
 router.get('/leaves/:id', checkPermission(['ADMIN','HR_MANAGER','EMPLOYEE','STOCK_MANAGER','SALES','ACCOUNTANT']), LeaveController.get);

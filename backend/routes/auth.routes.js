@@ -1,18 +1,92 @@
 
 import { Router } from 'express';
+import rateLimit from 'express-rate-limit';
 import { AuthController } from '../controllers/AuthController.js';
 import { authenticateJWT } from '../middlewares/auth.js';
 import { checkRole } from '../middlewares/rbac.js';
+import { concurrentLimiter, deduplicateRequests, loginSlowDown, registerSlowDown } from '../middlewares/floodProtection.js';
 
 const router = Router();
 
+// ── Rate limiters anti-brute-force ────────────────────────────────────────────
+
+// Login : max 5 tentatives par IP toutes les 15 minutes
+const loginRateLimit = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  message: { error: "Trop de tentatives de connexion. Veuillez patienter 15 minutes avant de réessayer." },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// Login : max 3 tentatives par email toutes les 15 minutes (protection même si l'IP change)
+const loginEmailRateLimit = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 3,
+  keyGenerator: (req) => `email:${(req.body?.email || '').trim().toLowerCase()}`,
+  skip: (req) => !(req.body?.email || '').trim(),
+  message: { error: "Trop de tentatives pour cet identifiant. Veuillez patienter 15 minutes." },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// Register : max 3 inscriptions par IP par heure
+const registerRateLimit = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 3,
+  message: { error: "Trop de tentatives d'inscription depuis cette adresse. Veuillez patienter 1 heure." },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// Register : max 2 inscriptions par email par 24h (évite les doublons et abus)
+const registerEmailRateLimit = rateLimit({
+  windowMs: 24 * 60 * 60 * 1000,
+  max: 2,
+  keyGenerator: (req) => {
+    const email = req.body?.admin?.email || req.body?.email || '';
+    return `reg_email:${email.trim().toLowerCase()}`;
+  },
+  skip: (req) => !((req.body?.admin?.email || req.body?.email || '').trim()),
+  message: { error: "Une inscription a déjà été tentée avec cet email. Veuillez patienter 24 heures." },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 // --- ROUTES PUBLIQUES ---
-router.post('/login', AuthController.login);
-router.post('/register', AuthController.register);
+router.post('/login',
+  concurrentLimiter(3),
+  loginSlowDown,
+  loginRateLimit,
+  loginEmailRateLimit,
+  deduplicateRequests(5_000, ['email']),
+  AuthController.login
+);
+
+router.post('/register',
+  concurrentLimiter(2),
+  registerSlowDown,
+  registerRateLimit,
+  registerEmailRateLimit,
+  deduplicateRequests(10_000, ['companyName']),
+  AuthController.register
+);
+
 router.post('/register-stripe-init', AuthController.registerStripeInit);
 router.get('/register-check/:sessionId', AuthController.registerCheck);
-router.post('/superadmin/login', AuthController.superAdminLogin);
-router.post('/mfa/verify', AuthController.verifyMFA); // Nouveau flux MFA
+
+router.post('/superadmin/login',
+  concurrentLimiter(1),
+  loginSlowDown,
+  loginRateLimit,
+  AuthController.superAdminLogin
+);
+
+router.post('/mfa/verify',
+  concurrentLimiter(3),
+  loginSlowDown,
+  AuthController.verifyMFA
+);
 
 // --- ROUTES PROTÉGÉES (IAM) ---
 router.use(authenticateJWT);
@@ -27,7 +101,7 @@ router.get('/me', async (req, res) => {
     try {
       const { Tenant, Subscription } = await import('../models/index.js');
       const tenant = await Tenant.findByPk(user.tenantId, {
-        attributes: ['id', 'isActive', 'paymentStatus', 'plan', 'primaryColor', 'buttonColor', 'fontFamily', 'baseFontSize', 'theme']
+        attributes: ['id', 'isActive', 'paymentStatus', 'plan', 'primaryColor', 'buttonColor', 'fontFamily', 'baseFontSize', 'theme', 'isSuspended', 'suspendedAt', 'suspensionReason', 'pendingDeletion', 'deletionScheduledFor']
       });
       if (tenant) {
         tenantData = {
@@ -38,7 +112,12 @@ router.get('/me', async (req, res) => {
           buttonColor: tenant.buttonColor,
           fontFamily: tenant.fontFamily,
           baseFontSize: tenant.baseFontSize,
-          theme: tenant.theme
+          theme: tenant.theme,
+          isSuspended: !!tenant.isSuspended,
+          suspendedAt: tenant.suspendedAt || null,
+          suspensionReason: tenant.suspensionReason || null,
+          pendingDeletion: !!tenant.pendingDeletion,
+          deletionScheduledFor: tenant.deletionScheduledFor || null
         };
       }
       const sub = await Subscription.findOne({ where: { tenantId: user.tenantId } });
@@ -136,6 +215,11 @@ router.post('/users/:id/toggle-mfa', checkRole(['ADMIN']), AuthController.toggle
 
 // Changement de mot de passe (auto)
 router.post('/change-password', AuthController.changeOwnPassword);
+
+// Désactivation / réactivation / suppression du compte par l'administrateur
+router.post('/deactivate-account', AuthController.deactivateOwnAccount);
+router.post('/reactivate-account', AuthController.reactivateOwnAccount);
+router.delete('/delete-account', AuthController.deleteOwnAccount);
 
 // --- ROUTES DE GESTION DE SESSION ---
 router.post('/logout', AuthController.logout);

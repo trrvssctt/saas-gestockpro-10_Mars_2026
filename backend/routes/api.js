@@ -92,7 +92,19 @@ router.use('/admin/contact', contactAdminRoutes);
 router.get('/settings', tenantIsolation, checkPermission(['ADMIN', 'SALES', 'STOCK_MANAGER', 'ACCOUNTANT']), TenantController.getSettings);
 router.put('/settings', tenantIsolation, checkPermission(['ADMIN']), TenantController.updateSettings);
 
-// Route pour récupérer les informations du tenant 
+// Route pour récupérer les informations du tenant
 router.get('/tenant/info', tenantIsolation, checkPermission(['ADMIN', 'SALES', 'STOCK_MANAGER', 'ACCOUNTANT', 'EMPLOYEE']), TenantController.getSettings);
+
+// Suspension / Réactivation du compte par le tenant lui-même (ADMIN uniquement)
+// Note : ces routes n'utilisent PAS tenantIsolation pour que la réactivation soit possible même compte suspendu
+router.post('/tenant/suspend',    checkPermission(['ADMIN']), TenantController.suspendAccount);
+router.post('/tenant/reactivate', checkPermission(['ADMIN']), TenantController.reactivateAccount);
+
+// Suppression du compte (ADMIN uniquement)
+// - POST /tenant/delete-request  → demande de suppression (30j de délai)
+// - DELETE /tenant/delete-request → annulation de la demande pendant les 30j
+// Ces routes n'utilisent PAS tenantIsolation (le compte est déjà suspendu au moment de la demande)
+router.post(  '/tenant/delete-request', checkPermission(['ADMIN']), TenantController.requestDeletion);
+router.delete('/tenant/delete-request', checkPermission(['ADMIN']), TenantController.cancelDeletion);
 
 export default router;

@@ -3,6 +3,7 @@ import rateLimit from 'express-rate-limit';
 import { checkPermission } from '../middlewares/rbac.js';
 import { ContactMessage } from '../models/ContactMessage.js';
 import { Op } from 'sequelize';
+import { concurrentLimiter, deduplicateRequests, contactSlowDown } from '../middlewares/floodProtection.js';
 
 // Router principal pour les routes contact
 const router = express.Router();
@@ -13,13 +14,58 @@ const publicRouter = express.Router();
 // Router pour les routes admin (avec authentification)
 const adminRouter = express.Router();
 
-// Rate limiting pour éviter le spam sur le formulaire de contact
+// ── Emails et domaines bloqués ───────────────────────────────────────────────
+
+// Emails explicitement bannis (spam avéré)
+const BLOCKED_EMAILS = new Set([
+  'jm.koffi@agrobusiness.ci',
+  'moussa.diop@example.com',
+  'awa.ndiaye@fashion.sn',
+]);
+
+// Domaines de test / jetables / faux connus
+const BLOCKED_DOMAINS = new Set([
+  'example.com', 'example.org', 'example.net',
+  'test.com', 'test.org', 'test.net',
+  'localhost.com',
+  'mailinator.com', 'guerrillamail.com', 'tempmail.com',
+  'throwaway.email', 'yopmail.com', 'trashmail.com',
+  'maildrop.cc', 'discard.email', 'sharklasers.com',
+  'spam4.me', 'fakeinbox.com', 'mailnull.com',
+  'getairmail.com', 'dispostable.com', 'nospammail.net',
+]);
+
+// ── Rate limiting anti-spam — 2 couches ──────────────────────────────────────
+
+// Couche 1 : par IP — max 1 message par heure (réduit de 2 → 1)
 const contactRateLimit = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 3, // Maximum 3 messages par IP toutes les 15 minutes
+  windowMs: 60 * 60 * 1000, // 1 heure
+  max: 1,
   message: {
-    error: "Trop de messages envoyés. Veuillez patienter avant de renvoyer un message.",
-    retryAfter: 15 * 60 // en secondes
+    error: "Trop de messages envoyés depuis votre adresse. Veuillez patienter 1 heure avant de réessayer.",
+    retryAfter: 60 * 60
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+  skipSuccessfulRequests: false,
+});
+
+// Couche 2 : par email — max 1 message par email par 2 heures
+// Empêche le spam même si l'attaquant change d'IP.
+const contactEmailRateLimit = rateLimit({
+  windowMs: 2 * 60 * 60 * 1000, // 2 heures
+  max: 1,
+  keyGenerator: (req) => {
+    const email = (req.body?.email || '').trim().toLowerCase();
+    return `email:${email}`;
+  },
+  skip: (req) => {
+    // Pas d'email dans le body = pas de clé valide → on laisse passer (sera rejeté par validateContactMessage)
+    return !(req.body?.email || '').trim();
+  },
+  message: {
+    error: "Un message a déjà été envoyé depuis cette adresse email. Veuillez patienter 2 heures.",
+    retryAfter: 2 * 60 * 60
   },
   standardHeaders: true,
   legacyHeaders: false,
@@ -51,13 +97,31 @@ const validateContactMessage = (req, res, next) => {
     return res.status(400).json({ error: 'Le nom complet ne peut pas dépasser 100 caractères.' });
   }
 
-  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+  if (!email || !/^[^\s@]+@[^\s@]+\.[a-zA-Z]{2,}$/.test(email)) {
     return res.status(400).json({
       error: 'Une adresse email valide est requise.'
     });
   }
   if (email.trim().length > 254) {
     return res.status(400).json({ error: 'L\'adresse email ne peut pas dépasser 254 caractères.' });
+  }
+
+  // Vérification email explicitement banni
+  const normalizedEmail = email.trim().toLowerCase();
+  if (BLOCKED_EMAILS.has(normalizedEmail)) {
+    console.warn(`[CONTACT] Email banni bloqué: ${normalizedEmail}`);
+    return res.status(403).json({
+      error: 'Cette adresse email n\'est pas autorisée à envoyer des messages.'
+    });
+  }
+
+  // Vérification domaine jetable / de test
+  const emailDomain = normalizedEmail.split('@')[1];
+  if (BLOCKED_DOMAINS.has(emailDomain)) {
+    console.warn(`[CONTACT] Domaine suspect bloqué: ${emailDomain} (${normalizedEmail})`);
+    return res.status(400).json({
+      error: 'Veuillez utiliser une adresse email professionnelle valide. Les adresses temporaires ou de test ne sont pas acceptées.'
+    });
   }
 
   if (!message || message.trim().length < 10) {
@@ -94,12 +158,19 @@ const validateContactMessage = (req, res, next) => {
  * @desc Envoie un nouveau message de contact depuis la landing page
  * @access Public
  */
-publicRouter.post('/', contactRateLimit, validateContactMessage, async (req, res) => {
+publicRouter.post('/',
+  concurrentLimiter(2),
+  contactSlowDown,
+  contactRateLimit,
+  contactEmailRateLimit,
+  deduplicateRequests(15_000, ['email', 'message']),
+  validateContactMessage,
+  async (req, res) => {
   try {
     const { fullName, email, phone, message } = req.body;
     
     // Récupération des métadonnées de la requête
-    const ipAddress = req.ip || req.connection.remoteAddress || req.headers['x-forwarded-for'];
+    const ipAddress = req.ip || req.headers['x-forwarded-for'] || req.socket?.remoteAddress || 'unknown';
     const userAgent = req.get('User-Agent') || '';
     
     // Création du message avec Sequelize

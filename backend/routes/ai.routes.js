@@ -46,4 +46,11 @@ router.post('/export-pdf', checkPermission(['ADMIN', 'SALES', 'ACCOUNTANT', 'STO
  */
 router.post('/export-zip', checkPermission(['ADMIN', 'SALES', 'ACCOUNTANT', 'STOCK_MANAGER']), AIController.exportZip);
 
+/**
+ * @route GET /api/ai/payments
+ * @desc  Liste des virements (TRANSFER) et chèques (CHEQUE) du tenant
+ *        Query params : status (PENDING|PAID|ALL), method (TRANSFER|CHEQUE|ALL), limit, page
+ */
+router.get('/payments', checkPermission(['ADMIN', 'ACCOUNTANT', 'SALES']), AIController.getTransfersAndCheques);
+
 export default router;
