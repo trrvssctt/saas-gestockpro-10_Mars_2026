@@ -2,6 +2,10 @@ import multer from 'multer';
 import { uploadToS3, getStorageInfo, s3Client, getS3Config } from '../services/S3Service.js';
 import { GetObjectCommand } from '@aws-sdk/client-s3';
 import { Tenant } from '../models/Tenant.js';
+import { SupportTicket } from '../models/SupportTicket.js';
+
+// Quota universel documents (indépendant du plan d'abonnement)
+const DOCUMENT_QUOTA_BYTES = 5 * 1024 * 1024 * 1024; // 5 Go
 
 // Multer en mémoire — pas de disque, tout passe en buffer vers S3
 const upload = multer({
@@ -46,9 +50,22 @@ export class UploadController {
       const planId = tenant?.planId || 'BASIC';
       const storageInfo = await getStorageInfo(tenantId, planId);
 
+      // ── Quota documents universel : 5 Go ──────────────────────────────────
+      const usedBytes = parseInt(tenant?.storageUsedBytes || 0, 10);
+      if (usedBytes >= DOCUMENT_QUOTA_BYTES) {
+        return res.status(413).json({
+          error: 'STORAGE_QUOTA_EXCEEDED',
+          message: 'Votre quota de stockage de 5 Go est atteint. Veuillez demander une extension.',
+          usedBytes,
+          quotaBytes: DOCUMENT_QUOTA_BYTES,
+        });
+      }
+
+      // ── Vérification plan (espace restant dans le plan) ───────────────────
       if (req.file.size > storageInfo.remainingBytes && storageInfo.limitBytes > 0) {
         return res.status(413).json({
-          error: `Espace de stockage insuffisant. Il vous reste ${(storageInfo.remainingBytes / 1024 / 1024).toFixed(1)} Mo.`
+          error: 'PLAN_STORAGE_INSUFFICIENT',
+          message: `Espace de stockage insuffisant. Il vous reste ${(storageInfo.remainingBytes / 1024 / 1024).toFixed(1)} Mo.`,
         });
       }
 
@@ -118,8 +135,64 @@ export class UploadController {
       const tenant   = await Tenant.findByPk(tenantId, { attributes: ['planId', 'storageUsedBytes'] });
       const planId   = tenant?.planId || 'BASIC';
       const info     = await getStorageInfo(tenantId, planId);
-      return res.status(200).json(info);
+
+      // Enrichit la réponse avec le quota document universel (5 Go)
+      const usedBytes     = parseInt(tenant?.storageUsedBytes || 0, 10);
+      const quotaExceeded = usedBytes >= DOCUMENT_QUOTA_BYTES;
+
+      return res.status(200).json({
+        ...info,
+        documentQuotaBytes:    DOCUMENT_QUOTA_BYTES,
+        documentQuotaMB:       +(DOCUMENT_QUOTA_BYTES / 1024 / 1024).toFixed(0),
+        documentQuotaExceeded: quotaExceeded,
+        documentUsedPercent:   +((usedBytes / DOCUMENT_QUOTA_BYTES) * 100).toFixed(1),
+      });
     } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  }
+
+  /**
+   * POST /api/upload/request-storage
+   * Crée automatiquement un ticket de support pour demander plus d'espace.
+   */
+  static async requestStorageExtension(req, res) {
+    try {
+      const tenantId = req.user?.tenantId;
+      const userId   = req.user?.id;
+      if (!tenantId || !userId) {
+        return res.status(401).json({ error: 'Non authentifié.' });
+      }
+
+      const { message: customMessage } = req.body || {};
+
+      // Vérifier l'utilisation courante
+      const tenant    = await Tenant.findByPk(tenantId, { attributes: ['storageUsedBytes', 'name'] });
+      const usedBytes = parseInt(tenant?.storageUsedBytes || 0, 10);
+      const usedGB    = (usedBytes / 1024 / 1024 / 1024).toFixed(2);
+
+      const subject = `Demande d'extension de stockage — quota 5 Go atteint`;
+      const body    = customMessage?.trim()
+        || `Bonjour,\n\nNotre entreprise ("${tenant?.name || tenantId}") a atteint le quota de stockage de 5 Go (utilisation actuelle : ${usedGB} Go).\n\nNous souhaitons bénéficier d'une extension de stockage supplémentaire afin de continuer à gérer nos documents RH.\n\nMerci de traiter cette demande dans les meilleurs délais.`;
+
+      // Créer un ticket de support
+      const ticket = await SupportTicket.create({
+        tenantId,
+        userId,
+        subject,
+        message: body,
+        category: 'BILLING',
+        priority: 'NORMAL',
+        status: 'OPEN',
+      });
+
+      return res.status(201).json({
+        success: true,
+        ticketId: ticket.id,
+        message: 'Votre demande a bien été envoyée. Notre équipe vous contactera sous 24h.',
+      });
+    } catch (err) {
+      console.error('[UploadController] requestStorageExtension error:', err);
       return res.status(500).json({ error: err.message });
     }
   }

@@ -1,4 +1,5 @@
-import { Employee, Contract, Tenant, Department, Advance, Prime, PayrollSettings, HRRule } from '../models/index.js';
+import { Employee, Contract, Tenant, Department, Advance, Prime, PayrollSettings, HRRule, Attendance, Leave } from '../models/index.js';
+import { Op } from 'sequelize';
 import { PayslipGeneratorService } from '../services/PayslipGeneratorService.js';
 import fs from 'fs';
 import path from 'path';
@@ -61,9 +62,25 @@ export class PayslipController {
         fs.mkdirSync(payslipFolder, { recursive: true });
       }
 
+      // Paramètres de paie depuis PayrollSettings (taux réels configurés)
+      const [settings, hrRules] = await Promise.all([
+        PayrollSettings.findOne({ where: { tenantId } }),
+        HRRule.findAll({ where: { tenantId, isActive: true }, order: [['sort_order', 'ASC']] })
+      ]);
+
+      const empSocialRate    = parseFloat(settings?.employeeSocialChargeRate ?? 8.2) / 100;
+      const taxRate          = parseFloat(settings?.taxRate                  ?? 10.0) / 100;
+      const workingDaysMonth = parseInt(settings?.workingDaysPerMonth        ?? 26);
+      const deductionEnabled = settings?.deductionEnabled ?? false;
+      const currency         = settings?.currency || tenant.currency || 'F CFA';
+
+      const startH       = parseInt((settings?.workStartTime || '08:00').split(':')[0]);
+      const endH         = parseInt((settings?.workEndTime   || '17:00').split(':')[0]);
+      const dailyWorkHours = Math.max(1, endH - startH);
+
       // Récupérer tous les employés actifs avec leur contrat actif
       const employeesWithContracts = await Employee.findAll({
-        where: { 
+        where: {
           tenantId: tenantId,
           status: 'ACTIVE'
         },
@@ -76,12 +93,23 @@ export class PayslipController {
           },
           required: true, // INNER JOIN pour ne récupérer que les employés avec contrat actif
           order: [['startDate', 'DESC']] // Prendre le contrat le plus récent
+        },
+        {
+          model: Department,
+          as: 'departmentInfo',
+          required: false
         }]
       });
 
       if (employeesWithContracts.length === 0) {
         return res.status(404).json({ error: 'Aucun employé avec contrat actif trouvé' });
       }
+
+      // Primes et avances approuvées pour ce tenant
+      const [allPrimes, allAdvances] = await Promise.all([
+        Prime.findAll({ where: { tenantId, status: 'APPROVED' } }),
+        Advance.findAll({ where: { tenantId, status: 'APPROVED' } })
+      ]);
 
       const results = {
         success: [],
@@ -97,13 +125,13 @@ export class PayslipController {
       for (const employee of employeesWithContracts) {
         try {
           results.summary.totalProcessed++;
-          
+
           // Prendre le contrat le plus récent s'il y en a plusieurs actifs
           const contract = employee.contracts[0];
-          
-          // Calculer le salaire
+
+          // Calculer le salaire avec les vrais taux PayrollSettings
           const baseSalary = parseFloat(contract.salary) || 0;
-          
+
           if (baseSalary === 0) {
             results.errors.push({
               employeeId: employee.id,
@@ -113,28 +141,123 @@ export class PayslipController {
             results.summary.errorCount++;
             continue;
           }
-          
-          const allowances = baseSalary * 0.1;
-          const grossSalary = baseSalary + allowances;
-          const socialContributions = grossSalary * 0.20;
-          const incomeTax = Math.max(0, (grossSalary - 30000) * 0.15);
-          const totalDeductions = socialContributions + incomeTax;
-          const netSalary = grossSalary - totalDeductions;
 
-          // Générer le HTML de la fiche de paie avec style DocumentPreview
-          const htmlContent = await PayslipController.generatePayslipHTML({
+          // Primes et avances de cet employé
+          const empPrimes   = allPrimes.filter(p => p.employeeId === employee.id);
+          const empAdvances  = allAdvances.filter(a => a.employeeId === employee.id);
+
+          const totalPrimes = empPrimes.reduce((s, p) => s + parseFloat(p.amount || 0), 0);
+          const totalAdvanceDeductions = empAdvances.reduce((s, a) => {
+            const monthly = parseFloat(a.monthlyDeduction || 0) > 0
+              ? parseFloat(a.monthlyDeduction)
+              : parseFloat(a.amount || 0) / Math.max(1, parseInt(a.months) || 1);
+            return s + monthly;
+          }, 0);
+
+          const grossSalary = baseSalary + totalPrimes;
+
+          // Cotisations sociales et impôt selon PayrollSettings
+          const socialContributions = Math.round(grossSalary * empSocialRate);
+          const taxableBase  = Math.max(0, grossSalary - socialContributions);
+          const incomeTax    = Math.round(taxableBase * taxRate);
+
+          // Déductions règles RH si activé
+          let hrRulesDeduction = 0;
+          if (deductionEnabled && hrRules.length > 0) {
+            const dailyRate  = workingDaysMonth > 0 ? baseSalary / workingDaysMonth : 0;
+            const hourlyRate = dailyWorkHours   > 0 ? dailyRate  / dailyWorkHours   : 0;
+
+            // Plage du mois
+            const monthStart = new Date(`${year}-${monthNum.padStart(2, '0')}-01`);
+            const monthEnd   = new Date(monthStart);
+            monthEnd.setMonth(monthEnd.getMonth() + 1);
+            monthEnd.setDate(monthEnd.getDate() - 1);
+
+            // Pointages et congés approuvés de l'employé ce mois
+            const [empAttendances, approvedLeaves] = await Promise.all([
+              Attendance.findAll({
+                where: { employeeId: employee.id, tenantId, date: { [Op.between]: [monthStart, monthEnd] } }
+              }),
+              Leave.findAll({
+                where: { employeeId: employee.id, tenantId, status: 'APPROVED',
+                  startDate: { [Op.lte]: monthEnd }, endDate: { [Op.gte]: monthStart } }
+              })
+            ]);
+
+            // Jours en retard : toute durée > 0 min = 1 heure entière perdue
+            const lateDays = empAttendances.filter(a => (a.meta?.lateMinutes || 0) > 0).length;
+            const totalLateMinutes = lateDays * 60;
+
+            // Absences injustifiées
+            const attendanceDates = new Set(empAttendances.map(a => String(a.date).substring(0, 10)));
+            const leaveDates = new Set();
+            for (const lv of approvedLeaves) {
+              let d = new Date(lv.startDate);
+              const end = new Date(lv.endDate);
+              while (d <= end) { leaveDates.add(d.toISOString().substring(0, 10)); d.setDate(d.getDate() + 1); }
+            }
+            let unapprovedAbsences = 0;
+            let cur = new Date(monthStart);
+            while (cur <= monthEnd) {
+              const dow = cur.getDay();
+              if (dow !== 0 && dow !== 6) {
+                const ds = cur.toISOString().substring(0, 10);
+                if (!attendanceDates.has(ds) && !leaveDates.has(ds)) unapprovedAbsences++;
+              }
+              cur.setDate(cur.getDate() + 1);
+            }
+
+            const _cmpOp = (a, op, b) => ({ GT: a > b, GTE: a >= b, LT: a < b, LTE: a <= b, EQ: a === b }[op] ?? false);
+
+            for (const rule of hrRules) {
+              const av      = parseFloat(rule.actionValue   || 0);
+              const condVal = parseFloat(rule.conditionValue || 0);
+              const op      = rule.conditionOperator || 'GT';
+
+              if (rule.type === 'LATE') {
+                const compareVal = rule.conditionUnit === 'HOURS' ? lateDays : totalLateMinutes;
+                if (!_cmpOp(compareVal, op, condVal)) continue;
+                if (rule.actionType === 'DEDUCT_FIXED')            hrRulesDeduction += av * lateDays;
+                else if (rule.actionType === 'DEDUCT_SALARY_HOURS') hrRulesDeduction += av * hourlyRate * lateDays;
+                else if (rule.actionType === 'DEDUCT_SALARY_DAYS')  hrRulesDeduction += av * dailyRate  * lateDays;
+                else if (rule.actionType === 'DEDUCT_PERCENT')      hrRulesDeduction += baseSalary * (av / 100) * lateDays;
+
+              } else if (rule.type === 'ABSENCE' || rule.type === 'UNPAID_LEAVE') {
+                if (!_cmpOp(unapprovedAbsences, op, condVal)) continue;
+                if (rule.actionType === 'DEDUCT_FIXED')            hrRulesDeduction += av * unapprovedAbsences;
+                else if (rule.actionType === 'DEDUCT_SALARY_HOURS') hrRulesDeduction += av * hourlyRate * unapprovedAbsences;
+                else if (rule.actionType === 'DEDUCT_SALARY_DAYS')  hrRulesDeduction += av * dailyRate  * unapprovedAbsences;
+                else if (rule.actionType === 'DEDUCT_PERCENT')      hrRulesDeduction += baseSalary * (av / 100) * unapprovedAbsences;
+              }
+            }
+            hrRulesDeduction = Math.round(hrRulesDeduction);
+          }
+
+          const totalDeductions = socialContributions + incomeTax + Math.round(totalAdvanceDeductions) + hrRulesDeduction;
+          const netSalary = Math.max(0, grossSalary - totalDeductions);
+
+          // Générer le HTML de la fiche de paie (même template que downloadAllAsZip)
+          const htmlContent = PayslipController.generateZipPayslipHTML({
             employee,
             contract,
             tenant,
             month,
+            empPrimes,
+            empAdvances,
             calculations: {
               baseSalary,
-              allowances,
+              totalPrimes,
               grossSalary,
               socialContributions,
               incomeTax,
+              totalAdvanceDeductions: Math.round(totalAdvanceDeductions),
+              hrRulesDeduction,
               totalDeductions,
-              netSalary
+              netSalary,
+              currency,
+              empSocialRate,
+              taxRate,
+              workingDaysMonth
             }
           });
 

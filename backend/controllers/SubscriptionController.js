@@ -42,6 +42,19 @@ export class SubscriptionController {
       const tenantId = req.user.tenantId;
       const { subscriptionId, amount, period, transactionId, paymentMethod, reference } = req.body;
 
+      // Bloquer si le compte est suspendu et que l'abonnement n'a pas encore expiré
+      const tenantCheck = await Tenant.findByPk(tenantId);
+      if (tenantCheck?.isSuspended) {
+        const subscriptionExpired = tenantCheck.subscriptionEndsAt && new Date(tenantCheck.subscriptionEndsAt) < new Date();
+        if (!subscriptionExpired) {
+          await transaction.rollback();
+          return res.status(423).json({
+            error: 'AccountSuspended',
+            message: 'Aucun paiement d\'abonnement ne peut être effectué tant que le compte est suspendu et que la période d\'abonnement en cours n\'est pas expirée. Réactivez votre compte pour reprendre.'
+          });
+        }
+      }
+
       // Bloquer si un paiement d'abonnement PENDING existe déjà pour ce tenant
       const existingPending = await Payment.findOne({
         where: { tenantId, saleId: null, status: 'PENDING' },
@@ -148,6 +161,18 @@ export class SubscriptionController {
       const plan = await Plan.findByPk(planId, { transaction });
 
       if (!tenant || !plan) throw new Error('Tenant ou Plan introuvable.');
+
+      // Bloquer l'upgrade si le compte est suspendu et l'abonnement toujours actif
+      if (tenant.isSuspended) {
+        const subscriptionExpired = tenant.subscriptionEndsAt && new Date(tenant.subscriptionEndsAt) < new Date();
+        if (!subscriptionExpired) {
+          await transaction.rollback();
+          return res.status(423).json({
+            error: 'AccountSuspended',
+            message: 'Impossible d\'effectuer un upgrade d\'abonnement tant que le compte est suspendu. Réactivez votre compte d\'abord.'
+          });
+        }
+      }
 
       // Calculer nextBillingDate selon la période sélectionnée
       const PERIOD_MONTHS = { '1M': 1, '2M': 2, '3M': 3, '6M': 6, '1Y': 12 };

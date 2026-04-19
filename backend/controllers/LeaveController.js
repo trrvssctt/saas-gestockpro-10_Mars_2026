@@ -123,19 +123,20 @@ export class LeaveController {
       // Validation des dates
       const start = new Date(startDate);
       const end = new Date(endDate);
+      const today = new Date();
       today.setHours(0, 0, 0, 0);
-      
+
       if (start < today) {
         return res.status(400).json({ error: 'Start date cannot be in the past' });
       }
-      
+
       if (end < start) {
         return res.status(400).json({ error: 'End date must be after start date' });
       }
-      
+
       const diffTime = end.getTime() - start.getTime();
       const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
-      
+
       if (diffDays > 365) {
         return res.status(400).json({ error: 'Leave duration cannot exceed 365 days' });
       }
@@ -144,14 +145,12 @@ export class LeaveController {
       const employee = await Employee.findOne({
         where: { id: employeeId, tenantId: req.user.tenantId }
       });
-      
+
       if (!employee) {
         return res.status(404).json({ error: 'Employee not found' });
       }
 
       // Vérifier qu'il n'y a pas déjà une demande en cours ou un congé actif pour cet employé
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
       
       const activeOrPendingLeave = await Leave.findOne({
         where: {
@@ -563,6 +562,93 @@ export class LeaveController {
 
       return res.status(204).send();
     } catch (error) {
+      return res.status(500).json({ error: error.message });
+    }
+  }
+
+  /**
+   * POST /hr/leaves/my/justify-absence
+   * L'employé justifie une de ses absences passées en l'imputant sur ses congés.
+   * Si approuvé, le calcul de paie ne déduira plus ce jour comme absence non justifiée.
+   */
+  static async justifyAbsence(req, res) {
+    try {
+      const employeeId = req.user.employeeId;
+      if (!employeeId) {
+        return res.status(400).json({ error: 'NoEmployeeLinked', message: 'Aucun employé lié à ce compte' });
+      }
+
+      const { type, date, reason } = req.body;
+
+      if (!type || !['PAID', 'SICK', 'MATERNITY', 'UNPAID', 'ANNUAL'].includes(type)) {
+        return res.status(400).json({ error: 'Type de congé invalide. Valeurs acceptées : PAID, SICK, MATERNITY, UNPAID, ANNUAL' });
+      }
+
+      if (!date) {
+        return res.status(400).json({ error: 'La date de l\'absence est obligatoire' });
+      }
+
+      const absenceDate = new Date(date);
+      if (isNaN(absenceDate.getTime())) {
+        return res.status(400).json({ error: 'Date invalide' });
+      }
+
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      absenceDate.setHours(0, 0, 0, 0);
+
+      if (absenceDate >= today) {
+        return res.status(400).json({ error: 'La date de justification doit être dans le passé' });
+      }
+
+      // Vérifier que l'employé appartient au tenant
+      const employee = await Employee.findOne({
+        where: { id: employeeId, tenantId: req.user.tenantId },
+        attributes: ['id', 'firstName', 'lastName']
+      });
+      if (!employee) {
+        return res.status(404).json({ error: 'Employé non trouvé' });
+      }
+
+      // Vérifier qu'il n'existe pas déjà un congé (en attente ou approuvé) pour cette date
+      const existing = await Leave.findOne({
+        where: {
+          employeeId,
+          tenantId: req.user.tenantId,
+          status: { [Op.in]: ['PENDING', 'APPROVED'] },
+          startDate: { [Op.lte]: date },
+          endDate:   { [Op.gte]: date }
+        }
+      });
+      if (existing) {
+        return res.status(409).json({
+          error: `Un congé ${existing.status === 'PENDING' ? 'en attente' : 'approuvé'} couvre déjà cette date.`
+        });
+      }
+
+      const dateLabel = absenceDate.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+
+      const leave = await Leave.create({
+        employeeId,
+        type,
+        startDate: date,
+        endDate:   date,
+        daysCount: 1,
+        reason: reason?.trim() || `Justification d'absence du ${dateLabel}`,
+        tenantId: req.user.tenantId,
+        status: 'PENDING'
+      });
+
+      const created = await Leave.findOne({
+        where: { id: leave.id },
+        include: [
+          { model: Employee, as: 'employee', attributes: ['id', 'firstName', 'lastName', 'position'] }
+        ]
+      });
+
+      return res.status(201).json(created);
+    } catch (error) {
+      console.error('LeaveController.justifyAbsence error:', error);
       return res.status(500).json({ error: error.message });
     }
   }

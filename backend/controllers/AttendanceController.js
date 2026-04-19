@@ -1,6 +1,15 @@
 import { Attendance, PayrollSettings } from '../models/index.js';
 import { Op } from 'sequelize';
 
+/** Vérifie qu'un instant est dans la plage horaire [workStartTime, workEndTime] */
+function isWithinWorkHours(dateTime, workStartTime, workEndTime) {
+  const ch = dateTime.getHours(), cm = dateTime.getMinutes();
+  const [sh, sm] = workStartTime.split(':').map(Number);
+  const [eh, em] = workEndTime.split(':').map(Number);
+  const cMin = ch * 60 + cm;
+  return cMin >= sh * 60 + sm && cMin <= eh * 60 + em;
+}
+
 export class AttendanceController {
   static async list(req, res) {
     try {
@@ -82,6 +91,15 @@ export class AttendanceController {
 
       const settings      = await PayrollSettings.findOne({ where: { tenantId } });
       const startTime     = settings?.workStartTime || '08:00';
+      const endTime       = settings?.workEndTime   || '17:00';
+
+      if (!isWithinWorkHours(now, startTime, endTime)) {
+        return res.status(400).json({
+          error: 'HorsHeuresTravail',
+          message: `Le pointage n'est autorisé qu'entre ${startTime} et ${endTime}`
+        });
+      }
+
       const expectedTs    = new Date(`${today}T${startTime}`);
       const lateMinutes   = Math.max(0, Math.floor((now - expectedTs) / 60000));
       const status        = lateMinutes > 0 ? 'LATE' : 'PRESENT';
@@ -130,7 +148,16 @@ export class AttendanceController {
 
       const now         = new Date();
       const settings    = await PayrollSettings.findOne({ where: { tenantId } });
-      const endTime     = settings?.workEndTime || '17:00';
+      const startTime2  = settings?.workStartTime || '08:00';
+      const endTime     = settings?.workEndTime   || '17:00';
+
+      if (!isWithinWorkHours(now, startTime2, endTime)) {
+        return res.status(400).json({
+          error: 'HorsHeuresTravail',
+          message: `Le dépointage n'est autorisé qu'entre ${startTime2} et ${endTime}`
+        });
+      }
+
       const expectedEnd = new Date(`${today}T${endTime}`);
       const overtimeMinutes = Math.max(0, Math.floor((now - expectedEnd) / 60000));
 
@@ -417,6 +444,15 @@ export class AttendanceController {
 
       const settings = await PayrollSettings.findOne({ where: { tenantId } });
       const startTime = settings?.workStartTime || '08:00';
+      const adminEndTime = settings?.workEndTime || '17:00';
+
+      if (!isWithinWorkHours(clockInTs, startTime, adminEndTime)) {
+        return res.status(400).json({
+          error: 'HorsHeuresTravail',
+          message: `Le pointage n'est autorisé qu'entre ${startTime} et ${adminEndTime}`
+        });
+      }
+
       const expectedTs = new Date(`${today}T${startTime}`);
       const lateMinutes = Math.max(0, Math.floor((clockInTs - expectedTs) / 60000));
       const status = lateMinutes > 0 ? 'LATE' : 'PRESENT';
@@ -462,7 +498,16 @@ export class AttendanceController {
       if (!record) return res.status(404).json({ error: 'Aucun pointage d\'arrivée trouvé pour aujourd\'hui' });
 
       const settings = await PayrollSettings.findOne({ where: { tenantId } });
+      const adminStartTime2 = settings?.workStartTime || '08:00';
       const endTime = settings?.workEndTime || '17:00';
+
+      if (!isWithinWorkHours(clockOutTs, adminStartTime2, endTime)) {
+        return res.status(400).json({
+          error: 'HorsHeuresTravail',
+          message: `Le dépointage n'est autorisé qu'entre ${adminStartTime2} et ${endTime}`
+        });
+      }
+
       const expectedEnd = new Date(`${today}T${endTime}`);
       const overtimeMinutes = Math.max(0, Math.floor((clockOutTs - expectedEnd) / 60000));
 

@@ -84,20 +84,21 @@ export class HRRuleController {
   }
 
   /**
-   * Calcule les déductions issues des règles RH pour un employé sur un mois donné.
+   * Calcule les déductions ET les bonus heures supplémentaires issus des règles RH
+   * pour un employé sur un mois donné.
    * Appelé par PayrollController.calculateEmployeeSalary
    *
    * @param {string}   tenantId
-   * @param {number}   baseSalary          - salaire de base brut
-   * @param {Array}    attendances         - enregistrements Attendance du mois (avec meta.lateMinutes)
-   * @param {number}   unapprovedAbsences  - jours d'absences injustifiées ce mois
-   * @returns {{ totalDeduction: number, appliedRules: Array }}
+   * @param {number}   baseSalary             - salaire de base brut
+   * @param {Array}    attendances            - enregistrements Attendance du mois
+   *                                            (avec meta.lateMinutes et overtimeMinutes)
+   * @param {number}   unapprovedAbsences     - jours d'absences injustifiées ce mois
+   * @returns {{ totalDeduction, totalBonus, appliedRules }}
    */
   static async computeRuleDeductions(tenantId, baseSalary, attendances = [], unapprovedAbsences = 0) {
-    // Vérifier si les déductions sont activées pour ce tenant
     const settings = await PayrollSettings.findOne({ where: { tenantId } });
     if (settings && settings.deductionEnabled === false) {
-      return { totalDeduction: 0, appliedRules: [], deductionDisabled: true };
+      return { totalDeduction: 0, totalBonus: 0, appliedRules: [], deductionDisabled: true };
     }
 
     const rules = await HRRule.findAll({
@@ -110,62 +111,87 @@ export class HRRuleController {
     const hourlyRate = dailyRate / 8;
 
     let totalDeduction = 0;
+    let totalBonus     = 0;
     const appliedRules = [];
 
-    // Somme des minutes de retard du mois (stockées dans attendance.meta.lateMinutes)
-    const totalLateMinutes = attendances.reduce((sum, att) => {
-      const meta = att.meta || {};
-      return sum + (meta.lateMinutes || 0);
+    // Jours de retard : chaque jour avec N'IMPORTE QUELLE durée de retard → 1 heure entière perdue.
+    // On ne cumule pas les minutes exactes — 15 min de retard = 1h déduite, comme 59 min de retard.
+    const lateDays = attendances.filter(a => (a.meta?.lateMinutes || 0) > 0).length;
+    // Conversion en minutes/heures pour les vérifications de condition
+    const totalLateMinutes = lateDays * 60; // 1h = 60 min par jour en retard
+
+    // Minutes d'heures supplémentaires totales du mois
+    const totalOvertimeMinutes = attendances.reduce((sum, att) => {
+      return sum + (att.overtimeMinutes || att.meta?.overtimeMinutes || 0);
     }, 0);
 
     for (const rule of rules) {
       const condVal = parseFloat(rule.conditionValue);
       let conditionMet = false;
 
+      /* ── Retards ── */
       if (rule.type === 'LATE') {
-        // Unité : MINUTES (défaut) ou HOURS
-        const compareValue = rule.conditionUnit === 'HOURS' ? totalLateMinutes / 60 : totalLateMinutes;
+        const compareValue = rule.conditionUnit === 'HOURS'
+          ? totalLateMinutes / 60
+          : totalLateMinutes;
         conditionMet = _compare(compareValue, rule.conditionOperator, condVal);
 
         if (conditionMet) {
-          const deduction = _actionDeduction(rule, baseSalary, hourlyRate, dailyRate);
+          // Déduction × nombre de jours en retard (1 heure par jour)
+          const deduction = _actionDeduction(rule, baseSalary, hourlyRate, dailyRate) * lateDays;
           totalDeduction += deduction;
           appliedRules.push({
-            ruleId: rule.id,
-            ruleName: rule.name,
-            deduction: Math.round(deduction * 100) / 100,
-            reason: `Retard total : ${totalLateMinutes} min ce mois`
+            ruleId: rule.id, ruleName: rule.name,
+            kind: 'deduction',
+            amount: Math.round(deduction * 100) / 100,
+            reason: `${lateDays} jour(s) de retard — ${lateDays} heure(s) comptabilisée(s)`
           });
         }
 
+      /* ── Absences injustifiées ── */
       } else if (rule.type === 'ABSENCE') {
-        // Unité : DAYS
-        conditionMet = _compare(unapprovedAbsences, rule.conditionOperator, condVal);
-
-        if (conditionMet) {
-          // Déduction par jour d'absence
-          const deductionPerDay = _actionDeduction(rule, baseSalary, hourlyRate, dailyRate);
-          const deduction = deductionPerDay * unapprovedAbsences;
-          totalDeduction += deduction;
-          appliedRules.push({
-            ruleId: rule.id,
-            ruleName: rule.name,
-            deduction: Math.round(deduction * 100) / 100,
-            reason: `${unapprovedAbsences} jour(s) d'absence injustifiée`
-          });
-        }
-
-      } else if (rule.type === 'UNPAID_LEAVE') {
-        // Traitée séparément (congés non payés approuvés) — même logique qu'ABSENCE
         conditionMet = _compare(unapprovedAbsences, rule.conditionOperator, condVal);
         if (conditionMet) {
           const deduction = _actionDeduction(rule, baseSalary, hourlyRate, dailyRate) * unapprovedAbsences;
           totalDeduction += deduction;
           appliedRules.push({
-            ruleId: rule.id,
-            ruleName: rule.name,
-            deduction: Math.round(deduction * 100) / 100,
+            ruleId: rule.id, ruleName: rule.name,
+            kind: 'deduction',
+            amount: Math.round(deduction * 100) / 100,
+            reason: `${unapprovedAbsences} jour(s) d'absence injustifiée`
+          });
+        }
+
+      /* ── Congés non payés ── */
+      } else if (rule.type === 'UNPAID_LEAVE') {
+        conditionMet = _compare(unapprovedAbsences, rule.conditionOperator, condVal);
+        if (conditionMet) {
+          const deduction = _actionDeduction(rule, baseSalary, hourlyRate, dailyRate) * unapprovedAbsences;
+          totalDeduction += deduction;
+          appliedRules.push({
+            ruleId: rule.id, ruleName: rule.name,
+            kind: 'deduction',
+            amount: Math.round(deduction * 100) / 100,
             reason: `${unapprovedAbsences} jour(s) de congé non payé`
+          });
+        }
+
+      /* ── Heures supplémentaires ── */
+      } else if (rule.type === 'OVERTIME') {
+        const compareValue = rule.conditionUnit === 'MINUTES'
+          ? totalOvertimeMinutes
+          : totalOvertimeMinutes / 60;
+        conditionMet = _compare(compareValue, rule.conditionOperator, condVal);
+
+        if (conditionMet) {
+          const overtimeHours = totalOvertimeMinutes / 60;
+          const bonus = _actionBonus(rule, baseSalary, hourlyRate, overtimeHours);
+          totalBonus += bonus;
+          appliedRules.push({
+            ruleId: rule.id, ruleName: rule.name,
+            kind: 'bonus',
+            amount: Math.round(bonus * 100) / 100,
+            reason: `${overtimeHours.toFixed(1)} heure(s) sup. ce mois`
           });
         }
       }
@@ -173,6 +199,7 @@ export class HRRuleController {
 
     return {
       totalDeduction: Math.round(totalDeduction * 100) / 100,
+      totalBonus:     Math.round(totalBonus     * 100) / 100,
       appliedRules
     };
   }
@@ -191,6 +218,7 @@ function _compare(value, operator, threshold) {
   }
 }
 
+/** Calcule un montant de DÉDUCTION selon le type d'action */
 function _actionDeduction(rule, baseSalary, hourlyRate, dailyRate) {
   const val = parseFloat(rule.actionValue);
   switch (rule.actionType) {
@@ -198,6 +226,17 @@ function _actionDeduction(rule, baseSalary, hourlyRate, dailyRate) {
     case 'DEDUCT_SALARY_HOURS': return hourlyRate * val;
     case 'DEDUCT_SALARY_DAYS':  return dailyRate  * val;
     case 'DEDUCT_PERCENT':      return baseSalary * (val / 100);
+    default: return 0;
+  }
+}
+
+/** Calcule un montant de BONUS (heures supplémentaires) selon le type d'action */
+function _actionBonus(rule, baseSalary, hourlyRate, overtimeHours) {
+  const val = parseFloat(rule.actionValue);
+  switch (rule.actionType) {
+    case 'ADD_FIXED':         return val;                           // montant fixe brut
+    case 'ADD_SALARY_HOURS':  return hourlyRate * val * overtimeHours; // val = multiplicateur (ex: 1.5)
+    case 'ADD_PERCENT':       return baseSalary * (val / 100);     // % du salaire de base
     default: return 0;
   }
 }

@@ -51,6 +51,9 @@ export class SaleController {
       }
 
       const isCheque = paymentMethod === 'CHEQUE';
+      const isTransfer = paymentMethod === 'TRANSFER';
+      // Chèque et virement : paiement en attente d'encaissement
+      const isPendingMethod = isCheque || isTransfer;
 
       if (amountPaid > 0) {
         await Payment.create({
@@ -58,17 +61,21 @@ export class SaleController {
           saleId: result.sale.id,
           amount: amountPaid,
           method: paymentMethod || 'CASH',
-          reference: paymentReference || (isCheque ? null : 'ACOMPTE_INITIAL'),
+          reference: paymentReference || (isPendingMethod ? null : 'ACOMPTE_INITIAL'),
           proofImage: paymentProofImage || null,
           chequeNumber: chequeNumber || null,
           bankName: bankName || null,
           chequeDate: chequeDate || null,
           chequeOrder: chequeOrder || null,
-          status: isCheque ? 'PENDING' : 'PAID'
+          // Chèque et virement : PENDING jusqu'à confirmation d'encaissement
+          status: isPendingMethod ? 'PENDING' : 'PAID'
         });
-        // Pour le chèque : amountPaid non crédité avant encaissement
-        if (!isCheque) {
+        if (!isPendingMethod) {
+          // Méthodes immédiates (espèces, mobile money) → créditer directement
           await result.sale.update({ amountPaid });
+        } else {
+          // Chèque / virement → la vente passe en BROUILLON en attendant l'encaissement
+          await result.sale.update({ status: 'BROUILLON' });
         }
       }
       return res.status(201).json(result);
@@ -203,6 +210,8 @@ export class SaleController {
       if (!sale) return res.status(404).json({ error: 'Sale not found' });
 
       const isCheque = method === 'CHEQUE';
+      const isTransfer = method === 'TRANSFER';
+      const isPendingMethod = isCheque || isTransfer;
 
       await Payment.create({
         tenantId: req.user.tenantId,
@@ -215,15 +224,20 @@ export class SaleController {
         bankName: bankName || null,
         chequeDate: chequeDate || null,
         chequeOrder: chequeOrder || null,
-        // Chèque commence en PENDING, les autres sont directement PAID
-        status: isCheque ? 'PENDING' : 'PAID'
+        // Chèque et virement commencent en PENDING, les autres sont directement PAID
+        status: isPendingMethod ? 'PENDING' : 'PAID'
       });
 
-      // Pour le chèque, amountPaid n'est mis à jour qu'à l'encaissement (PAID)
-      if (!isCheque) {
+      if (!isPendingMethod) {
+        // Méthodes immédiates → créditer et mettre à jour le statut de la vente
         const newPaid = parseFloat(sale.amountPaid) + parseFloat(amount);
         const newStatus = newPaid >= parseFloat(sale.totalTtc) ? 'TERMINE' : 'EN_COURS';
         await sale.update({ amountPaid: newPaid, status: newStatus });
+      } else {
+        // Chèque / virement → passer en BROUILLON si pas encore encaissé
+        if (sale.status === 'EN_COURS' && parseFloat(sale.amountPaid) === 0) {
+          await sale.update({ status: 'BROUILLON' });
+        }
       }
 
       return res.status(200).json({ message: 'Paiement enregistré.' });
@@ -244,8 +258,8 @@ export class SaleController {
 
       const payment = await Payment.findByPk(paymentId);
       if (!payment) return res.status(404).json({ error: 'Paiement introuvable' });
-      if (payment.method !== 'CHEQUE') {
-        return res.status(400).json({ error: 'Seuls les paiements par chèque peuvent être mis à jour via ce endpoint' });
+      if (!['CHEQUE', 'TRANSFER'].includes(payment.method)) {
+        return res.status(400).json({ error: 'Seuls les paiements par chèque ou virement peuvent être mis à jour via ce endpoint' });
       }
 
       const prevStatus = payment.status;
@@ -254,17 +268,24 @@ export class SaleController {
       if (payment.saleId) {
         const sale = await Sale.findByPk(payment.saleId);
         if (sale) {
-          // Chèque vient d'être encaissé (PAID) → créditer la vente
+          // Paiement confirmé encaissé (PAID) → créditer la trésorerie
           if (status === 'PAID' && prevStatus !== 'PAID') {
             const newPaid = parseFloat(sale.amountPaid) + parseFloat(payment.amount);
-            const newStatus = newPaid >= parseFloat(sale.totalTtc) ? 'TERMINE' : 'EN_COURS';
-            await sale.update({ amountPaid: newPaid, status: newStatus });
+            const newSaleStatus = newPaid >= parseFloat(sale.totalTtc) ? 'TERMINE' : 'EN_COURS';
+            await sale.update({ amountPaid: newPaid, status: newSaleStatus });
           }
-          // Chèque rejeté alors qu'il était déjà PAID → décréditer
+          // Paiement rejeté/impayé alors qu'il était déjà PAID → décréditer
           if (['REJECTED', 'FAILED'].includes(status) && prevStatus === 'PAID') {
             const newPaid = Math.max(0, parseFloat(sale.amountPaid) - parseFloat(payment.amount));
             const newSaleStatus = newPaid >= parseFloat(sale.totalTtc) ? 'TERMINE' : 'EN_COURS';
             await sale.update({ amountPaid: newPaid, status: newSaleStatus });
+          }
+          // Paiement rejeté depuis PENDING → la vente repasse EN_COURS si plus de PENDING
+          if (['REJECTED', 'FAILED'].includes(status) && prevStatus === 'PENDING') {
+            const pendingCount = await Payment.count({ where: { saleId: sale.id, status: 'PENDING' } });
+            if (pendingCount === 0 && sale.status === 'BROUILLON') {
+              await sale.update({ status: 'EN_COURS' });
+            }
           }
         }
       }

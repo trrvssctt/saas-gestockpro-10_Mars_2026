@@ -158,8 +158,9 @@ export class AdminController {
       });
 
       // Customers
-      const customersCount   = await Customer.count({ where: tenantWhere || {} });
-      const latestCustomers  = await Customer.findAll({ where: tenantWhere || {}, order: [['createdAt','DESC']], limit: 5 });
+      const activeCustomersWhere = { ...(tenantWhere || {}), status: 'actif' };
+      const customersCount   = await Customer.count({ where: activeCustomersWhere });
+      const latestCustomers  = await Customer.findAll({ where: activeCustomersWhere, order: [['createdAt','DESC']], limit: 5 });
 
       // Stock (not time-scoped — reflects current state)
       const stocksTotal   = await StockItem.count({ where: tenantWhere || {} });
@@ -887,6 +888,143 @@ export class AdminController {
       if (transaction) await transaction.rollback();
       console.error('[REJECT SUBSCRIPTION ERROR]:', error);
       return res.status(500).json({ error: 'RejectError', message: error.message });
+    }
+  }
+
+  // ─── Gestion des suppressions de compte ────────────────────────────────────
+
+  /**
+   * GET /api/admin/tenants/pending-deletions
+   * Liste tous les tenants en attente de suppression (SUPER_ADMIN).
+   */
+  static async listPendingDeletions(req, res) {
+    try {
+      const pending = await Tenant.findAll({
+        where: { pendingDeletion: true },
+        order: [['deletionScheduledFor', 'ASC']],
+        attributes: [
+          'id', 'name', 'domain', 'email', 'phone',
+          'deletionRequestedAt', 'deletionScheduledFor', 'deletionReason',
+          'deletionBackupPath', 'planId', 'createdAt'
+        ]
+      });
+
+      const now     = new Date();
+      const results = pending.map(t => ({
+        ...t.toJSON(),
+        daysRemaining: t.deletionScheduledFor
+          ? Math.max(0, Math.ceil((new Date(t.deletionScheduledFor) - now) / 86400000))
+          : null,
+        isOverdue: t.deletionScheduledFor ? new Date(t.deletionScheduledFor) <= now : false
+      }));
+
+      return res.status(200).json({ total: results.length, tenants: results });
+    } catch (error) {
+      return res.status(500).json({ error: 'ListPendingError', message: error.message });
+    }
+  }
+
+  /**
+   * POST /api/admin/tenants/:id/force-delete
+   * Force la suppression immédiate d'un tenant (backup 90j + delete opérationnel).
+   * SUPER_ADMIN uniquement.
+   */
+  static async forceDeleteTenant(req, res) {
+    try {
+      const { id }    = req.params;
+      const { reason } = req.body;
+
+      const tenant = await Tenant.findByPk(id);
+      if (!tenant) {
+        return res.status(404).json({ error: 'NotFound', message: 'Tenant introuvable.' });
+      }
+
+      const deletionReason = reason?.trim() ||
+        tenant.deletionReason ||
+        'Suppression forcée par SUPER_ADMIN';
+
+      // 1. Créer le backup de suppression (90 jours de rétention)
+      const { BackupService } = await import('../services/BackupService.js');
+      const backup = await BackupService.createDeletionBackup(id, deletionReason);
+
+      // 2. Audit avant suppression
+      await AuditLog.create({
+        tenantId:  id,
+        userId:    req.user?.id || null,
+        userName:  req.user?.name || 'SUPER_ADMIN',
+        action:    'ACCOUNT_FORCE_DELETED',
+        resource:  `Tenant: ${tenant.name} (${tenant.domain})`,
+        severity:  'HIGH',
+        sha256Signature: crypto
+          .createHash('sha256')
+          .update(`FORCE_DELETE:${id}:${req.user?.id}:${Date.now()}`)
+          .digest('hex')
+      });
+
+      // 3. Supprimer les données opérationnelles
+      await BackupService.deleteTenantData(id);
+
+      return res.status(200).json({
+        message:     `Compte "${tenant.name}" supprimé définitivement.`,
+        backupInfo: {
+          id:          backup.id,
+          storagePath: backup.storagePath,
+          retainUntil: backup.retainUntil,
+          sizeMB:      +((Number(backup.size) || 0) / 1024 / 1024).toFixed(2)
+        }
+      });
+    } catch (error) {
+      console.error('[FORCE DELETE TENANT ERROR]:', error);
+      return res.status(500).json({ error: 'ForceDeleteError', message: error.message });
+    }
+  }
+
+  /**
+   * POST /api/admin/tenants/:id/cancel-deletion
+   * Annule une demande de suppression en attente (SUPER_ADMIN).
+   */
+  static async cancelTenantDeletion(req, res) {
+    try {
+      const { id } = req.params;
+      const tenant = await Tenant.findByPk(id);
+      if (!tenant) {
+        return res.status(404).json({ error: 'NotFound', message: 'Tenant introuvable.' });
+      }
+      if (!tenant.pendingDeletion) {
+        return res.status(409).json({
+          error:   'NoDeletionPending',
+          message: 'Ce tenant n\'a pas de suppression en attente.'
+        });
+      }
+
+      await tenant.update({
+        pendingDeletion:      false,
+        deletionRequestedAt:  null,
+        deletionScheduledFor: null,
+        deletionReason:       null,
+        isSuspended:          false,
+        suspendedAt:          null,
+        suspensionReason:     null
+      });
+
+      await AuditLog.create({
+        tenantId:  id,
+        userId:    req.user?.id || null,
+        userName:  req.user?.name || 'SUPER_ADMIN',
+        action:    'ACCOUNT_DELETION_CANCELLED_BY_ADMIN',
+        resource:  `Tenant: ${tenant.name}`,
+        severity:  'HIGH',
+        sha256Signature: crypto
+          .createHash('sha256')
+          .update(`CANCEL_DELETE:${id}:${req.user?.id}:${Date.now()}`)
+          .digest('hex')
+      });
+
+      return res.status(200).json({
+        message: `Suppression annulée pour "${tenant.name}". Le compte est de nouveau actif.`
+      });
+    } catch (error) {
+      return res.status(500).json({ error: 'CancelDeletionError', message: error.message });
     }
   }
 }

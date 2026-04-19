@@ -1,6 +1,7 @@
 import { AIService } from '../services/AIService.js';
-import { StockItem, PromptTemplate } from '../models/index.js';
+import { StockItem, PromptTemplate, Payment, Sale, Customer } from '../models/index.js';
 import { sequelize } from '../config/database.js';
+import { Op } from 'sequelize';
 import axios from 'axios';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -445,6 +446,102 @@ export class AIController {
       });
     } finally {
       if (browser) await browser.close().catch(() => {});
+    }
+  }
+
+  /**
+   * GET /api/ai/payments
+   * Retourne la liste des virements (TRANSFER) et chèques (CHEQUE) du tenant.
+   *
+   * Query params :
+   *   - status  : 'PENDING' | 'PAID' | 'ALL' (défaut : 'ALL')
+   *   - method  : 'TRANSFER' | 'CHEQUE' | 'ALL' (défaut : 'ALL')
+   *   - limit   : nombre max de résultats (défaut : 100)
+   *   - page    : page (défaut : 1)
+   */
+  static async getTransfersAndCheques(req, res) {
+    try {
+      const tenantId = req.user?.tenantId ?? req.tenantFilter?.tenantId;
+      if (!tenantId) {
+        return res.status(400).json({ error: 'MissingTenant', message: 'Tenant introuvable.' });
+      }
+
+      const { status = 'ALL', method = 'ALL', limit = 100, page = 1 } = req.query;
+
+      // ── Filtres dynamiques ─────────────────────────────────────────────────
+      const methodFilter = ['TRANSFER', 'CHEQUE'].includes(String(method).toUpperCase())
+        ? [String(method).toUpperCase()]
+        : ['TRANSFER', 'CHEQUE'];
+
+      const where = {
+        tenantId,
+        method: { [Op.in]: methodFilter },
+      };
+
+      if (status !== 'ALL') {
+        const s = String(status).toUpperCase();
+        if (!['PENDING', 'PAID'].includes(s)) {
+          return res.status(400).json({ error: 'BadRequest', message: 'status doit être PENDING, PAID ou ALL.' });
+        }
+        where.status = s;
+      }
+
+      const pageNum  = Math.max(1, parseInt(page, 10) || 1);
+      const limitNum = Math.min(500, Math.max(1, parseInt(limit, 10) || 100));
+      const offset   = (pageNum - 1) * limitNum;
+
+      // ── Requête ────────────────────────────────────────────────────────────
+      const { count, rows } = await Payment.findAndCountAll({
+        where,
+        include: [
+          {
+            model: Sale,
+            attributes: ['id', 'reference', 'totalTtc', 'status', 'saleDate', 'walkinName', 'walkinPhone'],
+            include: [
+              {
+                model: Customer,
+                attributes: ['id', 'companyName', 'email', 'phone'],
+                required: false,
+              },
+            ],
+            required: false,
+          },
+        ],
+        order: [['paymentDate', 'DESC']],
+        limit:  limitNum,
+        offset,
+      });
+
+      // ── Résumé par méthode/statut ──────────────────────────────────────────
+      const summary = rows.reduce(
+        (acc, p) => {
+          const m = p.method;   // 'TRANSFER' | 'CHEQUE'
+          const s = p.status;   // 'PENDING' | 'PAID'
+          if (!acc[m]) acc[m] = { PENDING: { count: 0, total: 0 }, PAID: { count: 0, total: 0 } };
+          const bucket = acc[m][s] ?? (acc[m][s] = { count: 0, total: 0 });
+          bucket.count  += 1;
+          bucket.total  += parseFloat(p.amount) || 0;
+          return acc;
+        },
+        {},
+      );
+
+      return res.status(200).json({
+        total: count,
+        page:  pageNum,
+        limit: limitNum,
+        pages: Math.ceil(count / limitNum),
+        summary,
+        payments: rows,
+      });
+
+    } catch (error) {
+      console.error('[AI PAYMENTS ERROR]:', error);
+      return res.status(500).json({
+        error: 'PaymentsFetchError',
+        message: 'Impossible de récupérer les virements/chèques.',
+        details: error.message,
+      });
     }
   }
 

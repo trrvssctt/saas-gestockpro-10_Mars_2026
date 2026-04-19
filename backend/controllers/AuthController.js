@@ -9,6 +9,34 @@ import bcrypt from 'bcrypt';
 import crypto from 'crypto';
 import { StripeService } from '../services/StripeService.js';
 
+// ── Emails et domaines bloqués (spam / abus avérés) ──────────────────────────
+const BLOCKED_EMAILS = new Set([
+  'jm.koffi@agrobusiness.ci',
+  'moussa.diop@example.com',
+  'awa.ndiaye@fashion.sn',
+]);
+
+const BLOCKED_DOMAINS = new Set([
+  'example.com', 'example.org', 'example.net',
+  'test.com', 'test.org', 'test.net',
+  'localhost.com',
+  'mailinator.com', 'guerrillamail.com', 'tempmail.com',
+  'throwaway.email', 'yopmail.com', 'trashmail.com',
+  'maildrop.cc', 'discard.email', 'sharklasers.com',
+  'spam4.me', 'fakeinbox.com', 'mailnull.com',
+  'getairmail.com', 'dispostable.com', 'nospammail.net',
+]);
+
+/**
+ * Retourne true si l'email est banni ou utilise un domaine suspect.
+ */
+function isBlockedEmail(email) {
+  const normalized = email.toLowerCase().trim();
+  if (BLOCKED_EMAILS.has(normalized)) return true;
+  const domain = normalized.split('@')[1];
+  return domain ? BLOCKED_DOMAINS.has(domain) : false;
+}
+
 
 
 export class AuthController {
@@ -179,7 +207,16 @@ static async login(req, res) {
     try {
       const email = (req.body.email || '').toLowerCase().trim();
       const password = (req.body.password || '').trim();
-      
+
+      // Vérification email banni / domaine suspect avant toute requête DB
+      if (!email || !/^[^\s@]+@[^\s@]+\.[a-zA-Z]{2,}$/.test(email)) {
+        return res.status(400).json({ error: 'InvalidEmail', message: 'Adresse email invalide.' });
+      }
+      if (isBlockedEmail(email)) {
+        console.warn(`[AUTH] Tentative de connexion bloquée: ${email}`);
+        return res.status(403).json({ error: 'BlockedEmail', message: 'Accès refusé. Cette adresse email n\'est pas autorisée.' });
+      }
+
       const user = await AuthService.validateCredentials(email, password);
 
       if (!user) return res.status(401).json({ error: 'Identifiants invalides.' });
@@ -192,7 +229,34 @@ static async login(req, res) {
       const tenant = await Tenant.findByPk(user.tenantId);
       if (!tenant) return res.status(404).json({ error: 'Instance introuvable.' });
 
-      // 2. Blocage Flux-Paiement : Vérification si le compte est actif et à jour
+      // 2a. Blocage total si suppression en attente — personne ne peut se connecter
+      if (tenant.pendingDeletion) {
+        const scheduled = tenant.deletionScheduledFor
+          ? new Date(tenant.deletionScheduledFor).toLocaleDateString('fr-FR')
+          : null;
+        return res.status(410).json({
+          error:   'AccountPendingDeletion',
+          message: `Ce compte est en attente de suppression${scheduled ? ` (prévue le ${scheduled})` : ''}. Contactez le support pour annuler.`,
+          deletionScheduledFor: tenant.deletionScheduledFor
+        });
+      }
+
+      // 2b. Blocage si compte suspendu par le tenant lui-même
+      if (tenant.isSuspended) {
+        const userRoles = Array.isArray(user.roles) ? user.roles : [user.role || 'EMPLOYEE'];
+        const isAdminOrSuperAdmin = userRoles.includes('ADMIN') || userRoles.includes('SUPER_ADMIN');
+        if (!isAdminOrSuperAdmin) {
+          return res.status(403).json({
+            error: 'AccountSuspended',
+            message: 'L\'accès à cette instance est temporairement suspendu. Contactez votre administrateur.',
+            suspendedAt: tenant.suspendedAt,
+            suspensionReason: tenant.suspensionReason
+          });
+        }
+        // L'ADMIN peut se connecter mais sera notifié de la suspension
+      }
+
+      // 3. Blocage Flux-Paiement : Vérification si le compte est actif et à jour
       const isTrial = tenant.paymentStatus === 'TRIAL';
       const isUpToDate = tenant.paymentStatus === 'UP_TO_DATE' || isTrial;
 
@@ -267,7 +331,13 @@ static async login(req, res) {
         planId: planDetails?.id || (sub ? sub.planId : planId),
         subscription: sub ? { planId: sub.planId, status: sub.status, nextBillingDate: sub.nextBillingDate } : null,
         plan: planDetails,
-        tenant: { isActive: tenant.isActive, paymentStatus: tenant.paymentStatus }
+        tenant: {
+          isActive: tenant.isActive,
+          paymentStatus: tenant.paymentStatus,
+          isSuspended: !!tenant.isSuspended,
+          suspendedAt: tenant.suspendedAt || null,
+          suspensionReason: tenant.suspensionReason || null
+        }
       };
 
       // Include lastLogin timestamp in response (snake_case compatibility)
@@ -315,10 +385,17 @@ static async login(req, res) {
         return res.status(400).json({ error: 'MissingFields', message: 'Nom, email et mot de passe de l\'administrateur sont obligatoires.' });
       }
 
-      const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+      const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[a-zA-Z]{2,}$/;
       if (!EMAIL_REGEX.test(admin.email)) {
         await transaction.rollback();
         return res.status(400).json({ error: 'InvalidEmail', message: 'Format d\'adresse email invalide.' });
+      }
+
+      // Vérification email banni / domaine suspect
+      if (isBlockedEmail(admin.email)) {
+        console.warn(`[AUTH] Tentative d'inscription bloquée: ${admin.email}`);
+        await transaction.rollback();
+        return res.status(403).json({ error: 'BlockedEmail', message: 'Cette adresse email n\'est pas autorisée. Veuillez utiliser une adresse professionnelle valide.' });
       }
 
       if (admin.password.length < 8) {
@@ -987,6 +1064,144 @@ static async login(req, res) {
       });
     } catch (error) {
       return AuthController.sendSafeError(res, 500, error);
+    }
+  }
+
+  /**
+   * Désactivation du compte par l'administrateur lui-même (suspension du tenant)
+   * POST /auth/deactivate-account
+   */
+  static async deactivateOwnAccount(req, res) {
+    const transaction = await sequelize.transaction();
+    try {
+      const roles = Array.isArray(req.user.roles) ? req.user.roles : [req.user.role];
+      if (!roles.includes('ADMIN') && !roles.includes('SUPER_ADMIN')) {
+        await transaction.rollback();
+        return res.status(403).json({ error: 'Forbidden', message: 'Seul un administrateur peut désactiver le compte.' });
+      }
+
+      const tenant = await Tenant.findByPk(req.user.tenantId, { transaction });
+      if (!tenant) {
+        await transaction.rollback();
+        return res.status(404).json({ error: 'TenantNotFound', message: 'Instance introuvable.' });
+      }
+
+      await tenant.update({
+        isSuspended: true,
+        suspendedAt: new Date(),
+        suspensionReason: 'Désactivation volontaire par l\'administrateur.'
+      }, { transaction });
+
+      await AuditLog.create({
+        tenantId: req.user.tenantId,
+        userId: req.user.id,
+        userName: req.user.name,
+        action: 'TENANT_SELF_DEACTIVATED',
+        resource: `Tenant: ${tenant.name}`,
+        severity: 'HIGH',
+        sha256Signature: crypto.createHash('sha256').update(`${req.user.id}:self-deactivate:${Date.now()}`).digest('hex')
+      }, { transaction });
+
+      await transaction.commit();
+      return res.status(200).json({ message: 'Compte désactivé avec succès.' });
+    } catch (error) {
+      if (transaction) await transaction.rollback();
+      return AuthController.sendSafeError(res, 500, error, 'DeactivateAccountError');
+    }
+  }
+
+  /**
+   * Réactivation du compte suspendu par l'administrateur lui-même
+   * POST /auth/reactivate-account
+   */
+  static async reactivateOwnAccount(req, res) {
+    const transaction = await sequelize.transaction();
+    try {
+      const roles = Array.isArray(req.user.roles) ? req.user.roles : [req.user.role];
+      if (!roles.includes('ADMIN') && !roles.includes('SUPER_ADMIN')) {
+        await transaction.rollback();
+        return res.status(403).json({ error: 'Forbidden', message: 'Seul un administrateur peut réactiver le compte.' });
+      }
+
+      const tenant = await Tenant.findByPk(req.user.tenantId, { transaction });
+      if (!tenant) {
+        await transaction.rollback();
+        return res.status(404).json({ error: 'TenantNotFound', message: 'Instance introuvable.' });
+      }
+
+      await tenant.update({
+        isSuspended: false,
+        suspendedAt: null,
+        suspensionReason: null,
+        pendingDeletion: false,
+        deletionScheduledFor: null
+      }, { transaction });
+
+      await AuditLog.create({
+        tenantId: req.user.tenantId,
+        userId: req.user.id,
+        userName: req.user.name,
+        action: 'TENANT_SELF_REACTIVATED',
+        resource: `Tenant: ${tenant.name}`,
+        severity: 'HIGH',
+        sha256Signature: crypto.createHash('sha256').update(`${req.user.id}:self-reactivate:${Date.now()}`).digest('hex')
+      }, { transaction });
+
+      await transaction.commit();
+      return res.status(200).json({ message: 'Compte réactivé avec succès.' });
+    } catch (error) {
+      if (transaction) await transaction.rollback();
+      return AuthController.sendSafeError(res, 500, error, 'ReactivateAccountError');
+    }
+  }
+
+  /**
+   * Suppression définitive du compte (planification à 30 jours)
+   * DELETE /auth/delete-account
+   */
+  static async deleteOwnAccount(req, res) {
+    const transaction = await sequelize.transaction();
+    try {
+      const roles = Array.isArray(req.user.roles) ? req.user.roles : [req.user.role];
+      if (!roles.includes('ADMIN') && !roles.includes('SUPER_ADMIN')) {
+        await transaction.rollback();
+        return res.status(403).json({ error: 'Forbidden', message: 'Seul un administrateur peut supprimer le compte.' });
+      }
+
+      const tenant = await Tenant.findByPk(req.user.tenantId, { transaction });
+      if (!tenant) {
+        await transaction.rollback();
+        return res.status(404).json({ error: 'TenantNotFound', message: 'Instance introuvable.' });
+      }
+
+      const deletionDate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); // 30 jours
+
+      await tenant.update({
+        pendingDeletion: true,
+        deletionScheduledFor: deletionDate,
+        isSuspended: true,
+        suspendedAt: new Date(),
+        suspensionReason: 'Suppression définitive programmée par l\'administrateur.'
+      }, { transaction });
+
+      await AuditLog.create({
+        tenantId: req.user.tenantId,
+        userId: req.user.id,
+        userName: req.user.name,
+        action: 'TENANT_DELETION_SCHEDULED',
+        resource: `Tenant: ${tenant.name} — suppression prévue le ${deletionDate.toLocaleDateString('fr-FR')}`,
+        severity: 'CRITICAL',
+        sha256Signature: crypto.createHash('sha256').update(`${req.user.id}:schedule-deletion:${Date.now()}`).digest('hex')
+      }, { transaction });
+
+      await transaction.commit();
+      return res.status(200).json({
+        message: 'Suppression planifiée avec succès.',
+        deletionScheduledFor: deletionDate
+      });
+    } catch (error) {
+      if (transaction) await transaction.rollback();
+      return AuthController.sendSafeError(res, 500, error, 'DeleteAccountError');
     }
   }
 

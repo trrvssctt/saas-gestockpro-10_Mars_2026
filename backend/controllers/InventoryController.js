@@ -4,11 +4,17 @@ import { sequelize } from '../config/database.js';
 import { NotificationService } from '../services/NotificationService.js';
 
 async function checkActiveInventory(tenantId) {
-  const [active] = await sequelize.query(
-    'SELECT name FROM inventory_campaigns WHERE tenant_id = :tenantId AND status = \'DRAFT\' LIMIT 1',
-    { replacements: { tenantId }, type: sequelize.QueryTypes.SELECT }
-  );
-  if (active) throw new Error(`Action bloquée : Un inventaire physique ("${active.name}") est actuellement en cours.`);
+  try {
+    const [active] = await sequelize.query(
+      'SELECT name FROM inventory_campaigns WHERE tenant_id = :tenantId AND status = \'DRAFT\' LIMIT 1',
+      { replacements: { tenantId }, type: sequelize.QueryTypes.SELECT }
+    );
+    if (active) throw new Error(`Action bloquée : Un inventaire physique ("${active.name}") est actuellement en cours.`);
+  } catch (err) {
+    // Ne re-lancer que l'erreur métier (campagne active détectée)
+    if (err.message && err.message.startsWith('Action bloquée')) throw err;
+    // Toute autre erreur DB (table inexistante, connexion, etc.) : on laisse passer
+  }
 }
 
 // Génère un SKU court et tente de garantir l'unicité par tenant
