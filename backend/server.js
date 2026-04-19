@@ -10,13 +10,21 @@ loadEnv({ path: join(__serverDir, '.env') });
 import express from 'express';
 import path from 'path';
 import cors from 'cors';
+import cron from 'node-cron';
 import { connectDB } from './config/database.js';
 import { ContactMessage } from './models/ContactMessage.js';
+import { Attendance, PayrollSettings } from './models/index.js';
+import { Op } from 'sequelize';
 import apiRoutes from './routes/api.js';
 import { errorHandler } from './middlewares/errorHandler.js';
+import { BackupService } from './services/BackupService.js';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// Faire confiance au premier proxy (Nginx, Cloudflare…) pour récupérer la vraie IP du client
+// via l'en-tête X-Forwarded-For — indispensable pour que les rate limiters fonctionnent.
+app.set('trust proxy', 1);
 
 // Configuration Middlewares de base
 // Mise à jour CORS pour supporter les requêtes cross-origin du frontend
@@ -100,6 +108,76 @@ app.use(errorHandler);
 
 app.listen(PORT, async () => {
   await connectDB();
+
+  // ── Sauvegarde automatique quotidienne à 02:00 ──────────────────────────
+  // Rétention : 7 jours (purge automatique dans BackupService.runSystemBackup)
+  // Sauvegarde système complète (toutes les tables) — tous les jours à 02:00
+  cron.schedule('0 2 * * *', async () => {
+    console.log('[CRON] ▶ Sauvegarde système quotidienne démarrée…');
+    try {
+      await BackupService.runSystemBackup('AUTOMATIC');
+      console.log('[CRON] ✅ Sauvegarde système terminée.');
+    } catch (err) {
+      console.error('[CRON] ❌ Échec sauvegarde système :', err.message);
+    }
+  }, { timezone: 'Africa/Dakar' });
+  console.log('✅ Cron sauvegarde planifié : tous les jours à 02:00 (Africa/Dakar)');
+
+  // Traitement des suppressions de compte planifiées — tous les jours à 03:00
+  // Backup tenant (90j) → suppression données opérationnelles
+  cron.schedule('0 3 * * *', async () => {
+    console.log('[CRON] ▶ Traitement suppressions de compte planifiées…');
+    try {
+      await BackupService.processPendingDeletions();
+      console.log('[CRON] ✅ Traitement suppressions terminé.');
+    } catch (err) {
+      console.error('[CRON] ❌ Échec traitement suppressions :', err.message);
+    }
+  }, { timezone: 'Africa/Dakar' });
+  console.log('✅ Cron suppressions planifié : tous les jours à 03:00 (Africa/Dakar)');
+
+  // ── Auto-dépointage toutes les minutes ─────────────────────────────────────
+  // Pour chaque tenant ayant deductionEnabled=true, si l'heure courante >= workEndTime,
+  // on dépointage automatiquement tous les employés encore pointés (sauf les ABSENT).
+  cron.schedule('* * * * *', async () => {
+    try {
+      const now = new Date();
+      const today = now.toISOString().split('T')[0];
+      const currentMinutes = now.getHours() * 60 + now.getMinutes();
+
+      const allSettings = await PayrollSettings.findAll({ where: { deductionEnabled: true } });
+      for (const settings of allSettings) {
+        const [eh, em] = (settings.workEndTime || '17:00').split(':').map(Number);
+        const endMinutes = eh * 60 + em;
+        if (currentMinutes < endMinutes) continue;
+
+        const records = await Attendance.findAll({
+          where: {
+            tenantId: settings.tenantId,
+            date: today,
+            clockIn:  { [Op.ne]: null },
+            clockOut: null,
+            status:   { [Op.ne]: 'ABSENT' }
+          }
+        });
+
+        if (records.length === 0) continue;
+
+        const clockOutTime = new Date(`${today}T${settings.workEndTime}`).toISOString();
+        for (const r of records) {
+          await r.update({
+            clockOut:        clockOutTime,
+            overtimeMinutes: 0,
+            meta: { ...(r.meta || {}), autoClockout: true, workEndTime: settings.workEndTime }
+          });
+        }
+        console.log(`[CRON] Auto-dépointage: ${records.length} employé(s) pour tenant ${settings.tenantId} à ${settings.workEndTime}`);
+      }
+    } catch (err) {
+      console.error('[CRON] Erreur auto-dépointage:', err.message);
+    }
+  }, { timezone: 'Africa/Dakar' });
+  console.log('✅ Cron auto-dépointage planifié : toutes les minutes (Africa/Dakar)');
   
   // Seeding de données de test pour les messages de contact
   try {
