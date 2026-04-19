@@ -243,9 +243,23 @@ export class PayslipGeneratorService {
     const socialChargesEmployee   = fmt(salary.socialChargesEmployee);
     const totalAdvanceDeductions  = fmt(salary.totalAdvanceDeductions);
     const socialChargesEmployer   = fmt(salary.socialChargesEmployer);
+    const incomeTaxAmt            = parseFloat(salary.incomeTax) || 0;
+    const incomeTax               = fmt(incomeTaxAmt);
+    const hrRulesDeductionAmt     = parseFloat(salary.ruleDeductions) || 0;
+    const hrRulesDeduction        = fmt(hrRulesDeductionAmt);
     const netSalary               = fmt(salary.netSalary);
-    const totalDeductions         = fmt((parseFloat(salary.socialChargesEmployee) || 0) + (parseFloat(salary.totalAdvanceDeductions) || 0));
+    // Total retenues = cotisations + impôt + avances + déductions RH (aligné avec calculateEmployeeSalary)
+    const totalDeductionsAmt = (parseFloat(salary.socialChargesEmployee) || 0)
+      + incomeTaxAmt
+      + (parseFloat(salary.totalAdvanceDeductions) || 0)
+      + hrRulesDeductionAmt;
+    const totalDeductions         = fmt(totalDeductionsAmt);
     const hasPrimes               = (parseFloat(salary.totalPrimes) || 0) > 0;
+    const hasAdvances             = (parseFloat(salary.totalAdvanceDeductions) || 0) > 0;
+    const hasHrDeductions         = hrRulesDeductionAmt > 0;
+    // Taux affichés
+    const socialRateDisplay = salary.empSocialRate != null ? `${parseFloat(salary.empSocialRate).toFixed(1)}%` : '8.2%';
+    const taxRateDisplay    = salary.taxRate        != null ? `${parseFloat(salary.taxRate).toFixed(1)}%`    : '10.0%';
 
     const today = new Date().toLocaleDateString('fr-FR');
 
@@ -897,7 +911,7 @@ export class PayslipGeneratorService {
         <td>
           <div class="rubrique-cell">
             <span class="dot dot-red"></span>
-            <span>CHARGES SOCIALES SALARIÉ</span>
+            <span>CHARGES SOCIALES SALARIÉ (${socialRateDisplay})</span>
           </div>
         </td>
         <td>
@@ -906,7 +920,22 @@ export class PayslipGeneratorService {
         <td class="amount-cell amount-red">-${socialChargesEmployee}</td>
       </tr>
 
-      <!-- Avances déduites -->
+      <!-- Impôt sur le revenu -->
+      <tr>
+        <td>
+          <div class="rubrique-cell">
+            <span class="dot dot-red"></span>
+            <span>IMPÔT SUR LE REVENU (${taxRateDisplay})</span>
+          </div>
+        </td>
+        <td>
+          <span class="nature-badge badge-retenue">Retenue</span>
+        </td>
+        <td class="amount-cell amount-red">-${incomeTax}</td>
+      </tr>
+
+      <!-- Avances déduites (si présentes) -->
+      ${hasAdvances ? `
       <tr>
         <td>
           <div class="rubrique-cell">
@@ -918,7 +947,22 @@ export class PayslipGeneratorService {
           <span class="nature-badge badge-retenue">Retenue</span>
         </td>
         <td class="amount-cell amount-red">-${totalAdvanceDeductions}</td>
-      </tr>
+      </tr>` : ''}
+
+      <!-- Déductions règles RH (si présentes) -->
+      ${hasHrDeductions ? `
+      <tr>
+        <td>
+          <div class="rubrique-cell">
+            <span class="dot dot-red"></span>
+            <span>DÉDUCTIONS RÈGLES RH (retards/absences)</span>
+          </div>
+        </td>
+        <td>
+          <span class="nature-badge badge-retenue">Retenue</span>
+        </td>
+        <td class="amount-cell amount-red">-${hrRulesDeduction}</td>
+      </tr>` : ''}
 
       <!-- Charges patronales (info) -->
       <tr class="info-row-table">
