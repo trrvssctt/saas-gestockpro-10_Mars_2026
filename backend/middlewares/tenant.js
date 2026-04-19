@@ -21,6 +21,34 @@ export const tenantIsolation = async (req, res, next) => {
     if (!t) {
       return res.status(404).json({ error: 'TenantNotFound', message: 'Instance introuvable.' });
     }
+
+    // Blocage total si suppression planifiée — personne ne peut accéder (sauf SUPER_ADMIN)
+    if (t.pendingDeletion && req.user.role !== 'SUPER_ADMIN') {
+      const scheduled = t.deletionScheduledFor
+        ? new Date(t.deletionScheduledFor).toLocaleDateString('fr-FR')
+        : null;
+      return res.status(410).json({
+        error:   'AccountPendingDeletion',
+        message: `Ce compte est en cours de suppression${scheduled ? ` (prévue le ${scheduled})` : ''}. Contactez le support pour annuler.`,
+        deletionScheduledFor: t.deletionScheduledFor,
+        deletionReason:       t.deletionReason
+      });
+    }
+
+    // Blocage transactions si compte suspendu par le tenant
+    // Les SUPER_ADMIN peuvent toujours passer ; les GET sont autorisés pour consultation
+    if (t.isSuspended && req.user.role !== 'SUPER_ADMIN') {
+      const isWriteOperation = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method);
+      if (isWriteOperation) {
+        return res.status(423).json({
+          error: 'AccountSuspended',
+          message: 'Votre compte est suspendu. Aucune transaction ne peut être effectuée. Veuillez réactiver votre compte pour reprendre l\'activité.',
+          suspendedAt: t.suspendedAt,
+          suspensionReason: t.suspensionReason
+        });
+      }
+    }
+
     // Injection dans req.tenantFilter ET req.tenant (pour compatibilité)
     req.tenantFilter = {
       tenantId: t.id,
