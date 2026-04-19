@@ -11,7 +11,7 @@ Sale.init({
   walkinName: { type: DataTypes.STRING(150), allowNull: true, field: 'walkin_name' },
   walkinPhone: { type: DataTypes.STRING(50), allowNull: true, field: 'walkin_phone' },
   status: {
-    type: DataTypes.ENUM('EN_COURS', 'TERMINE', 'ANNULE', 'REMBOURSE'),
+    type: DataTypes.ENUM('EN_COURS', 'TERMINE', 'ANNULE', 'REMBOURSE', 'BROUILLON'),
     defaultValue: 'EN_COURS'
   },
   totalHt: { type: DataTypes.NUMERIC(15, 2), defaultValue: 0, field: 'total_ht' },

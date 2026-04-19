@@ -33,10 +33,15 @@ HRRule.init({
     field: 'condition_unit'
   },
 
-  // Action : DEDUCT_FIXED (montant fixe), DEDUCT_SALARY_HOURS (N heures de salaire),
-  //          DEDUCT_SALARY_DAYS (N jours de salaire), DEDUCT_PERCENT (% du salaire de base)
+  // Déductions : DEDUCT_FIXED (montant fixe), DEDUCT_SALARY_HOURS (N heures de salaire),
+  //              DEDUCT_SALARY_DAYS (N jours de salaire), DEDUCT_PERCENT (% du salaire de base)
+  // Gains (heures sup) : ADD_FIXED (montant fixe), ADD_SALARY_HOURS (N × taux horaire),
+  //                      ADD_PERCENT (% du salaire de base)
   actionType: {
-    type: DataTypes.ENUM('DEDUCT_FIXED', 'DEDUCT_SALARY_HOURS', 'DEDUCT_SALARY_DAYS', 'DEDUCT_PERCENT'),
+    type: DataTypes.ENUM(
+      'DEDUCT_FIXED', 'DEDUCT_SALARY_HOURS', 'DEDUCT_SALARY_DAYS', 'DEDUCT_PERCENT',
+      'ADD_FIXED',    'ADD_SALARY_HOURS',    'ADD_PERCENT'
+    ),
     allowNull: false,
     field: 'action_type'
   },

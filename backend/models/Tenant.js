@@ -48,6 +48,18 @@ Tenant.init({
   pendingPlanId: { type: DataTypes.STRING(50), allowNull: true, field: 'pending_plan_id' },
   pendingPeriod: { type: DataTypes.STRING(10), allowNull: true, field: 'pending_period' },
 
+  // Suspension du compte par le tenant lui-même
+  isSuspended: { type: DataTypes.BOOLEAN, defaultValue: false, field: 'is_suspended' },
+  suspendedAt: { type: DataTypes.DATE, allowNull: true, field: 'suspended_at' },
+  suspensionReason: { type: DataTypes.TEXT, allowNull: true, field: 'suspension_reason' },
+
+  // Suppression planifiée du compte (30 jours de délai de réflexion)
+  pendingDeletion: { type: DataTypes.BOOLEAN, defaultValue: false, field: 'pending_deletion' },
+  deletionRequestedAt: { type: DataTypes.DATE, allowNull: true, field: 'deletion_requested_at' },
+  deletionScheduledFor: { type: DataTypes.DATE, allowNull: true, field: 'deletion_scheduled_for' },
+  deletionReason: { type: DataTypes.TEXT, allowNull: true, field: 'deletion_reason' },
+  deletionBackupPath: { type: DataTypes.STRING(500), allowNull: true, field: 'deletion_backup_path' },
+
   // Stockage S3 utilisé (en octets)
   storageUsedBytes: { type: DataTypes.BIGINT, defaultValue: 0, field: 'storage_used_bytes' }
 }, {
