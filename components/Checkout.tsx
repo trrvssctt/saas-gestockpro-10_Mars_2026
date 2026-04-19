@@ -10,9 +10,9 @@
 
 import React, { useState, useMemo } from 'react';
 import {
-  CreditCard, Smartphone, Check, ArrowLeft,
+  /* CreditCard, */ Smartphone, Check, ArrowLeft,
   Loader2, ShieldCheck, Zap, QrCode,
-  CheckCircle2, ArrowRight, Phone, Star
+  CheckCircle2, /* ArrowRight, Phone, */ Star
 } from 'lucide-react';
 import { SUBSCRIPTION_PLANS } from '../constants';
 import { SubscriptionPlan } from '../types';
@@ -77,7 +77,7 @@ const Checkout: React.FC<CheckoutProps> = ({ planId, user, planObj, isUpgrade = 
   const [txReference, setTxReference] = useState('');
   const [status, setStatus] = useState<'IDLE' | 'WAITING' | 'SUCCESS' | 'ERROR'>('IDLE');
   const [isProcessing, setIsProcessing] = useState(false);
-  const [isStripeLoading, setIsStripeLoading] = useState(false);
+  // const [isStripeLoading, setIsStripeLoading] = useState(false); // Stripe — temporairement masqué
 
   /* Prix */
   const totalPrice = useMemo(() => getPeriodPrice(plan, selectedPeriod), [plan, selectedPeriod]);
@@ -130,7 +130,7 @@ const Checkout: React.FC<CheckoutProps> = ({ planId, user, planObj, isUpgrade = 
     }
   };
 
-  /* ─── Paiement Stripe ────────────────────────────────────────── */
+  /* ─── Paiement Stripe — temporairement masqué ───────────────────
   const handleStripeCheckout = async () => {
     setIsStripeLoading(true);
     try {
@@ -150,6 +150,7 @@ const Checkout: React.FC<CheckoutProps> = ({ planId, user, planObj, isUpgrade = 
       setIsStripeLoading(false);
     }
   };
+  ──────────────────────────────────────────────────────────────── */
 
   /* ─── Rendu état final ───────────────────────────────────────── */
   if (status === 'SUCCESS') {
@@ -328,6 +329,7 @@ const Checkout: React.FC<CheckoutProps> = ({ planId, user, planObj, isUpgrade = 
                 <span className="text-[8px] bg-yellow-100 text-yellow-600 px-1.5 py-0.5 rounded font-bold">MTN</span>
               </div>
             </button>
+            {/* Bouton Carte Bancaire (Stripe) — temporairement masqué
             <button
               onClick={() => setMethod('CARD')}
               className={`flex flex-col items-center gap-2 py-4 px-3 rounded-2xl border-2 transition-all ${
@@ -342,6 +344,7 @@ const Checkout: React.FC<CheckoutProps> = ({ planId, user, planObj, isUpgrade = 
               </span>
               <span className="text-[8px] bg-indigo-100 text-indigo-600 px-2 py-0.5 rounded font-bold">Via Stripe</span>
             </button>
+            */}
           </div>
 
           {/* ── Mobile Money ── */}
@@ -453,7 +456,7 @@ const Checkout: React.FC<CheckoutProps> = ({ planId, user, planObj, isUpgrade = 
             </div>
           )}
 
-          {/* ── Stripe Card ── */}
+          {/* ── Stripe Card — temporairement masqué ──
           {method === 'CARD' && (
             <div className="space-y-5 animate-in fade-in duration-300">
               <div className="bg-indigo-50 rounded-3xl p-5 border border-indigo-100 space-y-3">
@@ -472,7 +475,7 @@ const Checkout: React.FC<CheckoutProps> = ({ planId, user, planObj, isUpgrade = 
                     </span>
                   ))}
                 </div>
-                {/* Résumé montant */}
+                {/* Résumé montant *\/}
                 <div className="bg-white rounded-2xl p-4 border border-indigo-100 flex items-center justify-between">
                   <div>
                     <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Montant total</p>
@@ -503,6 +506,7 @@ const Checkout: React.FC<CheckoutProps> = ({ planId, user, planObj, isUpgrade = 
               </p>
             </div>
           )}
+          ──*/}
 
           {/* ── Placeholder si aucune méthode ── */}
           {!method && (

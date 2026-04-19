@@ -51,6 +51,28 @@ const DashboardTour: React.FC<Props> = ({ user, planId, currentTab, onNavigate, 
 
   // ─── Demo data creators ───────────────────────────────────────────────────
   const createDemoProduct = async () => {
+    // Résoudre une sous-catégorie existante ou en créer une de démo
+    let subcategoryId: string | undefined;
+    try {
+      const subs = await apiClient.get('/subcategories');
+      if (subs && subs.length > 0) {
+        subcategoryId = subs[0].id;
+      } else {
+        // Aucune sous-catégorie : créer une catégorie + sous-catégorie de démo
+        let catId: string;
+        try {
+          const cats = await apiClient.get('/categories');
+          catId = cats && cats.length > 0 ? cats[0].id : (await apiClient.post('/categories', { name: 'Général', description: 'Catégorie générale' })).id;
+        } catch {
+          catId = (await apiClient.post('/categories', { name: 'Général', description: 'Catégorie générale' })).id;
+        }
+        const newSub = await apiClient.post('/subcategories', { name: 'Divers', categoryId: catId });
+        subcategoryId = newSub.id;
+      }
+    } catch {
+      // Si la résolution de sous-catégorie échoue, on tente quand même la création
+    }
+
     await apiClient.request('/stock', {
       method: 'POST',
       body: JSON.stringify({
@@ -58,6 +80,7 @@ const DashboardTour: React.FC<Props> = ({ user, planId, currentTab, onNavigate, 
         unitPrice: 15000,
         quantity: 50,
         minThreshold: 10,
+        ...(subcategoryId ? { subcategoryId } : {}),
       }),
     });
   };

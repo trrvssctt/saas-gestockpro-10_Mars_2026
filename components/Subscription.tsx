@@ -795,6 +795,7 @@ const Subscription: React.FC<SubscriptionProps> = ({ user, currency, onUpgrade, 
                           </div>
                           <p className="text-[9px] text-slate-400 font-bold uppercase">Wave, Orange Money, MTN MoMo</p>
                         </button>
+                        {/* Bouton Carte Bancaire (Stripe) — temporairement masqué
                         <button onClick={() => { setPaymentMethod('CARD'); setOperator(null); }}
                           className="p-5 rounded-[2rem] border-2 border-slate-200 hover:border-indigo-400 hover:bg-indigo-50 text-left transition-all group">
                           <div className="flex items-center gap-3 mb-2">
@@ -803,6 +804,7 @@ const Subscription: React.FC<SubscriptionProps> = ({ user, currency, onUpgrade, 
                           </div>
                           <p className="text-[9px] text-slate-400 font-bold uppercase">Visa, Mastercard via Stripe</p>
                         </button>
+                        */}
                       </div>
                     </div>
                   )}
@@ -843,29 +845,7 @@ const Subscription: React.FC<SubscriptionProps> = ({ user, currency, onUpgrade, 
                     </div>
                   )}
 
-                  {/* Stripe — Carte Bancaire */}
-                  {paymentMethod === 'CARD' && (
-                    <div className="space-y-6">
-                      <div className="p-5 bg-slate-50 rounded-[2rem] border border-slate-100 space-y-4">
-                        <div className="flex items-center gap-3">
-                          <CreditCard size={20} className="text-indigo-600" />
-                          <p className="text-sm font-black uppercase">Paiement Sécurisé par Stripe</p>
-                        </div>
-                        <input type="text" placeholder="Nom sur la carte (optionnel)" value={cardHolder} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCardHolder(e.target.value)}
-                          className="w-full bg-white border border-slate-200 rounded-2xl px-6 py-4 text-sm font-black outline-none focus:ring-4 focus:ring-indigo-500/10" />
-                        <p className="text-[9px] text-slate-400 font-bold uppercase tracking-widest">
-                          Vous serez redirigé vers la page sécurisée Stripe pour entrer vos coordonnées bancaires.
-                        </p>
-                      </div>
-                      <button onClick={handleStripeCheckout} disabled={isStripeLoading}
-                        className="w-full py-5 bg-indigo-600 text-white rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl flex items-center justify-center gap-3 disabled:opacity-50">
-                        {isStripeLoading ? <Loader2 className="animate-spin" /> : <><CreditCard size={18}/> PAYER PAR CARTE — {selectedPlan ? getPeriodPrice(selectedPlan, selectedDuration).toLocaleString() : 0} {currency}</>}
-                      </button>
-                      <button onClick={() => setPaymentMethod(null)} className="w-full py-2 text-slate-400 text-[9px] font-black uppercase tracking-widest hover:text-slate-600">
-                        ← Changer de méthode
-                      </button>
-                    </div>
-                  )}
+                  {/* Stripe — Carte Bancaire — temporairement masqué */}
                 </div>
               </>
             )}

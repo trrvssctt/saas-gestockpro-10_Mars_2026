@@ -221,7 +221,8 @@ const DocumentPreview: React.FC<DocumentProps> = ({ type, sale, tenant, currency
       setDownloadLoading(docId);
       const session = authBridge.getSession();
       const token   = session?.token;
-      const res = await fetch(`http://localhost:3000/api/documents/download/${docId}`, {
+      //const res = await fetch(`http://localhost:3000/api/documents/download/${docId}`, {
+      const res = await fetch(`https://gestock.realtechprint.com/api/documents/download/${docId}`, {
         headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       });
       if (!res.ok) {

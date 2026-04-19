@@ -495,7 +495,9 @@ const Deliveries: React.FC<DeliveriesProps> = ({ user, currency }) => {
                             <select value={item.stockItemId} onChange={e => updateItem(idx, 'stockItemId', e.target.value)}
                               className="w-full px-3 py-2.5 bg-white rounded-xl text-xs font-semibold border border-slate-200 outline-none focus:ring-2 focus:ring-indigo-500/10">
                               <option value="">— Sélectionner —</option>
-                              {stockItems.map(s => (
+                              {stockItems
+                                .filter(s => !form.items.some((it, i) => i !== idx && it.stockItemId === s.id))
+                                .map(s => (
                                 <option key={s.id} value={s.id}>{s.name} ({s.sku})</option>
                               ))}
                             </select>

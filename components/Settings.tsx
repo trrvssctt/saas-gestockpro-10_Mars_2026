@@ -1,46 +1,69 @@
 
 import React, { useState, useEffect } from 'react';
-import Support from './Support';
-import { User } from '../types';
-import { 
-  Settings as SettingsIcon, Globe, DollarSign, Image as ImageIcon, 
-  ShieldCheck, Save, Check, X, FileText, ShieldAlert, 
-  User as UserIcon, Lock, Fingerprint, Shield, Palette, 
-  LayoutDashboard, CreditCard, Sparkles, History,
-  Sun, Moon,
-  CheckCircle2, ChevronRight, Building2, Phone, Mail, MapPin,
-  Stamp, RefreshCw, Upload, Loader2, Pipette, LifeBuoy
+import {
+  Settings as SettingsIcon, Globe, Image as ImageIcon,
+  ShieldCheck, Save, Check, FileText, ShieldAlert,
+  Lock, Palette,
+  LayoutDashboard, CreditCard, Sparkles,
+  CheckCircle2, Building2,
+  Stamp, RefreshCw, Upload, Loader2, Pipette, AlertTriangle, Trash2, PowerOff
 } from 'lucide-react';
-import { AppSettings, UserRole, Currency, Language } from '../types';
+import { AppSettings, Currency, Language } from '../types';
 import { apiClient } from '../services/api';
 import { uploadFile } from '../services/uploadService';
+import { authBridge } from '../services/authBridge';
 
 interface SettingsProps {
   settings: AppSettings;
   onSave: (newSettings: AppSettings) => void;
+  onLogout?: () => void;
 }
 
-const Settings: React.FC<SettingsProps> = ({ settings, onSave }) => {
-  // TODO: Remplacer ceci par l'utilisateur courant réel si disponible dans le contexte global
-  const fakeUser: User = {
-    id: '1',
-    name: 'Admin',
-    role: UserRole.SUPER_ADMIN,
-    roles: [UserRole.SUPER_ADMIN],
-    email: 'admin@example.com',
-    mfaEnabled: false,
-    lastLogin: '',
-    activeSession: true,
-    isActive: true,
-    tenantId: '1',
-  };
-  const [activeSubTab, setActiveSubTab] = useState<'general' | 'branding' | 'fiscal' | 'profile' | 'support'>('general');
+const Settings: React.FC<SettingsProps> = ({ settings, onSave, onLogout }) => {
+  const [activeSubTab, setActiveSubTab] = useState<'general' | 'branding' | 'fiscal' | 'profile'>('general');
   const [localTenant, setLocalTenant] = useState<any>(null);
   const [buttonColor, setButtonColor] = useState<string>('');
   const [loading, setLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [success, setSuccess] = useState(false);
   const [isUploading, setIsUploading] = useState<string | null>(null);
+
+  // Account deactivation / deletion state
+  const [showDeactivateConfirm, setShowDeactivateConfirm] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleteConfirmText, setDeleteConfirmText] = useState('');
+  const [accountActionLoading, setAccountActionLoading] = useState(false);
+
+  const handleDeactivateAccount = async () => {
+    setAccountActionLoading(true);
+    try {
+      await apiClient.post('/auth/deactivate-account', {});
+      authBridge.clearSession();
+      if (onLogout) onLogout();
+      else window.location.reload();
+    } catch (err: any) {
+      alert(err?.message || 'Erreur lors de la désactivation du compte.');
+    } finally {
+      setAccountActionLoading(false);
+      setShowDeactivateConfirm(false);
+    }
+  };
+
+  const handleDeleteAccount = async () => {
+    if (deleteConfirmText !== 'SUPPRIMER') return;
+    setAccountActionLoading(true);
+    try {
+      await apiClient.delete('/auth/delete-account');
+      authBridge.clearSession();
+      if (onLogout) onLogout();
+      else window.location.reload();
+    } catch (err: any) {
+      alert(err?.message || 'Erreur lors de la suppression du compte.');
+    } finally {
+      setAccountActionLoading(false);
+      setShowDeleteConfirm(false);
+    }
+  };
 
   // Password change state
   const [pwCurrent, setPwCurrent] = useState('');
@@ -320,7 +343,6 @@ const Settings: React.FC<SettingsProps> = ({ settings, onSave }) => {
             { id: 'branding', label: 'Design & Branding', icon: Palette },
             { id: 'fiscal', label: 'Fiscalité & Factures', icon: FileText },
             { id: 'profile', label: 'Accès Sécurité', icon: Lock },
-            { id: 'support', label: 'Support', icon: LifeBuoy },
           ].map(tab => (
             <button
               key={tab.id}
@@ -615,106 +637,239 @@ const Settings: React.FC<SettingsProps> = ({ settings, onSave }) => {
       )}
 
       {activeSubTab === 'profile' && (
-        <div className="bg-white p-5 md:p-10 rounded-[3rem] border border-slate-100 shadow-sm max-w-2xl animate-in slide-in-from-bottom-4 space-y-8">
-           <h3 className="text-xs font-black uppercase tracking-widest text-indigo-600 flex items-center gap-2"><Lock size={16}/> Sécurité de votre Session Administrateur</h3>
+        <div className="space-y-6 animate-in slide-in-from-bottom-4">
+          {/* Header */}
+          <div className="flex items-center gap-4 p-6 bg-indigo-900 rounded-[2.5rem] text-white relative overflow-hidden">
+            <div className="absolute right-0 top-0 p-8 opacity-10"><ShieldCheck size={100}/></div>
+            <div className="w-14 h-14 bg-indigo-700 rounded-2xl flex items-center justify-center shrink-0">
+              <Lock size={28} className="text-white"/>
+            </div>
+            <div>
+              <h3 className="text-xl font-black uppercase tracking-tight">Sécurité de votre Session Administrateur</h3>
+              <p className="text-indigo-300 text-[10px] font-bold uppercase tracking-widest mt-1">Gérez vos accès, mots de passe et le cycle de vie de votre compte</p>
+            </div>
+          </div>
 
-           {/* Password change form */}
-           <div className="p-6 bg-slate-50 rounded-3xl border border-slate-100 space-y-4">
-             <p className="text-sm font-black text-slate-900 uppercase">Changer le mot de passe</p>
+          {/* Grille principale : mot de passe (gauche) + actions rapides (droite) */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
 
-             <div className="space-y-3">
-               <div className="relative">
-                 <input
-                   type={pwShowCurrent ? 'text' : 'password'}
-                   value={pwCurrent}
-                   onChange={e => setPwCurrent(e.target.value)}
-                   placeholder="Mot de passe actuel"
-                   className="w-full px-4 py-3 pr-12 border border-slate-200 rounded-2xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-white"
-                 />
-                 <button type="button" onClick={() => setPwShowCurrent(v => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700">
-                   <Lock size={15}/>
-                 </button>
-               </div>
-
-               <div className="relative">
-                 <input
-                   type={pwShowNew ? 'text' : 'password'}
-                   value={pwNew}
-                   onChange={e => setPwNew(e.target.value)}
-                   placeholder="Nouveau mot de passe"
-                   className="w-full px-4 py-3 pr-12 border border-slate-200 rounded-2xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-white"
-                 />
-                 <button type="button" onClick={() => setPwShowNew(v => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700">
-                   <Lock size={15}/>
-                 </button>
-               </div>
-
-               {pwNew && (() => {
-                 const s = getPasswordStrength(pwNew);
-                 return (
-                   <div className="space-y-1">
-                     <div className="h-1.5 bg-slate-200 rounded-full overflow-hidden">
-                       <div className={`h-full rounded-full transition-all ${s.color}`} style={{ width: s.width }}/>
-                     </div>
-                     <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">{s.label}</p>
-                   </div>
-                 );
-               })()}
-
-               <div className="relative">
-                 <input
-                   type="password"
-                   value={pwConfirm}
-                   onChange={e => setPwConfirm(e.target.value)}
-                   placeholder="Confirmer le nouveau mot de passe"
-                   className="w-full px-4 py-3 border border-slate-200 rounded-2xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-white"
-                 />
-               </div>
-             </div>
-
-             {pwError && <p className="text-xs text-red-500 font-bold">{pwError}</p>}
-             {pwSuccess && <p className="text-xs text-green-600 font-bold">Mot de passe mis à jour avec succès.</p>}
-
-             <div className="flex flex-wrap gap-3 pt-1">
-               <button
-                 type="button"
-                 onClick={generateStrongPassword}
-                 className="px-5 py-2 bg-slate-100 text-slate-700 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-indigo-50 hover:text-indigo-700 transition-all flex items-center gap-2"
-               >
-                 <Sparkles size={13}/> Générer un mot de passe
-               </button>
-               <button
-                 type="button"
-                 onClick={handleChangePassword}
-                 disabled={pwSaving}
-                 className="px-6 py-2 bg-indigo-600 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-900 transition-all flex items-center gap-2 disabled:opacity-60"
-               >
-                 {pwSaving ? <Loader2 size={13} className="animate-spin"/> : <Save size={13}/>}
-                 Enregistrer
-               </button>
-             </div>
-           </div>
-
-           <div className="flex flex-wrap items-center justify-between gap-4 p-6 bg-slate-50 rounded-3xl border border-slate-100">
-              <div>
-                 <p className="text-sm font-black text-slate-900 uppercase">Double Authentification (MFA)</p>
-                 <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-1">Sécurise l'accès par code mobile</p>
+            {/* — Changement de mot de passe — */}
+            <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm space-y-6">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-indigo-50 rounded-2xl flex items-center justify-center shrink-0">
+                  <Lock size={18} className="text-indigo-600"/>
+                </div>
+                <div>
+                  <p className="text-sm font-black text-slate-900 uppercase">Changer le mot de passe</p>
+                  <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Mise à jour sécurisée de vos identifiants</p>
+                </div>
               </div>
-              <button className="px-6 py-2 bg-indigo-600 text-white rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-slate-900 transition-all">GÉRER LE MFA</button>
-           </div>
-           <div className="flex flex-wrap items-center justify-between gap-4 p-6 bg-slate-50 rounded-3xl border border-slate-100">
-              <div>
-                 <p className="text-sm font-black text-slate-900 uppercase">Registre de connexion</p>
-                 <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-1">Historique des accès de l'instance</p>
-              </div>
-              <button className="px-6 py-2 bg-slate-200 text-slate-500 rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-indigo-600 hover:text-white transition-all">CONSULTER</button>
-           </div>
-        </div>
-      )}
 
-      {activeSubTab === 'support' && (
-        <div className="bg-white p-5 md:p-10 rounded-[3rem] border border-slate-100 shadow-sm max-w-4xl animate-in slide-in-from-bottom-4">
-         <Support user={fakeUser} />
+              <div className="space-y-4">
+                <div className="relative">
+                  <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1.5 block">Mot de passe actuel</label>
+                  <input
+                    type={pwShowCurrent ? 'text' : 'password'}
+                    value={pwCurrent}
+                    onChange={e => setPwCurrent(e.target.value)}
+                    placeholder="••••••••"
+                    className="w-full px-5 py-3.5 pr-12 border border-slate-200 rounded-2xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-slate-50"
+                  />
+                  <button type="button" onClick={() => setPwShowCurrent(v => !v)} className="absolute right-4 bottom-3.5 text-slate-400 hover:text-slate-700">
+                    <Lock size={15}/>
+                  </button>
+                </div>
+
+                <div className="relative">
+                  <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1.5 block">Nouveau mot de passe</label>
+                  <input
+                    type={pwShowNew ? 'text' : 'password'}
+                    value={pwNew}
+                    onChange={e => setPwNew(e.target.value)}
+                    placeholder="••••••••"
+                    className="w-full px-5 py-3.5 pr-12 border border-slate-200 rounded-2xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-slate-50"
+                  />
+                  <button type="button" onClick={() => setPwShowNew(v => !v)} className="absolute right-4 bottom-3.5 text-slate-400 hover:text-slate-700">
+                    <Lock size={15}/>
+                  </button>
+                </div>
+
+                {pwNew && (() => {
+                  const s = getPasswordStrength(pwNew);
+                  return (
+                    <div className="space-y-1.5 px-1">
+                      <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+                        <div className={`h-full rounded-full transition-all duration-500 ${s.color}`} style={{ width: s.width }}/>
+                      </div>
+                      <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{s.label}</p>
+                    </div>
+                  );
+                })()}
+
+                <div>
+                  <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1.5 block">Confirmer le nouveau mot de passe</label>
+                  <input
+                    type="password"
+                    value={pwConfirm}
+                    onChange={e => setPwConfirm(e.target.value)}
+                    placeholder="••••••••"
+                    className="w-full px-5 py-3.5 border border-slate-200 rounded-2xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-slate-50"
+                  />
+                </div>
+              </div>
+
+              {pwError && <p className="text-xs text-red-500 font-bold px-1">{pwError}</p>}
+              {pwSuccess && <p className="text-xs text-green-600 font-bold px-1 flex items-center gap-2"><CheckCircle2 size={14}/> Mot de passe mis à jour avec succès.</p>}
+
+              <div className="flex flex-wrap gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={generateStrongPassword}
+                  className="flex-1 min-w-[140px] px-5 py-3 bg-slate-100 text-slate-700 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-indigo-50 hover:text-indigo-700 transition-all flex items-center justify-center gap-2"
+                >
+                  <Sparkles size={13}/> Générer
+                </button>
+                <button
+                  type="button"
+                  onClick={handleChangePassword}
+                  disabled={pwSaving}
+                  className="flex-1 min-w-[140px] px-6 py-3 bg-indigo-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-900 transition-all flex items-center justify-center gap-2 disabled:opacity-60"
+                >
+                  {pwSaving ? <Loader2 size={13} className="animate-spin"/> : <Save size={13}/>}
+                  Enregistrer
+                </button>
+              </div>
+            </div>
+
+            {/* — Actions rapides (MFA + Sessions) — */}
+            <div className="space-y-4">
+              <div className="bg-white p-7 rounded-[2.5rem] border border-slate-100 shadow-sm flex items-center justify-between gap-6">
+                <div className="flex items-center gap-4">
+                  <div className="w-12 h-12 bg-indigo-50 rounded-2xl flex items-center justify-center shrink-0">
+                    <ShieldCheck size={22} className="text-indigo-600"/>
+                  </div>
+                  <div>
+                    <p className="text-sm font-black text-slate-900 uppercase">Double Authentification</p>
+                    <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-0.5">Sécurise l'accès par code mobile</p>
+                  </div>
+                </div>
+                <button className="px-5 py-2.5 bg-indigo-600 text-white rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-slate-900 transition-all shrink-0">GÉRER</button>
+              </div>
+
+              <div className="bg-white p-7 rounded-[2.5rem] border border-slate-100 shadow-sm flex items-center justify-between gap-6">
+                <div className="flex items-center gap-4">
+                  <div className="w-12 h-12 bg-slate-100 rounded-2xl flex items-center justify-center shrink-0">
+                    <FileText size={22} className="text-slate-500"/>
+                  </div>
+                  <div>
+                    <p className="text-sm font-black text-slate-900 uppercase">Registre de connexion</p>
+                    <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-0.5">Historique des accès de l'instance</p>
+                  </div>
+                </div>
+                <button className="px-5 py-2.5 bg-slate-100 text-slate-600 rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-indigo-600 hover:text-white transition-all shrink-0">VOIR</button>
+              </div>
+
+              {/* Conseil sécurité */}
+              <div className="bg-indigo-50 border border-indigo-100 p-6 rounded-[2rem] flex items-start gap-4">
+                <ShieldCheck size={20} className="text-indigo-500 shrink-0 mt-0.5"/>
+                <p className="text-[10px] font-bold text-indigo-700 uppercase leading-relaxed">
+                  Activez le MFA pour doubler la protection de votre compte administrateur. En cas de compromission du mot de passe, votre espace restera sécurisé.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* — Zone dangereuse — */}
+          <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm overflow-hidden">
+            <div className="flex items-center gap-3 px-8 py-5 bg-gradient-to-r from-slate-900 to-slate-800 border-b border-slate-700">
+              <AlertTriangle size={18} className="text-amber-400"/>
+              <span className="text-xs font-black text-white uppercase tracking-[0.2em]">Zone Dangereuse</span>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 divide-y lg:divide-y-0 lg:divide-x divide-slate-100">
+
+              {/* Désactivation */}
+              <div className="p-8 space-y-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-orange-100 rounded-2xl flex items-center justify-center shrink-0">
+                    <PowerOff size={18} className="text-orange-600"/>
+                  </div>
+                  <div>
+                    <p className="text-sm font-black text-slate-900 uppercase">Désactiver le compte</p>
+                    <p className="text-[10px] text-orange-500 font-bold uppercase tracking-widest mt-0.5">Suspension temporaire de l'accès</p>
+                  </div>
+                </div>
+                <p className="text-xs text-slate-500 leading-relaxed">
+                  Suspend l'accès à votre espace pour tous vos utilisateurs. Vos données sont conservées. Vous pouvez réactiver à tout moment en contactant le support.
+                </p>
+                {!showDeactivateConfirm ? (
+                  <button
+                    onClick={() => setShowDeactivateConfirm(true)}
+                    className="w-full py-3 bg-orange-50 border border-orange-200 text-orange-700 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-orange-100 transition-all flex items-center justify-center gap-2"
+                  >
+                    <PowerOff size={13}/> Désactiver le compte
+                  </button>
+                ) : (
+                  <div className="bg-orange-50 border border-orange-200 rounded-2xl p-5 space-y-3">
+                    <p className="text-[10px] text-orange-800 font-black uppercase">Confirmer la désactivation ?</p>
+                    <p className="text-[10px] text-orange-600">Tous vos utilisateurs perdront l'accès immédiatement.</p>
+                    <div className="flex gap-3">
+                      <button onClick={handleDeactivateAccount} disabled={accountActionLoading} className="flex-1 py-2.5 bg-orange-600 text-white rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-orange-800 transition-all disabled:opacity-60 flex items-center justify-center gap-2">
+                        {accountActionLoading ? <Loader2 size={12} className="animate-spin"/> : <PowerOff size={12}/>} Confirmer
+                      </button>
+                      <button onClick={() => setShowDeactivateConfirm(false)} className="flex-1 py-2.5 bg-white border border-slate-200 text-slate-700 rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-slate-50 transition-all">Annuler</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Suppression définitive */}
+              <div className="p-8 space-y-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-red-100 rounded-2xl flex items-center justify-center shrink-0">
+                    <Trash2 size={18} className="text-red-600"/>
+                  </div>
+                  <div>
+                    <p className="text-sm font-black text-slate-900 uppercase">Supprimer le compte</p>
+                    <p className="text-[10px] text-red-500 font-bold uppercase tracking-widest mt-0.5">Action irréversible après 30 jours</p>
+                  </div>
+                </div>
+                <p className="text-xs text-slate-500 leading-relaxed">
+                  Programme la suppression définitive de votre espace et toutes vos données sous 30 jours. Vous pouvez annuler pendant ce délai via le support.
+                </p>
+                {!showDeleteConfirm ? (
+                  <button
+                    onClick={() => setShowDeleteConfirm(true)}
+                    className="w-full py-3 bg-red-50 border border-red-200 text-red-700 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-red-100 transition-all flex items-center justify-center gap-2"
+                  >
+                    <Trash2 size={13}/> Supprimer définitivement
+                  </button>
+                ) : (
+                  <div className="bg-red-50 border border-red-200 rounded-2xl p-5 space-y-3">
+                    <p className="text-[10px] text-red-800 font-black uppercase">Tapez <span className="bg-red-100 px-1.5 py-0.5 rounded font-mono">SUPPRIMER</span> pour confirmer</p>
+                    <input
+                      type="text"
+                      value={deleteConfirmText}
+                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => setDeleteConfirmText(e.target.value)}
+                      placeholder="SUPPRIMER"
+                      className="w-full px-4 py-3 border border-red-200 rounded-2xl text-sm font-black focus:outline-none focus:ring-2 focus:ring-red-400 bg-white uppercase tracking-widest"
+                    />
+                    <div className="flex gap-3">
+                      <button
+                        onClick={handleDeleteAccount}
+                        disabled={deleteConfirmText !== 'SUPPRIMER' || accountActionLoading}
+                        className="flex-1 py-2.5 bg-red-600 text-white rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-red-800 transition-all disabled:opacity-40 flex items-center justify-center gap-2"
+                      >
+                        {accountActionLoading ? <Loader2 size={12} className="animate-spin"/> : <Trash2 size={12}/>} Supprimer
+                      </button>
+                      <button onClick={() => { setShowDeleteConfirm(false); setDeleteConfirmText(''); }} className="flex-1 py-2.5 bg-white border border-slate-200 text-slate-700 rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-slate-50 transition-all">Annuler</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+            </div>
+          </div>
         </div>
       )}
     </div>

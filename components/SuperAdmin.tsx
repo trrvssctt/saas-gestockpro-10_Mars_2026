@@ -300,19 +300,42 @@ const SuperAdmin: React.FC = () => {
 
   return (
     <div className="flex h-screen bg-zinc-950 text-white overflow-hidden">
+
+      {/* ══ MOBILE BACKDROP ══ */}
+      {sidebarOpen && (
+        <div
+          className="fixed inset-0 z-30 bg-black/60 backdrop-blur-sm lg:hidden"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+
+      {/* ══ DESKTOP SIDEBAR SPACER (keeps flex layout) ══ */}
+      <div className={`hidden lg:block flex-shrink-0 transition-all duration-300 ${sidebarOpen ? 'lg:w-60' : 'lg:w-16'}`} />
+
       {/* ══ SIDEBAR ══ */}
-      <aside className={`${sidebarOpen ? 'w-60' : 'w-16'} flex-shrink-0 bg-zinc-900 border-r border-zinc-800/50 flex flex-col transition-all duration-300 z-10`}>
+      <aside className={`
+        fixed inset-y-0 left-0 z-40 flex flex-col
+        bg-zinc-900 border-r border-zinc-800/50 transition-all duration-300
+        ${sidebarOpen
+          ? 'w-72 translate-x-0 lg:w-60'
+          : 'w-72 -translate-x-full lg:w-16 lg:translate-x-0'}
+      `}>
         {/* Logo area */}
         <div className="p-4 border-b border-zinc-800/50 flex items-center gap-3">
           <div className="w-8 h-8 bg-gradient-to-br from-rose-500 to-indigo-600 rounded-xl flex items-center justify-center flex-shrink-0 shadow-lg">
             <ShieldCheck size={16} className="text-white" />
           </div>
-          {sidebarOpen && (
-            <div className="overflow-hidden">
-              <p className="text-[10px] font-black text-rose-400 uppercase tracking-[0.2em]">Kernel</p>
-              <p className="text-xs font-black text-white leading-none">Super Admin</p>
-            </div>
-          )}
+          <div className={`overflow-hidden transition-all duration-200 ${sidebarOpen ? 'opacity-100 w-auto' : 'opacity-0 w-0 lg:hidden'}`}>
+            <p className="text-[10px] font-black text-rose-400 uppercase tracking-[0.2em] whitespace-nowrap">Kernel</p>
+            <p className="text-xs font-black text-white leading-none whitespace-nowrap">Super Admin</p>
+          </div>
+          {/* Close button mobile only */}
+          <button
+            onClick={() => setSidebarOpen(false)}
+            className="ml-auto lg:hidden p-1.5 text-zinc-500 hover:text-white rounded-lg hover:bg-zinc-800 transition-all"
+          >
+            <X size={14} />
+          </button>
         </div>
 
         {/* Navigation */}
@@ -324,7 +347,7 @@ const SuperAdmin: React.FC = () => {
             return (
               <button
                 key={item.id}
-                onClick={() => setActiveTab(item.id)}
+                onClick={() => { setActiveTab(item.id); setSidebarOpen(prev => { if (window.innerWidth < 1024) return false; return prev; }); }}
                 title={!sidebarOpen ? item.label : undefined}
                 className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all duration-200 group relative ${
                   isActive
@@ -333,9 +356,7 @@ const SuperAdmin: React.FC = () => {
                 }`}
               >
                 <Icon size={16} className={`flex-shrink-0 ${isActive ? 'text-indigo-400' : ''}`} />
-                {sidebarOpen && (
-                  <span className="text-xs font-bold truncate">{item.label}</span>
-                )}
+                <span className={`text-xs font-bold truncate transition-all duration-200 ${sidebarOpen ? 'opacity-100' : 'opacity-0 w-0 overflow-hidden lg:hidden'}`}>{item.label}</span>
                 {badge > 0 && (
                   <span className={`${sidebarOpen ? 'ml-auto' : 'absolute top-1 right-1'} flex items-center justify-center min-w-[18px] h-[18px] bg-rose-500 text-white text-[9px] font-black rounded-full px-1 animate-pulse`}>
                     {badge}
@@ -346,8 +367,8 @@ const SuperAdmin: React.FC = () => {
           })}
         </nav>
 
-        {/* Sidebar footer */}
-        <div className="p-3 border-t border-zinc-800/50">
+        {/* Sidebar footer — desktop collapse only */}
+        <div className="p-3 border-t border-zinc-800/50 hidden lg:block">
           <button
             onClick={() => setSidebarOpen(!sidebarOpen)}
             className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50 transition-all"
@@ -362,20 +383,30 @@ const SuperAdmin: React.FC = () => {
       {/* ══ MAIN CONTENT ══ */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         {/* Top bar */}
-        <header className="flex-shrink-0 bg-zinc-900/80 backdrop-blur border-b border-zinc-800/50 px-6 py-3 flex items-center justify-between">
-          <div>
-            <h1 className="font-black text-white text-sm">{NAV_ITEMS.find(n => n.id === activeTab)?.label}</h1>
-            <p className="text-[10px] text-zinc-500">{NAV_ITEMS.find(n => n.id === activeTab)?.description}</p>
+        <header className="flex-shrink-0 bg-zinc-900/80 backdrop-blur border-b border-zinc-800/50 px-3 sm:px-6 py-3 flex items-center gap-3">
+          {/* Mobile hamburger */}
+          <button
+            onClick={() => setSidebarOpen(v => !v)}
+            className="lg:hidden flex-shrink-0 p-2 text-zinc-400 hover:text-white rounded-xl hover:bg-zinc-800 transition-all"
+          >
+            <Menu size={18} />
+          </button>
+
+          <div className="flex-1 min-w-0">
+            <h1 className="font-black text-white text-sm truncate">{NAV_ITEMS.find(n => n.id === activeTab)?.label}</h1>
+            <p className="text-[10px] text-zinc-500 hidden sm:block">{NAV_ITEMS.find(n => n.id === activeTab)?.description}</p>
           </div>
-          <div className="flex items-center gap-3">
+
+          <div className="flex items-center gap-2">
             {/* Alert badge */}
             {totalAlerts > 0 && (
               <button
                 onClick={() => setActiveTab('ALERTES')}
-                className="flex items-center gap-2 px-3 py-1.5 bg-rose-500/10 border border-rose-500/20 rounded-xl text-rose-400 text-xs font-bold hover:bg-rose-500/20 transition-all animate-pulse"
+                className="flex items-center gap-1.5 px-2 sm:px-3 py-1.5 bg-rose-500/10 border border-rose-500/20 rounded-xl text-rose-400 text-xs font-bold hover:bg-rose-500/20 transition-all animate-pulse"
               >
                 <Bell size={13} />
-                {totalAlerts} alerte(s)
+                <span className="hidden sm:inline">{totalAlerts} alerte(s)</span>
+                <span className="sm:hidden">{totalAlerts}</span>
               </button>
             )}
 
@@ -383,25 +414,25 @@ const SuperAdmin: React.FC = () => {
             <div className="relative">
               <button
                 onClick={() => { setShowLivePanel(v => !v); setLiveUnread(0); }}
-                className={`flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-bold transition-all relative ${
+                className={`flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-xl text-xs font-bold transition-all relative ${
                   livePayments.length > 0
                     ? 'bg-emerald-500/10 border border-emerald-500/25 text-emerald-400 hover:bg-emerald-500/20'
                     : 'bg-zinc-800 border border-zinc-700/50 text-zinc-400 hover:text-white'
                 }`}
               >
-                <span className={`w-1.5 h-1.5 rounded-full ${livePayments.length > 0 ? 'bg-emerald-400 animate-pulse' : 'bg-zinc-600'}`} />
-                Paiements live
+                <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${livePayments.length > 0 ? 'bg-emerald-400 animate-pulse' : 'bg-zinc-600'}`} />
+                <span className="hidden sm:inline">Paiements live</span>
                 {liveUnread > 0 && (
                   <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] bg-emerald-500 text-white text-[9px] font-black rounded-full flex items-center justify-center px-1 animate-bounce">
                     {liveUnread > 9 ? '9+' : liveUnread}
                   </span>
                 )}
-                <ChevronDown size={11} className={`transition-transform ${showLivePanel ? 'rotate-180' : ''}`} />
+                <ChevronDown size={11} className={`transition-transform hidden sm:block ${showLivePanel ? 'rotate-180' : ''}`} />
               </button>
 
               {/* Dropdown panel */}
               {showLivePanel && (
-                <div className="absolute right-0 top-full mt-2 w-96 bg-zinc-900 border border-zinc-700/60 rounded-2xl shadow-2xl z-50 overflow-hidden animate-in slide-in-from-top-2 duration-200">
+                <div className="absolute right-0 top-full mt-2 w-[calc(100vw-1.5rem)] sm:w-96 max-w-sm sm:max-w-none bg-zinc-900 border border-zinc-700/60 rounded-2xl shadow-2xl z-50 overflow-hidden animate-in slide-in-from-top-2 duration-200">
                   <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">
                     <div className="flex items-center gap-2">
                       <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
@@ -480,10 +511,11 @@ const SuperAdmin: React.FC = () => {
             <button
               onClick={fetchData}
               disabled={loading}
-              className="flex items-center gap-2 px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 rounded-xl text-zinc-400 hover:text-white text-xs font-bold transition-all"
+              className="flex items-center gap-1.5 px-2 sm:px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 rounded-xl text-zinc-400 hover:text-white text-xs font-bold transition-all"
+              title="Actualiser"
             >
               <RefreshCw size={13} className={loading ? 'animate-spin' : ''} />
-              {loading ? 'Chargement...' : 'Actualiser'}
+              <span className="hidden sm:inline">{loading ? 'Chargement...' : 'Actualiser'}</span>
             </button>
           </div>
         </header>
@@ -503,8 +535,8 @@ const SuperAdmin: React.FC = () => {
 
       {/* ══ MODAL: BILLING DETAIL ══ */}
       {showBillingDetail && (
-        <div className="fixed inset-0 z-50 flex items-center justify-end bg-black/60 backdrop-blur-sm">
-          <div className="w-full max-w-xl h-full bg-zinc-900 border-l border-zinc-700/50 overflow-y-auto shadow-2xl animate-in slide-in-from-right duration-300">
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center sm:justify-end bg-black/60 backdrop-blur-sm">
+          <div className="w-full sm:max-w-xl sm:h-full bg-zinc-900 sm:border-l border-t sm:border-t-0 border-zinc-700/50 overflow-y-auto shadow-2xl animate-in slide-in-from-bottom sm:slide-in-from-right duration-300 rounded-t-3xl sm:rounded-none max-h-[92vh] sm:max-h-full">
             <div className="sticky top-0 bg-zinc-900/95 backdrop-blur px-6 py-4 border-b border-zinc-700/50 flex items-center justify-between z-10">
               <div>
                 <h3 className="font-black text-white">Détails billing</h3>
@@ -596,8 +628,8 @@ const SuperAdmin: React.FC = () => {
 
       {/* ══ MODAL: EMAIL ══ */}
       {emailModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
-          <div className="bg-zinc-900 border border-zinc-700/50 rounded-2xl p-8 w-full max-w-lg shadow-2xl">
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4 bg-black/70 backdrop-blur-sm">
+          <div className="bg-zinc-900 border border-zinc-700/50 rounded-t-3xl sm:rounded-2xl p-6 sm:p-8 w-full sm:max-w-lg shadow-2xl max-h-[92vh] overflow-y-auto">
             <div className="flex items-center justify-between mb-6">
               <div>
                 <h3 className="font-black text-white">Envoyer un email</h3>
@@ -646,8 +678,8 @@ const SuperAdmin: React.FC = () => {
 
       {/* ══ MODAL: VALIDATE SUBSCRIPTION ══ */}
       {validateModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
-          <div className="bg-zinc-900 border border-emerald-500/20 rounded-2xl w-full max-w-md shadow-2xl animate-in zoom-in-95 duration-200">
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4 bg-black/70 backdrop-blur-sm">
+          <div className="bg-zinc-900 border border-emerald-500/20 rounded-t-3xl sm:rounded-2xl w-full sm:max-w-md shadow-2xl animate-in slide-in-from-bottom sm:zoom-in-95 duration-200 max-h-[92vh] overflow-y-auto">
 
             {/* Header */}
             <div className="px-6 py-5 border-b border-zinc-800 flex items-center justify-between">
@@ -776,8 +808,8 @@ const SuperAdmin: React.FC = () => {
 
       {/* ══ MODAL: CONFIRM ACTION ══ */}
       {confirmAction && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
-          <div className={`bg-zinc-900 border rounded-2xl p-8 w-full max-w-sm text-center shadow-2xl ${
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4 bg-black/70 backdrop-blur-sm">
+          <div className={`bg-zinc-900 border rounded-t-3xl sm:rounded-2xl p-6 sm:p-8 w-full sm:max-w-sm text-center shadow-2xl ${
             confirmAction.type === 'danger' ? 'border-rose-500/30' :
             confirmAction.type === 'success' ? 'border-emerald-500/30' :
             'border-amber-500/30'

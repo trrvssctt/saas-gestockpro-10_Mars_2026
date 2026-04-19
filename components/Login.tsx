@@ -306,13 +306,25 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBackToLanding, initialM
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     // Vérifier les tentatives de connexion
     if (!checkLoginAttempts(loginEmail)) {
       setApiError({ message: `Trop de tentatives de connexion. Réessayez dans ${Math.ceil(timeRemaining / 60)} minutes.` } as any);
       return;
     }
-    
+
+    // Vérification format email
+    if (!loginEmail.trim() || !EMAIL_RE.test(loginEmail.trim())) {
+      setApiError({ message: 'Veuillez saisir une adresse email valide.' } as any);
+      return;
+    }
+
+    // Vérification email banni / domaine suspect
+    if (isBlockedEmail(loginEmail)) {
+      setApiError({ message: 'Accès refusé. Cette adresse email n\'est pas autorisée.' } as any);
+      return;
+    }
+
     setLoading(true);
     setApiError(null);
     try {
@@ -457,8 +469,32 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBackToLanding, initialM
   };
 
 
-  const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+  const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[a-zA-Z]{2,}$/;
   const PHONE_RE = /^[+\d][\d\s\-().]{6,19}$/;
+
+  const BLOCKED_EMAILS_SET = new Set([
+    'jm.koffi@agrobusiness.ci',
+    'moussa.diop@example.com',
+    'awa.ndiaye@fashion.sn',
+  ]);
+
+  const BLOCKED_DOMAINS_SET = new Set([
+    'example.com', 'example.org', 'example.net',
+    'test.com', 'test.org', 'test.net',
+    'localhost.com',
+    'mailinator.com', 'guerrillamail.com', 'tempmail.com',
+    'throwaway.email', 'yopmail.com', 'trashmail.com',
+    'maildrop.cc', 'discard.email', 'sharklasers.com',
+    'spam4.me', 'fakeinbox.com', 'mailnull.com',
+    'getairmail.com', 'dispostable.com', 'nospammail.net',
+  ]);
+
+  const isBlockedEmail = (email: string): boolean => {
+    const normalized = email.toLowerCase().trim();
+    if (BLOCKED_EMAILS_SET.has(normalized)) return true;
+    const domain = normalized.split('@')[1];
+    return domain ? BLOCKED_DOMAINS_SET.has(domain) : false;
+  };
 
   const validateStep2 = (): boolean => {
     const errs: Record<string, string> = {};
@@ -482,6 +518,8 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBackToLanding, initialM
       errs.adminEmail = 'L\'adresse email est obligatoire.';
     } else if (!EMAIL_RE.test(regData.adminEmail.trim())) {
       errs.adminEmail = 'Format d\'email invalide (ex: nom@domaine.com).';
+    } else if (isBlockedEmail(regData.adminEmail)) {
+      errs.adminEmail = 'Cette adresse email n\'est pas autorisée. Utilisez une adresse professionnelle valide.';
     }
     if (!regData.adminPassword) {
       errs.adminPassword = 'Le mot de passe est obligatoire.';
@@ -773,6 +811,8 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBackToLanding, initialM
     }
   };
 
+  // handleStripeRegister — temporairement masqué
+  /*
   const handleStripeRegister = async () => {
     setLoading(true);
     setApiError(null);
@@ -794,6 +834,7 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBackToLanding, initialM
       setLoading(false);
     }
   };
+  */
 
   const PaymentStep = () => {
     const amount = computeAmount();
@@ -862,15 +903,17 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBackToLanding, initialM
         {/* Sélecteur méthode : Wave ou Stripe */}
         <div>
           <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-3">Méthode de paiement</p>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3">
             <button type="button" onClick={() => setRegData({...regData, paymentMethod: 'Wave'})}
               className={`py-4 px-4 rounded-2xl border-2 font-black text-[10px] uppercase tracking-widest transition-all flex items-center justify-center gap-2 ${regData.paymentMethod === 'Wave' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-100 text-slate-500 hover:border-slate-200'}`}>
               <Smartphone size={16} /> Wave
             </button>
+            {/* Bouton Carte Stripe — temporairement masqué
             <button type="button" onClick={() => setRegData({...regData, paymentMethod: 'Stripe'})}
               className={`py-4 px-4 rounded-2xl border-2 font-black text-[10px] uppercase tracking-widest transition-all flex items-center justify-center gap-2 ${regData.paymentMethod === 'Stripe' ? 'border-indigo-500 bg-indigo-50 text-indigo-700' : 'border-slate-100 text-slate-500 hover:border-slate-200'}`}>
               <CreditCard size={16} /> Carte Stripe
             </button>
+            */}
           </div>
         </div>
 
@@ -908,7 +951,7 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBackToLanding, initialM
           </div>
         )}
 
-        {/* Stripe : redirection */}
+        {/* Stripe : redirection — temporairement masqué
         {regData.paymentMethod === 'Stripe' && (
           <div className="space-y-4 animate-in fade-in duration-300">
             <div className="p-5 bg-indigo-50 border-2 border-indigo-100 rounded-3xl space-y-2">
@@ -929,6 +972,7 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBackToLanding, initialM
             </div>
           </div>
         )}
+        */}
 
         {/* Aucune méthode sélectionnée */}
         {regData.paymentMethod !== 'Wave' && regData.paymentMethod !== 'Stripe' && (

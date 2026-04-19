@@ -121,9 +121,42 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLogin }) => {
       return;
     }
     
-    if (!contactForm.email.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactForm.email)) {
+    // Emails explicitement bannis
+    const BLOCKED_EMAILS_CLIENT = new Set([
+      'jm.koffi@agrobusiness.ci',
+      'moussa.diop@example.com',
+      'awa.ndiaye@fashion.sn',
+    ]);
+    // Domaines de test / jetables connus
+    const BLOCKED_DOMAINS_CLIENT = new Set([
+      'example.com', 'example.org', 'example.net',
+      'test.com', 'test.org', 'test.net',
+      'localhost.com',
+      'mailinator.com', 'guerrillamail.com', 'tempmail.com',
+      'throwaway.email', 'yopmail.com', 'trashmail.com',
+      'maildrop.cc', 'discard.email', 'sharklasers.com',
+      'spam4.me', 'fakeinbox.com', 'mailnull.com',
+      'getairmail.com', 'dispostable.com', 'nospammail.net',
+    ]);
+
+    const rawEmail = contactForm.email.trim().toLowerCase();
+
+    if (!rawEmail || !/^[^\s@]+@[^\s@]+\.[a-zA-Z]{2,}$/.test(rawEmail)) {
       setSubmitStatus('error');
       setSubmitMessage('Veuillez saisir une adresse email valide.');
+      return;
+    }
+
+    if (BLOCKED_EMAILS_CLIENT.has(rawEmail)) {
+      setSubmitStatus('error');
+      setSubmitMessage('Cette adresse email n\'est pas autorisée à envoyer des messages.');
+      return;
+    }
+
+    const emailDomain = rawEmail.split('@')[1];
+    if (BLOCKED_DOMAINS_CLIENT.has(emailDomain)) {
+      setSubmitStatus('error');
+      setSubmitMessage('Veuillez utiliser une adresse email professionnelle valide. Les adresses temporaires ou de test ne sont pas acceptées.');
       return;
     }
     

@@ -116,7 +116,7 @@ const Sales = ({ currency, user, tenantSettings, plan }: { currency: string, use
     { key: 'totalTtc', label: 'Montant TTC', format: (v) => Number(v || 0).toLocaleString('fr-FR') },
     { key: 'amountPaid', label: 'Encaissé', format: (v) => Number(v || 0).toLocaleString('fr-FR') },
     { key: 'totalTtc', label: 'Solde Restant', format: (_v, row) => Number(Math.max(0, (row.totalTtc || 0) - (row.amountPaid || 0))).toLocaleString('fr-FR') },
-    { key: 'status', label: 'Statut', format: (v) => v === 'TERMINE' ? 'Soldé' : v === 'EN_COURS' ? 'En cours' : v === 'ANNULE' ? 'Annulé' : v || '' },
+    { key: 'status', label: 'Statut', format: (v) => v === 'TERMINE' ? 'Soldé' : v === 'EN_COURS' ? 'En cours' : v === 'ANNULE' ? 'Annulé' : v === 'BROUILLON' ? 'Brouillon (en attente encaissement)' : v || '' },
     { key: 'paymentMethod', label: 'Méthode paiement' },
     { key: 'deliveryStatus', label: 'Livraison' },
   ];
@@ -281,6 +281,10 @@ const Sales = ({ currency, user, tenantSettings, plan }: { currency: string, use
       showToast('Veuillez renseigner le numéro de chèque et la banque émettrice', 'error');
       return;
     }
+    if (!editModeId && hasPaid && saleForm.paymentMethod === 'TRANSFER' && !saleForm.paymentReference) {
+      showToast('Veuillez renseigner la référence du virement bancaire', 'error');
+      return;
+    }
 
     setActionLoading(true);
     try {
@@ -338,6 +342,11 @@ const Sales = ({ currency, user, tenantSettings, plan }: { currency: string, use
 
     if (paymentForm.method === 'CHEQUE' && (!paymentForm.chequeNumber || !paymentForm.bankName)) {
       showToast('Veuillez renseigner le numéro de chèque et la banque émettrice', 'error');
+      return;
+    }
+
+    if (paymentForm.method === 'TRANSFER' && !paymentForm.reference) {
+      showToast('Veuillez renseigner la référence du virement bancaire', 'error');
       return;
     }
 
@@ -547,6 +556,7 @@ const Sales = ({ currency, user, tenantSettings, plan }: { currency: string, use
               <select value={filters.status} onChange={e => setFilters({...filters, status: e.target.value})} className="w-full bg-slate-50 border border-slate-100 rounded-xl px-4 py-3 text-xs font-bold outline-none">
                 <option value="ALL">Tous les statuts</option>
                 <option value="EN_COURS">EN COURS</option>
+                <option value="BROUILLON">BROUILLON (en attente d'encaissement)</option>
                 <option value="TERMINE">TERMINÉ</option>
                 <option value="ANNULE">ANNULÉ</option>
               </select>
@@ -611,11 +621,13 @@ const Sales = ({ currency, user, tenantSettings, plan }: { currency: string, use
               ) : visibleSales.map((sale) => {
                 const { payRate, delivRate, deliveredQty, totalQty } = getRates(sale);
                 const isAnnule = sale.status === 'ANNULE';
+                const isBrouillon = sale.status === 'BROUILLON';
                 return (
-                  <tr key={sale.id} className={`hover:bg-slate-50/50 transition-all group ${isAnnule ? 'bg-rose-50/20 opacity-60' : ''}`}>
+                  <tr key={sale.id} className={`hover:bg-slate-50/50 transition-all group ${isAnnule ? 'bg-rose-50/20 opacity-60' : isBrouillon ? 'bg-amber-50/30' : ''}`}>
                     <td className="px-3 md:px-8 py-3 md:py-5">
-                      <p className={`font-mono text-xs font-black ${isAnnule ? 'text-rose-400 line-through' : 'text-indigo-600'}`}>#{sale.reference}</p>
+                      <p className={`font-mono text-xs font-black ${isAnnule ? 'text-rose-400 line-through' : isBrouillon ? 'text-amber-600' : 'text-indigo-600'}`}>#{sale.reference}</p>
                       <p className="text-[9px] text-slate-400 font-bold mt-1">{new Date(sale.createdAt).toLocaleDateString()}</p>
+                      {isBrouillon && <span className="inline-flex items-center gap-1 mt-1 px-2 py-0.5 bg-amber-100 text-amber-700 text-[7px] font-black rounded-full uppercase tracking-widest"><Clock size={8}/> Brouillon</span>}
                     </td>
                     <td className="px-3 md:px-8 py-3 md:py-5">
                       <div className="flex items-center gap-2">
@@ -788,7 +800,7 @@ const Sales = ({ currency, user, tenantSettings, plan }: { currency: string, use
                             </div>
                             <div>
                               <p className="text-[7px] font-black uppercase text-indigo-400 tracking-widest pl-1 mb-1">
-                                {saleForm.paymentMethod === 'CHEQUE' ? 'Montant chèque' : 'Acompte'}
+                                {saleForm.paymentMethod === 'CHEQUE' ? 'Montant chèque' : saleForm.paymentMethod === 'TRANSFER' ? 'Montant virement' : 'Acompte'}
                               </p>
                               <input type="number" placeholder="0" value={saleForm.amountPaid} onChange={e => setSaleForm({...saleForm, amountPaid: parseFloat(e.target.value) || 0})} className="w-full bg-white/10 border border-white/10 rounded-xl px-3 py-2.5 text-[10px] font-black outline-none text-white" />
                             </div>
@@ -803,6 +815,17 @@ const Sales = ({ currency, user, tenantSettings, plan }: { currency: string, use
                                 <Upload size={10}/>{saleForm.paymentProofImage ? 'Preuve jointe ✓' : 'Joindre preuve'}
                                 <input type="file" accept="image/*" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (!f) return; const r = new FileReader(); r.onload = ev => setSaleForm({...saleForm, paymentProofImage: ev.target?.result as string}); r.readAsDataURL(f); }}/>
                               </label>
+                            </div>
+                          )}
+
+                          {/* Virement bancaire — référence obligatoire */}
+                          {saleForm.paymentMethod === 'TRANSFER' && parseFloat(saleForm.amountPaid.toString()) > 0 && (
+                            <div className="p-2.5 bg-amber-500/10 border border-amber-400/20 rounded-xl space-y-2">
+                              <p className="text-[7px] font-black text-amber-400 uppercase tracking-widest flex items-center gap-1">
+                                <Clock size={9}/> Virement · encaissement à confirmer · vente en brouillon
+                              </p>
+                              <input type="text" placeholder="Référence virement *" value={saleForm.paymentReference} onChange={e => setSaleForm({...saleForm, paymentReference: e.target.value})} className="w-full bg-white/10 border border-white/10 rounded-lg px-3 py-2 text-[10px] font-bold outline-none text-white placeholder-white/40"/>
+                              <p className="text-[7px] text-amber-300/70 font-bold">Le montant sera crédité en trésorerie uniquement après confirmation de l'encaissement.</p>
                             </div>
                           )}
 
@@ -852,6 +875,7 @@ const Sales = ({ currency, user, tenantSettings, plan }: { currency: string, use
                       <div className="flex items-center gap-3 mt-2">
                         <p className="text-[10px] text-indigo-400 font-bold uppercase tracking-widest">{new Date(selectedSaleDetails.createdAt).toLocaleString('fr-FR')}</p>
                         {selectedSaleDetails.status === 'ANNULE' && <span className="px-2 py-0.5 bg-rose-500 text-white text-[8px] font-black rounded uppercase">ANNULÉE</span>}
+                        {selectedSaleDetails.status === 'BROUILLON' && <span className="px-2 py-0.5 bg-amber-400 text-white text-[8px] font-black rounded uppercase flex items-center gap-1"><Clock size={9}/> Brouillon · En attente d'encaissement</span>}
                       </div>
                     </div>
                  </div>
@@ -915,7 +939,7 @@ const Sales = ({ currency, user, tenantSettings, plan }: { currency: string, use
                     )}
 
                     <div className={`p-4 md:p-8 rounded-[2rem] md:rounded-[3rem] text-white shadow-xl space-y-4 md:space-y-6 ${selectedSaleDetails.status === 'ANNULE' ? 'bg-rose-900' : 'bg-slate-900'}`}>
-                       <div className="flex justify-between items-center"><span className="text-[10px] font-black text-indigo-400 uppercase">Statut Transaction</span><span className={`px-3 py-1 rounded-full text-[8px] font-black uppercase ${selectedSaleDetails.status === 'TERMINE' ? 'bg-emerald-500/20 text-emerald-400' : selectedSaleDetails.status === 'ANNULE' ? 'bg-white/10 text-white' : 'bg-amber-500/20 text-amber-400'}`}>{selectedSaleDetails.status}</span></div>
+                       <div className="flex justify-between items-center"><span className="text-[10px] font-black text-indigo-400 uppercase">Statut Transaction</span><span className={`px-3 py-1 rounded-full text-[8px] font-black uppercase ${selectedSaleDetails.status === 'TERMINE' ? 'bg-emerald-500/20 text-emerald-400' : selectedSaleDetails.status === 'ANNULE' ? 'bg-white/10 text-white' : selectedSaleDetails.status === 'BROUILLON' ? 'bg-amber-500/20 text-amber-400' : 'bg-amber-500/20 text-amber-400'}`}>{selectedSaleDetails.status === 'BROUILLON' ? '⏳ BROUILLON' : selectedSaleDetails.status}</span></div>
                        <div className="space-y-1"><p className={`text-3xl font-black ${selectedSaleDetails.status === 'ANNULE' ? 'line-through opacity-50' : ''}`}>{parseFloat(selectedSaleDetails.totalTtc).toLocaleString()} {currency}</p><p className="text-[10px] font-bold text-slate-500 uppercase">Total Net à Payer</p></div>
                        <div className="space-y-4 pt-6 border-t border-white/10">
                           <div className="flex justify-between text-xs font-bold uppercase"><span className="text-slate-400">Déjà réglé</span><span className="text-emerald-400">-{parseFloat(selectedSaleDetails.amountPaid).toLocaleString()}</span></div>
@@ -929,6 +953,8 @@ const Sales = ({ currency, user, tenantSettings, plan }: { currency: string, use
                         <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest px-1">Historique des règlements</p>
                         {selectedSaleDetails.payments.map((p: any) => {
                           const isCheque = p.method === 'CHEQUE';
+                          const isTransferPay = p.method === 'TRANSFER';
+                          const isPendingPay = isCheque || isTransferPay;
                           const statusColors: Record<string, string> = {
                             PENDING: 'bg-amber-100 text-amber-700',
                             REGISTERED: 'bg-blue-100 text-blue-700',
@@ -939,25 +965,34 @@ const Sales = ({ currency, user, tenantSettings, plan }: { currency: string, use
                             FAILED: 'bg-rose-100 text-rose-700',
                           };
                           const statusLabels: Record<string, string> = {
-                            PENDING: 'Reçu',
+                            PENDING: 'En attente',
                             REGISTERED: 'Enregistré',
                             DEPOSITED: 'Déposé',
                             PROCESSING: 'En traitement',
-                            PAID: 'Encaissé',
+                            PAID: 'Encaissé ✓',
                             REJECTED: 'Rejeté',
                             FAILED: 'Impayé',
                           };
+                          // Workflow chèque : suivi multi-étapes
                           const chequeNextStatuses: Record<string, {value: string, label: string}[]> = {
                             PENDING:    [{ value: 'REGISTERED', label: 'Enregistrer' }, { value: 'REJECTED', label: 'Rejeter' }],
                             REGISTERED: [{ value: 'DEPOSITED', label: 'Déposer en banque' }, { value: 'REJECTED', label: 'Rejeter' }],
                             DEPOSITED:  [{ value: 'PROCESSING', label: 'En traitement' }, { value: 'REJECTED', label: 'Rejeter' }],
-                            PROCESSING: [{ value: 'PAID', label: 'Encaisser ✓' }, { value: 'REJECTED', label: 'Rejeter' }],
-                            PAID: [],
-                            REJECTED: [],
-                            FAILED: [],
+                            PROCESSING: [{ value: 'PAID', label: '✓ Encaisser' }, { value: 'REJECTED', label: 'Rejeter' }],
+                            PAID: [], REJECTED: [], FAILED: [],
                           };
+                          // Workflow virement : simple PENDING → PAID ou FAILED
+                          const transferNextStatuses: Record<string, {value: string, label: string}[]> = {
+                            PENDING: [{ value: 'PAID', label: '✓ Confirmer encaissement' }, { value: 'FAILED', label: 'Virement impayé' }],
+                            PAID: [], FAILED: [], REJECTED: [],
+                          };
+                          const nextActions = isCheque
+                            ? (chequeNextStatuses[p.status] || [])
+                            : isTransferPay
+                              ? (transferNextStatuses[p.status] || [])
+                              : [];
                           return (
-                            <div key={p.id} className={`p-4 rounded-2xl border ${isCheque ? 'bg-indigo-50 border-indigo-100' : 'bg-slate-50 border-slate-100'}`}>
+                            <div key={p.id} className={`p-4 rounded-2xl border ${isCheque ? 'bg-indigo-50 border-indigo-100' : isTransferPay && p.status === 'PENDING' ? 'bg-amber-50 border-amber-200' : 'bg-slate-50 border-slate-100'}`}>
                               <div className="flex justify-between items-start">
                                 <div>
                                   <p className="text-[10px] font-black text-slate-800 uppercase">{p.method.replace('_', ' ')} — {parseFloat(p.amount).toLocaleString()} {currency}</p>
@@ -972,10 +1007,10 @@ const Sales = ({ currency, user, tenantSettings, plan }: { currency: string, use
                               {p.proofImage && (
                                 <img src={p.proofImage} alt="preuve" className="mt-2 w-full h-20 object-cover rounded-xl border border-slate-200"/>
                               )}
-                              {/* Actions de suivi chèque */}
-                              {isCheque && chequeNextStatuses[p.status]?.length > 0 && (
+                              {/* Actions de suivi chèque ou virement */}
+                              {isPendingPay && nextActions.length > 0 && (
                                 <div className="flex gap-2 mt-3 flex-wrap">
-                                  {chequeNextStatuses[p.status].map(action => (
+                                  {nextActions.map(action => (
                                     <button
                                       key={action.value}
                                       onClick={() => handleUpdateChequeStatus(p.id, action.value)}
@@ -1004,8 +1039,15 @@ const Sales = ({ currency, user, tenantSettings, plan }: { currency: string, use
                           <button onClick={() => handleEditSaleRequest(selectedSaleDetails)} className="w-full py-4 bg-amber-500 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-lg flex items-center justify-center gap-3 hover:bg-amber-600 transition-all"><Edit3 size={16}/> MODIFIER LES ARTICLES</button>
                        )}
                        
-                       {selectedSaleDetails.status !== 'ANNULE' && parseFloat(selectedSaleDetails.amountPaid) < parseFloat(selectedSaleDetails.totalTtc) && (
+                       {selectedSaleDetails.status !== 'ANNULE' && parseFloat(selectedSaleDetails.amountPaid) < parseFloat(selectedSaleDetails.totalTtc) && selectedSaleDetails.paymentMethod !== 'TRANSFER' && selectedSaleDetails.paymentMethod !== 'CHEQUE' && (
                           <button onClick={() => { setPaymentForm({ amount: Math.max(0, parseFloat(selectedSaleDetails.totalTtc) - parseFloat(selectedSaleDetails.amountPaid)), method: 'CASH', reference: '', proofImage: '', chequeNumber: '', bankName: '', chequeDate: new Date().toISOString().split('T')[0], chequeOrder: '' }); setShowPaymentModal(selectedSaleDetails); }} className="w-full py-4 bg-emerald-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-lg flex items-center justify-center gap-3"><Wallet size={16}/> ENREGISTRER RÈGLEMENT</button>
+                       )}
+
+                       {selectedSaleDetails.status !== 'ANNULE' && parseFloat(selectedSaleDetails.amountPaid) < parseFloat(selectedSaleDetails.totalTtc) && (selectedSaleDetails.paymentMethod === 'TRANSFER' || selectedSaleDetails.paymentMethod === 'CHEQUE') && (
+                          <div className="w-full py-4 px-5 bg-amber-50 border border-amber-200 rounded-2xl text-amber-700 text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-3">
+                            <Clock size={14}/>
+                            {selectedSaleDetails.paymentMethod === 'TRANSFER' ? 'Virement en attente · confirmez l\'encaissement ci-dessus' : 'Chèque en attente · suivez le statut ci-dessus'}
+                          </div>
                        )}
                        
                        {selectedSaleDetails.status !== 'ANNULE' && selectedSaleDetails.items.some((i:any) => !i.service_id && ((i.quantityDelivered || 0) < i.quantity)) && (
@@ -1042,7 +1084,8 @@ const Sales = ({ currency, user, tenantSettings, plan }: { currency: string, use
                    const isMobileMoneyMethod = ['WAVE', 'ORANGE_MONEY', 'MTN_MOMO'].includes(paymentForm.method);
                    const mobileMoneyValid = !isMobileMoneyMethod || !!(paymentForm.reference || paymentForm.proofImage);
                    const chequeValid = paymentForm.method !== 'CHEQUE' || !!(paymentForm.chequeNumber && paymentForm.bankName);
-                   const isAmountValid = paymentForm.amount > 0 && !isAmountExceeded && mobileMoneyValid && chequeValid;
+                   const transferValid = paymentForm.method !== 'TRANSFER' || !!paymentForm.reference;
+                   const isAmountValid = paymentForm.amount > 0 && !isAmountExceeded && mobileMoneyValid && chequeValid && transferValid;
                    
                    return (
                      <>
@@ -1120,9 +1163,24 @@ const Sales = ({ currency, user, tenantSettings, plan }: { currency: string, use
                             </div>
                           )}
 
-                          {/* CASH ou VIREMENT : référence optionnelle */}
-                          {['CASH', 'TRANSFER'].includes(paymentForm.method) && (
+                          {/* CASH : référence optionnelle */}
+                          {paymentForm.method === 'CASH' && (
                             <input type="text" placeholder="Référence (optionnel)" value={paymentForm.reference} onChange={e => setPaymentForm({...paymentForm, reference: e.target.value})} className="w-full bg-slate-50 border border-slate-100 rounded-2xl px-6 py-4 text-sm font-bold outline-none"/>
+                          )}
+
+                          {/* VIREMENT : référence obligatoire + avertissement brouillon */}
+                          {paymentForm.method === 'TRANSFER' && (
+                            <div className="space-y-3 p-4 bg-amber-50 border border-amber-200 rounded-2xl">
+                              <p className="text-[9px] font-black text-amber-700 uppercase tracking-widest flex items-center gap-2"><Clock size={11}/> Virement · en attente d'encaissement</p>
+                              <input
+                                type="text"
+                                placeholder="Référence du virement *"
+                                value={paymentForm.reference}
+                                onChange={e => setPaymentForm({...paymentForm, reference: e.target.value})}
+                                className="w-full bg-white border border-amber-200 rounded-xl px-4 py-3 text-sm font-bold outline-none focus:ring-2 focus:ring-amber-300"
+                              />
+                              <p className="text-[8px] text-amber-600 font-bold">Le montant sera crédité en trésorerie uniquement après confirmation de l'encaissement.</p>
+                            </div>
                           )}
 
                           {/* CHÈQUE : formulaire complet */}
@@ -1149,7 +1207,7 @@ const Sales = ({ currency, user, tenantSettings, plan }: { currency: string, use
                              : 'bg-slate-900 text-white hover:bg-emerald-600'
                          }`}
                        >
-                          {actionLoading ? <Loader2 className="animate-spin" /> : paymentForm.method === 'CHEQUE' ? <><CheckCircle size={18}/> ENREGISTRER LE CHÈQUE</> : <><CheckCircle size={18}/> VALIDER L'ENCAISSEMENT</>}
+                          {actionLoading ? <Loader2 className="animate-spin" /> : paymentForm.method === 'CHEQUE' ? <><CheckCircle size={18}/> ENREGISTRER LE CHÈQUE</> : paymentForm.method === 'TRANSFER' ? <><Clock size={18}/> ENREGISTRER LE VIREMENT</> : <><CheckCircle size={18}/> VALIDER L'ENCAISSEMENT</>}
                        </button>
                      </>
                    );
