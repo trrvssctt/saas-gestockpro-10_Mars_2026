@@ -26,12 +26,13 @@ if (buildTimeBackend) {
       rawBackend = 'https://gestock.realtechprint.com';
     }
   } catch (e) {
-   // rawBackend = 'http://localhost:3000';
+    //rawBackend = 'http://localhost:3000';
     rawBackend = 'https://gestock.realtechprint.com';
   }
 }
 
 const BACKEND_URL = rawBackend.endsWith('/api') ? rawBackend : `${rawBackend.replace(/\/+$/, '')}/api`;
+export const BASE_URL = rawBackend.replace(/\/+$/, '');
 
 
 
@@ -45,7 +46,7 @@ export const apiClient = {
   async request(endpoint: string, options: RequestInit = {}) {
     const session = authBridge.getSession();
     const sessionToken = authBridge.getSessionToken();
-    
+
     // Ne pas définir Content-Type si headers est un objet vide (pour FormData)
     const isFormData = options.body instanceof FormData;
     const headers = {
@@ -66,7 +67,7 @@ export const apiClient = {
           message: data.message || 'Une erreur inattendue est survenue sur le serveur.',
           status: response.status
         };
-        
+
         // Gestion spécifique des sessions expirées
         if (response.status === 401 || response.status === 403) {
           if (data.message?.toLowerCase().includes('expirée') || data.shouldLogout) {
@@ -81,7 +82,7 @@ export const apiClient = {
       return data;
     } catch (err: any) {
       if (err.status) throw err; // C'est déjà une ApiError
-      
+
       // Erreur réseau (Backend injoignable)
       throw {
         error: 'NetworkError',
@@ -176,7 +177,7 @@ export const leaveApi = {
         headers: {} // Laisser le navigateur gérer Content-Type pour FormData
       });
     }
-    
+
     // Si un document est fourni dans l'objet, utiliser FormData
     if (data.document) {
       const formData = new FormData();
@@ -224,7 +225,7 @@ export const leaveApi = {
     }
   },
 
-  approve: (id: string, rejectionReason?: string) => 
+  approve: (id: string, rejectionReason?: string) =>
     apiClient.post(`/hr/leaves/${id}/approve`, { rejectionReason }),
 
   delete: (id: string) => apiClient.delete(`/hr/leaves/${id}`),
