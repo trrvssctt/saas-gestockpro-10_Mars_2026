@@ -155,9 +155,9 @@ app.listen(PORT, async () => {
           where: {
             tenantId: settings.tenantId,
             date: today,
-            clockIn:  { [Op.ne]: null },
+            clockIn: { [Op.ne]: null },
             clockOut: null,
-            status:   { [Op.ne]: 'ABSENT' }
+            status: { [Op.ne]: 'ABSENT' }
           }
         });
 
@@ -166,7 +166,7 @@ app.listen(PORT, async () => {
         const clockOutTime = new Date(`${today}T${settings.workEndTime}`).toISOString();
         for (const r of records) {
           await r.update({
-            clockOut:        clockOutTime,
+            clockOut: clockOutTime,
             overtimeMinutes: 0,
             meta: { ...(r.meta || {}), autoClockout: true, workEndTime: settings.workEndTime }
           });
@@ -178,50 +178,8 @@ app.listen(PORT, async () => {
     }
   }, { timezone: 'Africa/Dakar' });
   console.log('✅ Cron auto-dépointage planifié : toutes les minutes (Africa/Dakar)');
-  
-  // Seeding de données de test pour les messages de contact
-  try {
-    const messageCount = await ContactMessage.count();
-    if (messageCount === 0) {
-      await ContactMessage.bulkCreate([
-        {
-          fullName: 'Moussa Diop',
-          email: 'moussa.diop@example.com',
-          phone: '+221 77 123 45 67',
-          message: 'Bonjour, je suis intéressé par votre solution ERP pour ma petite entreprise de Dakar. Pouvez-vous me donner plus d\'informations sur le plan Starter AI ?',
-          status: 'non_lus',
-          ipAddress: '127.0.0.1',
-          userAgent: 'Mozilla/5.0 (Test Browser)',
-          source: 'landing_page'
-        },
-        {
-          fullName: 'Awa Ndiaye',
-          email: 'awa.ndiaye@fashion.sn',
-          phone: '+221 78 987 65 43',
-          message: 'Je cherche un logiciel de gestion pour ma boutique de mode. Vos fonctionnalités de gestion d\'inventaire m\'intéressent particulièrement.',
-          status: 'non_lus',
-          ipAddress: '127.0.0.1',
-          userAgent: 'Mozilla/5.0 (Test Browser)',
-          source: 'landing_page'
-        },
-        {
-          fullName: 'Jean-Marc Koffi',
-          email: 'jm.koffi@agrobusiness.ci',
-          phone: '+225 05 12 34 56',
-          message: 'Responsable d\'une PME en Côte d\'Ivoire, j\'aimerais une démonstration de votre plateforme, notamment pour la facturation et la trésorerie.',
-          status: 'lus',
-          ipAddress: '127.0.0.1',
-          userAgent: 'Mozilla/5.0 (Test Browser)',
-          source: 'landing_page',
-          repliedAt: new Date(),
-          repliedBy: 'Admin Test'
-        }
-      ]);
-      console.log('✅ Messages de contact de test créés');
-    }
-  } catch (error) {
-    console.warn('⚠️ Erreur seeding messages contact:', error.message);
-  }
-  
+
+  // Seeding de données de test pour les messages de contact retiré (anti-spam)
+
   console.log(`🚀 GeStockPro API running on port ${PORT} (FRONTEND_URL=${FRONTEND_URL})`);
 });
