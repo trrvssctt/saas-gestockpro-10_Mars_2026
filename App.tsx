@@ -211,7 +211,7 @@ const App: React.FC = () => {
           // Vérifier si l'onboarding est terminé (restauration de progression si non)
           try {
             const settings = await apiClient.get('/settings');
-            if (settings && settings.onboardingCompleted === false) {
+            if (settings && settings.onboardingCompleted === false && (freshUser.role === UserRole.ADMIN || freshUser.role === UserRole.SUPER_ADMIN)) {
               setShowLanding(false);
               setShowOnboarding({
                 companyName: settings.name || (freshUser as any).companyName || 'Ma Société',
@@ -278,7 +278,7 @@ const App: React.FC = () => {
     setIsLoggedIn(true);
     await syncTenantSettings(user);
     setActiveTab(user.role === UserRole.SUPER_ADMIN ? 'superadmin' : 'dashboard');
-    if (user.role !== UserRole.SUPER_ADMIN && shouldShowTour(user.id)) {
+    if (user.role === UserRole.ADMIN && shouldShowTour(user.id)) {
       setTimeout(() => setShowTour(true), 1200);
     }
   };
@@ -335,6 +335,26 @@ const App: React.FC = () => {
   ));
   const EXPIRED_ALLOWED_TABS = ['dashboard', 'subscription'];
 
+  const isTenantSuspended = !!(currentUser && (currentUser as any)?.tenant?.isSuspended);
+  const isTenantPendingDeletion = !!(currentUser && (currentUser as any)?.tenant?.pendingDeletion);
+
+  const [reactivationLoading, setReactivationLoading] = useState(false);
+  const handleReactivateAccount = async () => {
+    setReactivationLoading(true);
+    try {
+      await apiClient.post('/auth/reactivate-account', {});
+      // Mettre à jour l'état local du tenant pour débloquer l'interface
+      setCurrentUser((prev: any) => prev ? {
+        ...prev,
+        tenant: { ...prev.tenant, isSuspended: false, suspendedAt: null, pendingDeletion: false, deletionScheduledFor: null }
+      } : prev);
+    } catch (err: any) {
+      alert(err?.message || 'Erreur lors de la réactivation du compte.');
+    } finally {
+      setReactivationLoading(false);
+    }
+  };
+
   if (isInitializing) {
     return (
       <div className="h-screen bg-slate-950 flex flex-col items-center justify-center gap-6">
@@ -383,7 +403,7 @@ const App: React.FC = () => {
         setIsLoggedIn(true);
         setActiveTab(data?.goToHR ? 'rh' : 'dashboard');
         setShowOnboarding(null);
-        if (shouldShowTour(showOnboarding.user.id)) {
+        if (showOnboarding.user.role === UserRole.ADMIN && shouldShowTour(showOnboarding.user.id)) {
           setTimeout(() => setShowTour(true), 1500);
         }
       }
@@ -490,6 +510,70 @@ const App: React.FC = () => {
       }} />;
     }
     return <Login onLoginSuccess={handleLoginSuccess} onBackToLanding={() => { setShowLanding(true); setInitialLoginOptions(null); }} initialMode={initialLoginOptions?.mode} initialPlanId={initialLoginOptions?.planId} initialRegStep={initialLoginOptions?.regStep} initialPeriod={initialLoginOptions?.period} initialWavePending={initialLoginOptions?.wavePending} />;
+  }
+
+  // ── Écran de blocage si le compte est suspendu ou en attente de suppression ──
+  if (isLoggedIn && currentUser && (isTenantSuspended || isTenantPendingDeletion)) {
+    const deletionDate = (currentUser as any)?.tenant?.deletionScheduledFor;
+    return (
+      <ErrorBoundary>
+        <ToastProvider>
+          <div className="min-h-screen bg-slate-950 flex items-center justify-center p-6">
+            <div className="max-w-lg w-full animate-in zoom-in-95 duration-500 space-y-6">
+              {/* Icône */}
+              <div className={`w-24 h-24 rounded-[2.5rem] flex items-center justify-center mx-auto shadow-2xl ${isTenantPendingDeletion ? 'bg-red-600' : 'bg-orange-500'}`}>
+                {isTenantPendingDeletion
+                  ? <ShieldAlert size={48} className="text-white" />
+                  : <Lock size={48} className="text-white" />
+                }
+              </div>
+
+              {/* Message principal */}
+              <div className="text-center space-y-3">
+                <h1 className="text-3xl font-black text-white tracking-tighter uppercase">
+                  {isTenantPendingDeletion ? 'Suppression Planifiée' : 'Compte Désactivé'}
+                </h1>
+                <p className="text-slate-400 text-[11px] font-bold uppercase tracking-[0.25em] leading-relaxed px-4">
+                  {isTenantPendingDeletion
+                    ? `La suppression définitive de votre espace est programmée${deletionDate ? ` pour le ${new Date(deletionDate).toLocaleDateString('fr-FR')}` : ''}. Toutes les actions sont bloquées.`
+                    : 'Votre compte est temporairement désactivé. Aucune action n\'est possible tant que le compte n\'est pas réactivé.'
+                  }
+                </p>
+              </div>
+
+              {/* Card d'actions */}
+              <div className="bg-white/5 border border-white/10 rounded-[2rem] p-8 space-y-4">
+                {isAdminUser && (
+                  <button
+                    onClick={handleReactivateAccount}
+                    disabled={reactivationLoading}
+                    className="w-full py-4 bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl font-black text-xs uppercase tracking-widest transition-all flex items-center justify-center gap-3 disabled:opacity-60 shadow-xl shadow-indigo-900/40"
+                  >
+                    {reactivationLoading
+                      ? <Loader2 size={18} className="animate-spin" />
+                      : <CheckCircle2 size={18} />
+                    }
+                    {reactivationLoading ? 'Réactivation en cours...' : 'Réactiver le compte'}
+                  </button>
+                )}
+                <button
+                  onClick={handleLogout}
+                  className="w-full py-4 bg-white/10 hover:bg-white/20 text-white rounded-2xl font-black text-xs uppercase tracking-widest transition-all flex items-center justify-center gap-3"
+                >
+                  <RefreshCw size={18} /> Se déconnecter
+                </button>
+              </div>
+
+              {isTenantPendingDeletion && isAdminUser && (
+                <p className="text-center text-[10px] text-slate-500 font-bold uppercase tracking-widest">
+                  La réactivation annule également la suppression planifiée.
+                </p>
+              )}
+            </div>
+          </div>
+        </ToastProvider>
+      </ErrorBoundary>
+    );
   }
 
   const renderContent = () => {
@@ -615,7 +699,7 @@ const App: React.FC = () => {
       case 'support': return <Support user={currentUser} />;
       case 'security': return <SecurityPanel />;
       case 'audit': return <AuditLogs tenantSettings={appSettings} />;
-      case 'settings': return <Settings settings={appSettings} onSave={setAppSettings} />;
+      case 'settings': return <Settings settings={appSettings} onSave={setAppSettings} onLogout={handleLogout} />;
       default: return <Dashboard user={currentUser} currency={appSettings.currency} onNavigate={handleContextualNavigate} />;
     }
   };
