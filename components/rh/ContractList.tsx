@@ -1,12 +1,12 @@
-import React, { useState, useEffect } from 'react';
-import { 
-  FileText, 
-  Search, 
-  Filter, 
-  Download, 
-  Plus, 
-  MoreVertical, 
-  ChevronRight, 
+import React, { useState, useEffect, useMemo } from 'react';
+import {
+  FileText,
+  Search,
+  Filter,
+  Download,
+  Plus,
+  MoreVertical,
+  ChevronRight,
   Calendar,
   Clock,
   AlertCircle,
@@ -26,7 +26,8 @@ import {
   RefreshCw,
   AlertTriangle,
   Info,
-  ExternalLink
+  ExternalLink,
+  DollarSign
 } from 'lucide-react';
 import { Contract, Employee } from '../../types';
 import { apiClient, fetchWithToken } from '../../services/api';
@@ -48,8 +49,10 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [payrollSettings, setPayrollSettings] = useState<any>(null);
+  const [loadingSettings, setLoadingSettings] = useState(false);
   const [creating, setCreating] = useState(false);
-  
+
   const [contractForm, setContractForm] = useState({
     employeeId: '',
     type: 'CDI',
@@ -61,7 +64,7 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
     workLocation: '',
     maxRenewals: ''
   });
-  
+
   const [selectedContract, setSelectedContract] = useState<Contract | null>(null);
   const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false);
   const [isTerminateModalOpen, setIsTerminateModalOpen] = useState(false);
@@ -69,15 +72,15 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
   const [terminationForm, setTerminationForm] = useState({ reason: '' });
   const [suspensionForm, setSuspensionForm] = useState({ reason: '' });
   const [processing, setProcessing] = useState(false);
-  
+
   const showToast = useToast();
-  
+
   const [isBulkPayslipModalOpen, setIsBulkPayslipModalOpen] = useState(false);
-  const [bulkPayslipForm, setBulkPayslipForm] = useState({ 
+  const [bulkPayslipForm, setBulkPayslipForm] = useState({
     month: new Date().toISOString().substring(0, 7)
   });
   const [generatingPayslips, setGeneratingPayslips] = useState(false);
-  
+
   const [isRenewModalOpen, setIsRenewModalOpen] = useState(false);
   const [renewalForm, setRenewalForm] = useState({
     newEndDate: '',
@@ -88,7 +91,7 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
   });
   const [isRenewing, setIsRenewing] = useState(false);
   const [contractHistory, setContractHistory] = useState([]);
-  
+
   const [renewalErrors, setRenewalErrors] = useState({
     effectiveDate: '',
     newEndDate: '',
@@ -101,7 +104,7 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
     newEndDate: '',
     duration: ''
   });
-  
+
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [editForm, setEditForm] = useState({
     type: '',
@@ -167,7 +170,7 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
     if (!Array.isArray(employees) || !Array.isArray(contracts)) {
       return [];
     }
-    
+
     const available = employees.filter(employee => {
       const hasActiveContract = contracts.some(contract => {
         const employeeIdMatch = String(contract.employeeId) === String(employee.id);
@@ -176,7 +179,7 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
       });
       return !hasActiveContract;
     });
-    
+
     return available;
   };
 
@@ -193,7 +196,7 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
       maxRenewals: ''
     });
   };
-  
+
   const resetRenewalForm = () => {
     setRenewalForm({
       newEndDate: '',
@@ -215,7 +218,7 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
       duration: ''
     });
   };
-  
+
   const resetEditForm = () => {
     setEditForm({
       type: '',
@@ -250,23 +253,55 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
 
   useEffect(() => {
     loadData();
+    loadPayrollSettings();
   }, []);
+
+  const loadPayrollSettings = async () => {
+    try {
+      setLoadingSettings(true);
+      const data = await apiClient.get('/hr/payroll-settings');
+      setPayrollSettings(data);
+    } catch (error) {
+      console.error('Error loading payroll settings:', error);
+    } finally {
+      setLoadingSettings(false);
+    }
+  };
+
+  const paydayInfo = useMemo(() => {
+    const payDay = payrollSettings?.paymentDay || 28;
+    const today = new Date();
+    const todayDay = today.getDate();
+    const currentMonth = today.getMonth();
+    const currentYear = today.getFullYear();
+
+    let nextPayDate = new Date(currentYear, currentMonth, payDay);
+    if (todayDay > payDay) {
+      nextPayDate = new Date(currentYear, currentMonth + 1, payDay);
+    }
+
+    const diffTime = nextPayDate.getTime() - today.getTime();
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    const isPayday = todayDay === payDay;
+
+    return { payDay, isPayday, diffDays };
+  }, [payrollSettings?.paymentDay]);
 
   const loadData = async () => {
     try {
       setLoading(true);
       setError(null);
-      
+
       const [contractsData, employeesData] = await Promise.all([
         apiClient.get('/hr/contracts'),
         apiClient.get('/hr/employees')
       ]);
-      
-      const contractsList = Array.isArray(contractsData) ? contractsData : 
-                        contractsData?.rows ? contractsData.rows : [];
-      const employeesList = Array.isArray(employeesData) ? employeesData : 
-                        employeesData?.rows ? employeesData.rows : [];
-      
+
+      const contractsList = Array.isArray(contractsData) ? contractsData :
+        contractsData?.rows ? contractsData.rows : [];
+      const employeesList = Array.isArray(employeesData) ? employeesData :
+        employeesData?.rows ? employeesData.rows : [];
+
       setContracts(contractsList);
       setEmployees(employeesList);
     } catch (err: any) {
@@ -303,8 +338,8 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
 
   const filteredContracts = Array.isArray(contracts) ? contracts.filter(contract => {
     const empName = getEmployeeName(contract).toLowerCase();
-    const matchesSearch = empName.includes(searchTerm.toLowerCase()) || 
-                          (contract.type && contract.type.toLowerCase().includes(searchTerm.toLowerCase()));
+    const matchesSearch = empName.includes(searchTerm.toLowerCase()) ||
+      (contract.type && contract.type.toLowerCase().includes(searchTerm.toLowerCase()));
     const matchesType = filterType === 'All' || contract.type === filterType;
     return matchesSearch && matchesType;
   }) : [];
@@ -336,7 +371,7 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
 
   const handleCreateContract = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     if (!contractForm.employeeId || !contractForm.type || !contractForm.startDate) {
       setError('Veuillez remplir tous les champs obligatoires');
       return;
@@ -370,7 +405,7 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
 
     if (contractForm.endDate) {
       const endDate = new Date(contractForm.endDate);
-      
+
       if (endDate <= startDate) {
         setError('La date de fin doit être postérieure à la date de début');
         return;
@@ -400,7 +435,7 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
 
     if (contractForm.trialPeriodEnd) {
       const trialEnd = new Date(contractForm.trialPeriodEnd);
-      
+
       if (trialEnd <= startDate) {
         setError('La fin de période d\'essai doit être postérieure à la date de début');
         return;
@@ -411,10 +446,10 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
         return;
       }
 
-      const maxTrialMonths = contractForm.type === 'CDI' ? 4 : 
-                            contractForm.type === 'CDD' ? 1 : 
-                            contractForm.type === 'STAGE' ? 0 : 2;
-      
+      const maxTrialMonths = contractForm.type === 'CDI' ? 4 :
+        contractForm.type === 'CDD' ? 1 :
+          contractForm.type === 'STAGE' ? 0 : 2;
+
       if (maxTrialMonths === 0) {
         setError('Les stages ne peuvent pas avoir de période d\'essai');
         return;
@@ -435,7 +470,7 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
     try {
       setCreating(true);
       setError(null);
-      
+
       const payload = {
         employeeId: contractForm.employeeId,
         type: contractForm.type,
@@ -451,7 +486,7 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
       };
 
       await apiClient.post('/hr/contracts', payload);
-      
+
       setIsModalOpen(false);
       resetContractForm();
       setSuccessMessage('Contrat créé avec succès');
@@ -488,31 +523,31 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
 
   const handleTerminateContract = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     // Validation renforcée du motif de résiliation
     if (!selectedContract || !terminationForm.reason.trim()) {
       showToast('Veuillez saisir un motif de résiliation', 'error');
       return;
     }
-    
+
     if (terminationForm.reason.trim().length < 15) {
       showToast('Le motif de résiliation doit contenir au moins 15 caractères', 'error');
       return;
     }
-    
+
     try {
       setProcessing(true);
       const response = await apiClient.post(`/hr/contracts/${selectedContract.id}/terminate`, {
         reason: terminationForm.reason.trim()
       });
-      
+
       setIsTerminateModalOpen(false);
       setTerminationForm({ reason: '' });
       setSuccessMessage(response.data.message || 'Contrat résilié avec succès. L\'employé peut maintenant être désactivé si nécessaire.');
       setShowSuccessAlert(true);
       setTimeout(() => setShowSuccessAlert(false), 5000);
       await loadData();
-      
+
       if (isDetailsModalOpen && selectedContract) {
         const employeeId = selectedContract.employee?.id || selectedContract.employeeId;
         if (employeeId) {
@@ -529,19 +564,19 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
   const handleSuspendContract = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedContract || !suspensionForm.reason.trim()) return;
-    
+
     try {
       setProcessing(true);
       await apiClient.post(`/hr/contracts/${selectedContract.id}/suspend`, {
         reason: suspensionForm.reason.trim()
       });
-      
+
       setIsSuspendModalOpen(false);
       setSuccessMessage('Contrat suspendu avec succès');
       setShowSuccessAlert(true);
       setTimeout(() => setShowSuccessAlert(false), 3000);
       await loadData();
-      
+
       if (isDetailsModalOpen && selectedContract) {
         const employeeId = selectedContract.employee?.id || selectedContract.employeeId;
         if (employeeId) {
@@ -554,7 +589,7 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
       setProcessing(false);
     }
   };
-  
+
   const handleEditClick = (contract: Contract) => {
     setSelectedContract(contract);
     setEditForm({
@@ -583,7 +618,7 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
     }
 
     const startDate = new Date(editForm.startDate);
-    
+
     if (editForm.endDate) {
       const endDate = new Date(editForm.endDate);
       if (endDate <= startDate) {
@@ -605,7 +640,7 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
     try {
       setIsEditing(true);
       setError(null);
-      
+
       const updateData = {
         type: editForm.type,
         startDate: editForm.startDate,
@@ -618,23 +653,23 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
         modifiedAt: new Date().toISOString(),
         modifiedBy: 'current_user'
       };
-      
+
       await apiClient.put(`/hr/contracts/${selectedContract.id}`, updateData);
-      
+
       await loadData();
-      
+
       if (isDetailsModalOpen && selectedContract) {
         const employeeId = selectedContract.employee?.id || selectedContract.employeeId;
         if (employeeId) {
           await loadContractHistory(employeeId);
         }
       }
-      
+
       setShowSuccessAlert(true);
       setSuccessMessage('Contrat modifié avec succès');
       setIsEditModalOpen(false);
       resetEditForm();
-      
+
       setTimeout(() => setShowSuccessAlert(false), 3000);
     } catch (error: any) {
       setError(error.message || 'Erreur lors de la modification du contrat');
@@ -642,7 +677,7 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
       setIsEditing(false);
     }
   };
-  
+
   const validateRenewalField = (fieldName: string, value: string, allValues = renewalForm) => {
     const errors = { ...renewalErrors };
     const warnings = { ...renewalWarnings };
@@ -653,7 +688,7 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
       case 'effectiveDate':
         const effectiveDate = new Date(value);
         effectiveDate.setHours(0, 0, 0, 0);
-        
+
         if (!value) {
           errors.effectiveDate = 'La date d\'effet est obligatoire';
         } else if (effectiveDate < today) {
@@ -681,9 +716,9 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
           const effectiveDate = new Date(allValues.effectiveDate);
           endDate.setHours(0, 0, 0, 0);
           effectiveDate.setHours(0, 0, 0, 0);
-          
+
           const diffDays = Math.ceil((endDate.getTime() - effectiveDate.getTime()) / (1000 * 60 * 60 * 24));
-          
+
           if (endDate <= effectiveDate) {
             errors.newEndDate = 'La date de fin doit être au moins 1 jour après la date d\'effet';
           } else if (allValues.newType === 'CDD' && diffDays < 7) {
@@ -700,13 +735,13 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
               errors.newEndDate = 'La date de fin ne peut pas être un weekend';
             } else {
               errors.newEndDate = '';
-              
+
               const months = Math.floor(diffDays / 30);
               const days = diffDays % 30;
               warnings.duration = `📅 Durée: ${diffDays} jour(s) ${months > 0 ? `(≈ ${months} mois ${days > 0 ? `et ${days} jours` : ''})` : ''}`;
-              
+
               if (diffDays > 365) {
-                warnings.newEndDate = `⚠️ Contrat de longue durée (${Math.floor(diffDays/365)} an(s)). Vérifiez la conformité légale.`;
+                warnings.newEndDate = `⚠️ Contrat de longue durée (${Math.floor(diffDays / 365)} an(s)). Vérifiez la conformité légale.`;
               } else {
                 warnings.newEndDate = '';
               }
@@ -757,9 +792,9 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
   const handleRenewalFormChange = (field: string, value: string) => {
     const newForm = { ...renewalForm, [field]: value };
     setRenewalForm(newForm);
-    
+
     validateRenewalField(field, value, newForm);
-    
+
     if (field === 'effectiveDate' && newForm.newEndDate) {
       validateRenewalField('newEndDate', newForm.newEndDate, newForm);
     }
@@ -779,7 +814,7 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
       effectiveDate: contract.endDate ? new Date(contract.endDate).toISOString().split('T')[0] : new Date().toISOString().split('T')[0]
     };
     setRenewalForm(initialForm);
-    
+
     setRenewalErrors({
       effectiveDate: '',
       newEndDate: '',
@@ -792,38 +827,38 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
       newEndDate: '',
       duration: ''
     });
-    
+
     setTimeout(() => {
       Object.keys(initialForm).forEach(key => {
         validateRenewalField(key, initialForm[key as keyof typeof initialForm], initialForm);
       });
     }, 100);
-    
+
     setIsRenewModalOpen(true);
   };
-  
+
   const handleRenewContract = async (e: React.FormEvent, retryCount = 0) => {
     e.preventDefault();
-    
+
     const fieldsToValidate = ['effectiveDate', 'newEndDate', 'newType', 'renewalReason', 'newSalary'];
     let hasErrors = false;
-    
+
     fieldsToValidate.forEach(field => {
       if (!validateRenewalField(field, renewalForm[field as keyof typeof renewalForm], renewalForm)) {
         hasErrors = true;
       }
     });
-    
+
     if (hasErrors) {
       setError('Veuillez corriger les erreurs dans le formulaire avant de continuer');
       return;
     }
-    
+
     if (!selectedContract || !renewalForm.renewalReason.trim() || !renewalForm.effectiveDate) {
       setError('Veuillez remplir tous les champs obligatoires');
       return;
     }
-    
+
     if (renewalForm.newType === 'CDI' && renewalForm.newEndDate) {
       setError('Un contrat CDI ne peut pas avoir de date de fin');
       return;
@@ -844,23 +879,23 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
       setError(`Une date de fin est obligatoire pour un contrat de type ${renewalForm.newType}`);
       return;
     }
-    
+
     const effectiveDate = new Date(renewalForm.effectiveDate);
     const today = new Date();
-    
+
     if (effectiveDate < today) {
       setError('La date d\'effet ne peut pas être antérieure à aujourd\'hui');
       return;
     }
-    
+
     if (renewalForm.newEndDate) {
       const newEndDate = new Date(renewalForm.newEndDate);
-      
+
       if (newEndDate <= effectiveDate) {
         setError('La nouvelle date de fin doit être postérieure à la date d\'effet');
         return;
       }
-      
+
       if (renewalForm.newType === 'STAGE') {
         const diffMonths = (newEndDate.getFullYear() - effectiveDate.getFullYear()) * 12 + (newEndDate.getMonth() - effectiveDate.getMonth());
         if (diffMonths > 6) {
@@ -868,7 +903,7 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
           return;
         }
       }
-      
+
       const maxEndDate = new Date(effectiveDate);
       maxEndDate.setFullYear(effectiveDate.getFullYear() + 5);
       if (newEndDate > maxEndDate) {
@@ -876,11 +911,11 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
         return;
       }
     }
-    
+
     try {
       setIsRenewing(true);
       setError(null);
-      
+
       const payload = {
         newEndDate: renewalForm.newEndDate || null,
         newSalary: renewalForm.newSalary ? parseFloat(renewalForm.newSalary) : null,
@@ -888,16 +923,16 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
         renewalReason: renewalForm.renewalReason.trim(),
         effectiveDate: renewalForm.effectiveDate
       };
-      
+
       await apiClient.post(`/hr/contracts/${selectedContract.id}/renew`, payload);
-      
+
       setIsRenewModalOpen(false);
       resetRenewalForm();
       setSuccessMessage('Contrat renouvelé avec succès');
       setShowSuccessAlert(true);
       setTimeout(() => setShowSuccessAlert(false), 3000);
       await loadData();
-      
+
       if (isDetailsModalOpen && selectedContract) {
         const employeeId = selectedContract.employee?.id || selectedContract.employeeId;
         if (employeeId) {
@@ -906,13 +941,13 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
       }
     } catch (error: any) {
       console.error('ContractList - Renewal error:', error);
-      
-      if (error.response?.status === 503 || 
-          error.code === 'NETWORK_ERROR' || 
-          error.message.includes('timeout') ||
-          error.message.includes('connexion') ||
-          error.message.includes('ETIMEDOUT')) {
-        
+
+      if (error.response?.status === 503 ||
+        error.code === 'NETWORK_ERROR' ||
+        error.message.includes('timeout') ||
+        error.message.includes('connexion') ||
+        error.message.includes('ETIMEDOUT')) {
+
         if (retryCount < 2) {
           setError(`Problème de connexion, nouvelle tentative en cours... (${retryCount + 1}/3)`);
           setTimeout(() => {
@@ -942,13 +977,13 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
       setIsRenewing(false);
     }
   };
-  
+
   const hasRenewalFormErrors = () => {
     return Object.values(renewalErrors).some(error => error !== '') ||
-           !renewalForm.renewalReason.trim() ||
-           !renewalForm.effectiveDate ||
-           !renewalForm.newType ||
-           ((renewalForm.newType === 'CDD' || renewalForm.newType === 'STAGE') && !renewalForm.newEndDate);
+      !renewalForm.renewalReason.trim() ||
+      !renewalForm.effectiveDate ||
+      !renewalForm.newType ||
+      ((renewalForm.newType === 'CDD' || renewalForm.newType === 'STAGE') && !renewalForm.newEndDate);
   };
 
   const loadContractHistory = async (employeeId: string) => {
@@ -960,7 +995,7 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
       setContractHistory([]);
     }
   };
-  
+
   const isContractExpiring = (contract: Contract) => {
     if (!contract.endDate || contract.status !== 'ACTIVE') return false;
     const endDate = new Date(contract.endDate);
@@ -973,7 +1008,7 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
   const getExpirationUrgency = (contract: Contract) => {
     if (!contract.endDate || contract.status !== 'ACTIVE') return null;
     const diffDays = Math.ceil((new Date(contract.endDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
-    if (diffDays >= 0 && diffDays <= 7)  return { level: 'critical' as const, days: diffDays };
+    if (diffDays >= 0 && diffDays <= 7) return { level: 'critical' as const, days: diffDays };
     if (diffDays >= 0 && diffDays <= 30) return { level: 'warning' as const, days: diffDays };
     if (diffDays >= 0 && diffDays <= 60) return { level: 'info' as const, days: diffDays };
     return null;
@@ -985,22 +1020,22 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
 
   const handleReactivateContract = async (contract: Contract) => {
     if (contract.status !== 'SUSPENDED') return;
-    
-    const hasActiveContract = Array.isArray(contracts) && contracts.some(c => 
-      c.employeeId === contract.employeeId && 
-      c.id !== contract.id && 
+
+    const hasActiveContract = Array.isArray(contracts) && contracts.some(c =>
+      c.employeeId === contract.employeeId &&
+      c.id !== contract.id &&
       c.status === 'ACTIVE'
     );
-    
+
     if (hasActiveContract) {
       setError('Impossible de réactiver : cet employé a déjà un contrat actif. Un employé ne peut pas avoir plus d\'un contrat actif simultanément.');
       return;
     }
-    
+
     try {
       setProcessing(true);
       await apiClient.post(`/hr/contracts/${contract.id}/reactivate`, {});
-      
+
       setSuccessMessage('Contrat réactivé avec succès');
       setShowSuccessAlert(true);
       setTimeout(() => setShowSuccessAlert(false), 3000);
@@ -1030,9 +1065,9 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
       }
 
       const blob = await res.blob();
-      const url  = URL.createObjectURL(blob);
-      const a    = document.createElement('a');
-      a.href     = url;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
       a.download = `fiches_paie_${bulkPayslipForm.month}.zip`;
       document.body.appendChild(a);
       a.click();
@@ -1055,7 +1090,7 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
       {/* Success Alert */}
       <AnimatePresence>
         {showSuccessAlert && (
-          <motion.div 
+          <motion.div
             initial={{ opacity: 0, y: -20 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -20 }}
@@ -1069,7 +1104,7 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div className="flex items-center gap-4">
-          <button 
+          <button
             onClick={() => onNavigate('rh')}
             className="w-10 h-10 bg-white border border-slate-100 rounded-xl flex items-center justify-center text-slate-400 hover:text-slate-900 transition-all shadow-sm"
           >
@@ -1081,12 +1116,20 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
           </div>
         </div>
         <div className="flex items-center gap-3">
-          <button 
-            onClick={() => setIsBulkPayslipModalOpen(true)}
-            className="px-6 py-3 bg-emerald-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest flex items-center gap-2 hover:bg-emerald-700 transition-all shadow-xl"
-            title="Générer les fiches de paie pour tous les employés avec contrat actif"
+          <button
+            onClick={() => {
+              if (paydayInfo.isPayday) {
+                setIsBulkPayslipModalOpen(true);
+              }
+            }}
+            disabled={!paydayInfo.isPayday}
+            className={`px-6 py-3 rounded-2xl font-black text-[10px] uppercase tracking-widest flex items-center gap-2 transition-all shadow-xl ${paydayInfo.isPayday
+                ? "bg-emerald-600 text-white hover:bg-emerald-700"
+                : "bg-slate-100 text-slate-400 cursor-not-allowed opacity-60 shadow-none border border-slate-200"
+              }`}
+            title={paydayInfo.isPayday ? "Générer les fiches de paie pour tous" : `Disponible le ${paydayInfo.payDay} du mois (J-${paydayInfo.diffDays})`}
           >
-            <FileText size={16} /> Fiches de Paie
+            <FileText size={16} /> {paydayInfo.isPayday ? "Fiches de Paie" : `Paie le ${paydayInfo.payDay}`}
           </button>
           <button className="px-6 py-3 bg-white border border-slate-100 text-slate-900 rounded-2xl font-black text-[10px] uppercase tracking-widest flex items-center gap-2 hover:bg-slate-50 transition-all shadow-sm">
             <Download size={16} /> Rapport d'échéance
@@ -1108,24 +1151,22 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
 
       {/* Error Alert */}
       {error && (
-        <div className={`border px-6 py-4 rounded-2xl flex items-center gap-3 ${
-          error.includes('nouvelle tentative') 
-            ? 'bg-yellow-50 border-yellow-200 text-yellow-800' 
+        <div className={`border px-6 py-4 rounded-2xl flex items-center gap-3 ${error.includes('nouvelle tentative')
+            ? 'bg-yellow-50 border-yellow-200 text-yellow-800'
             : 'bg-red-50 border-red-200 text-red-800'
-        }`}>
+          }`}>
           {error.includes('nouvelle tentative') ? (
             <div className="animate-spin h-5 w-5 border-2 border-yellow-600 border-t-transparent rounded-full"></div>
           ) : (
             <AlertCircle size={20} />
           )}
           <span className="font-medium whitespace-pre-line flex-1">{error}</span>
-          <button 
+          <button
             onClick={() => setError(null)}
-            className={`ml-auto ${
-              error.includes('nouvelle tentative')
+            className={`ml-auto ${error.includes('nouvelle tentative')
                 ? 'text-yellow-600 hover:text-yellow-800'
                 : 'text-red-600 hover:text-red-800'
-            }`}
+              }`}
           >
             ×
           </button>
@@ -1196,9 +1237,9 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
       <div className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm flex flex-col md:flex-row gap-6 items-center">
         <div className="relative flex-grow w-full">
           <Search className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-          <input 
-            type="text" 
-            placeholder="Rechercher par employé ou type..." 
+          <input
+            type="text"
+            placeholder="Rechercher par employé ou type..."
             className="w-full pl-14 pr-6 py-4 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-indigo-500 transition-all font-medium text-sm"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
@@ -1207,7 +1248,7 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
         <div className="flex items-center gap-4 w-full md:w-auto">
           <div className="flex items-center gap-2 bg-slate-50 px-6 py-4 rounded-2xl">
             <Filter size={18} className="text-slate-400" />
-            <select 
+            <select
               className="bg-transparent border-none focus:ring-0 font-black text-[10px] uppercase tracking-widest text-slate-600"
               value={filterType}
               onChange={(e) => setFilterType(e.target.value)}
@@ -1269,7 +1310,7 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
                     TERMINATED: { color: 'text-slate-500', icon: Clock, label: 'Résilié' },
                     SUSPENDED: { color: 'text-amber-500', icon: Clock, label: 'Suspendu' }
                   };
-                  
+
                   const isExpiring = isContractExpiring(contract);
                   const isExpiringSoon = contract.endDate && contract.status === 'ACTIVE' && (() => {
                     const endDate = new Date(contract.endDate);
@@ -1278,25 +1319,24 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
                     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
                     return diffDays > 0 && diffDays <= 30;
                   })();
-                  
+
                   const status = statusInfo[contract.status as keyof typeof statusInfo] || statusInfo.ACTIVE;
                   const StatusIcon = status.icon;
 
                   return (
-                    <tr key={contract.id} className={`transition-colors group ${
-                      isExpiringSoon 
-                        ? 'bg-gradient-to-r from-amber-50 to-orange-50 border-l-4 border-amber-500 hover:from-amber-100 hover:to-orange-100' 
-                        : isExpiring 
-                        ? 'bg-gradient-to-r from-orange-50 to-red-50 border-l-4 border-orange-500 hover:from-orange-100 hover:to-red-100'
-                        : 'hover:bg-slate-50/50'
-                    }`}>
+                    <tr key={contract.id} className={`transition-colors group ${isExpiringSoon
+                        ? 'bg-gradient-to-r from-amber-50 to-orange-50 border-l-4 border-amber-500 hover:from-amber-100 hover:to-orange-100'
+                        : isExpiring
+                          ? 'bg-gradient-to-r from-orange-50 to-red-50 border-l-4 border-orange-500 hover:from-orange-100 hover:to-red-100'
+                          : 'hover:bg-slate-50/50'
+                      }`}>
                       <td className="px-8 py-6">
                         <div className="flex items-center gap-3">
                           <div className="w-10 h-10 bg-slate-100 rounded-xl overflow-hidden shadow-sm relative">
-                            <img 
-                              src={getEmployeePhoto(contract)} 
+                            <img
+                              src={getEmployeePhoto(contract)}
                               alt={getEmployeeName(contract)}
-                              className="w-full h-full object-cover" 
+                              className="w-full h-full object-cover"
                               referrerPolicy="no-referrer"
                               onError={(e) => {
                                 const target = e.target as HTMLImageElement;
@@ -1315,9 +1355,8 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
                             {(isExpiringSoon || isExpiring) && (
                               <div className="flex items-center gap-1 mt-1">
                                 <Clock size={10} className={isExpiringSoon ? 'text-amber-600' : 'text-orange-600'} />
-                                <span className={`text-[9px] font-bold uppercase tracking-wider ${
-                                  isExpiringSoon ? 'text-amber-600' : 'text-orange-600'
-                                }`}>
+                                <span className={`text-[9px] font-bold uppercase tracking-wider ${isExpiringSoon ? 'text-amber-600' : 'text-orange-600'
+                                  }`}>
                                   {isExpiringSoon ? 'Expire bientôt' : 'À renouveler'}
                                 </span>
                               </div>
@@ -1348,21 +1387,19 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
                         <div className="space-y-1">
                           <p className="text-xs font-bold text-slate-900">Du {new Date(contract.startDate).toLocaleDateString('fr-FR')}</p>
                           <div className="flex items-center gap-2">
-                            <p className={`text-[10px] font-medium italic ${
-                              contract.endDate 
-                                ? (isExpiringSoon 
-                                    ? 'text-amber-700 font-bold' 
-                                    : isExpiring 
-                                    ? 'text-orange-700 font-bold' 
+                            <p className={`text-[10px] font-medium italic ${contract.endDate
+                                ? (isExpiringSoon
+                                  ? 'text-amber-700 font-bold'
+                                  : isExpiring
+                                    ? 'text-orange-700 font-bold'
                                     : 'text-slate-400')
                                 : 'text-slate-400'
-                            }`}>
+                              }`}>
                               {contract.endDate ? `Au ${new Date(contract.endDate).toLocaleDateString('fr-FR')}` : 'Durée Indéterminée'}
                             </p>
                             {(isExpiringSoon || isExpiring) && contract.endDate && (
-                              <div className={`w-2 h-2 rounded-full animate-ping ${
-                                isExpiringSoon ? 'bg-amber-500' : 'bg-orange-500'
-                              }`}></div>
+                              <div className={`w-2 h-2 rounded-full animate-ping ${isExpiringSoon ? 'bg-amber-500' : 'bg-orange-500'
+                                }`}></div>
                             )}
                           </div>
                           {(isExpiringSoon || isExpiring) && contract.endDate && (() => {
@@ -1371,9 +1408,8 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
                             const diffTime = endDate.getTime() - today.getTime();
                             const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
                             return (
-                              <p className={`text-[9px] font-black uppercase tracking-wider ${
-                                isExpiringSoon ? 'text-amber-600' : 'text-orange-600'
-                              }`}>
+                              <p className={`text-[9px] font-black uppercase tracking-wider ${isExpiringSoon ? 'text-amber-600' : 'text-orange-600'
+                                }`}>
                                 {diffDays > 0 ? `${diffDays} jours restants` : 'EXPIRÉ'}
                               </p>
                             );
@@ -1385,41 +1421,39 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
                       </td>
                       <td className="px-8 py-6">
                         <div className="flex items-center gap-2">
-                          <span className={`flex items-center gap-2 text-[10px] font-black uppercase tracking-widest ${
-                            contract.status === 'ACTIVE'
-                              ? (isExpiringSoon 
-                                  ? 'text-amber-600' 
-                                  : isExpiring 
-                                  ? 'text-orange-600' 
+                          <span className={`flex items-center gap-2 text-[10px] font-black uppercase tracking-widest ${contract.status === 'ACTIVE'
+                              ? (isExpiringSoon
+                                ? 'text-amber-600'
+                                : isExpiring
+                                  ? 'text-orange-600'
                                   : status.color)
                               : status.color
-                          }`}>
-                            <StatusIcon size={14} /> 
-                            {contract.status === 'ACTIVE' && isExpiringSoon 
-                              ? 'EXPIRE BIENTÔT' 
-                              : contract.status === 'ACTIVE' && isExpiring 
-                              ? 'À RENOUVELER' 
-                              : status.label}
+                            }`}>
+                            <StatusIcon size={14} />
+                            {contract.status === 'ACTIVE' && isExpiringSoon
+                              ? 'EXPIRE BIENTÔT'
+                              : contract.status === 'ACTIVE' && isExpiring
+                                ? 'À RENOUVELER'
+                                : status.label}
                           </span>
                           {(isExpiringSoon || isExpiring) && (
-                            <div className={`w-2 h-2 rounded-full animate-pulse ${
-                              isExpiringSoon ? 'bg-amber-500' : 'bg-orange-500'
-                            }`}></div>
+                            <div className={`w-2 h-2 rounded-full animate-pulse ${isExpiringSoon ? 'bg-amber-500' : 'bg-orange-500'
+                              }`}></div>
                           )}
                         </div>
                       </td>
                       <td className="px-8 py-6 text-right">
                         <div className="flex items-center justify-end gap-2">
-                          <button 
+                          <button
                             onClick={() => handleViewContract(contract)}
                             className="w-10 h-10 bg-white border border-slate-100 text-slate-400 rounded-xl flex items-center justify-center hover:text-slate-900 hover:shadow-md transition-all"
                             title="Voir les détails"
                           >
                             <Eye size={16} />
                           </button>
-                          
+
                           {contract.status === 'ACTIVE' && (
-                            <button 
+                            <button
                               onClick={() => handleEditClick(contract)}
                               className="w-10 h-10 bg-white border border-slate-100 text-indigo-500 rounded-xl flex items-center justify-center hover:text-indigo-700 hover:shadow-md transition-all"
                               title="Modifier le contrat"
@@ -1427,36 +1461,35 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
                               <Edit2 size={16} />
                             </button>
                           )}
-                          
+
                           {contract.status === 'ACTIVE' && (
                             <>
                               {canRenewContract(contract) && (
-                                <button 
+                                <button
                                   onClick={() => handleRenewClick(contract)}
-                                  className={`w-10 h-10 border rounded-xl flex items-center justify-center hover:shadow-md transition-all ${
-                                    isExpiringSoon
-                                      ? 'bg-amber-500 text-white border-amber-500 animate-pulse hover:bg-amber-600 shadow-lg shadow-amber-200' 
+                                  className={`w-10 h-10 border rounded-xl flex items-center justify-center hover:shadow-md transition-all ${isExpiringSoon
+                                      ? 'bg-amber-500 text-white border-amber-500 animate-pulse hover:bg-amber-600 shadow-lg shadow-amber-200'
                                       : isExpiring
-                                      ? 'bg-orange-500 text-white border-orange-500 hover:bg-orange-600 shadow-lg shadow-orange-200'
-                                      : 'bg-white border-slate-100 text-green-500 hover:text-green-700'
-                                  }`}
-                                  title={isExpiringSoon 
-                                    ? "URGENT: Contrat expire dans moins de 30 jours !" 
-                                    : isExpiring 
-                                    ? "Attention: Contrat à renouveler bientôt" 
-                                    : "Renouveler le contrat"}
+                                        ? 'bg-orange-500 text-white border-orange-500 hover:bg-orange-600 shadow-lg shadow-orange-200'
+                                        : 'bg-white border-slate-100 text-green-500 hover:text-green-700'
+                                    }`}
+                                  title={isExpiringSoon
+                                    ? "URGENT: Contrat expire dans moins de 30 jours !"
+                                    : isExpiring
+                                      ? "Attention: Contrat à renouveler bientôt"
+                                      : "Renouveler le contrat"}
                                 >
                                   <RefreshCw size={16} className={isExpiringSoon ? 'animate-spin' : ''} />
                                 </button>
                               )}
-                              <button 
+                              <button
                                 onClick={() => handleSuspendClick(contract)}
                                 className="w-10 h-10 bg-white border border-slate-100 text-amber-500 rounded-xl flex items-center justify-center hover:text-amber-700 hover:shadow-md transition-all"
                                 title="Suspendre le contrat"
                               >
                                 <Pause size={16} />
                               </button>
-                              <button 
+                              <button
                                 onClick={() => handleTerminateClick(contract)}
                                 className="w-10 h-10 bg-white border border-slate-100 text-red-500 rounded-xl flex items-center justify-center hover:text-red-700 hover:shadow-md transition-all"
                                 title="Résilier le contrat"
@@ -1465,9 +1498,9 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
                               </button>
                             </>
                           )}
-                          
+
                           {contract.status === 'SUSPENDED' && (
-                            <button 
+                            <button
                               onClick={() => handleReactivateContract(contract)}
                               className="w-10 h-10 bg-white border border-slate-100 text-emerald-500 rounded-xl flex items-center justify-center hover:text-emerald-700 hover:shadow-md transition-all"
                               title="Réactiver le contrat"
@@ -1487,29 +1520,29 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
       </div>
 
       {/* Create Modal */}
-      <HRModal 
-        isOpen={isModalOpen} 
+      <HRModal
+        isOpen={isModalOpen}
         onClose={() => {
           setIsModalOpen(false);
           resetContractForm();
-        }} 
+        }}
         title="Nouveau Contrat de Travail"
         size="lg"
         footer={
           <div className="flex justify-end gap-4">
-            <button 
-              type="button" 
+            <button
+              type="button"
               onClick={() => {
                 setIsModalOpen(false);
                 resetContractForm();
-              }} 
+              }}
               disabled={creating}
               className="px-8 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-slate-900 transition-all disabled:opacity-50"
             >
               Annuler
             </button>
-            <button 
-              type="submit" 
+            <button
+              type="submit"
               form="contract-form"
               disabled={creating || !contractForm.employeeId || !contractForm.startDate}
               className="px-4 md:px-10 py-4 bg-slate-900 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-indigo-600 transition-all shadow-xl disabled:opacity-50 flex items-center gap-2"
@@ -1523,10 +1556,10 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
         <form id="contract-form" onSubmit={handleCreateContract} className="space-y-6">
           <div className="space-y-2">
             <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Employé *</label>
-            <select 
+            <select
               value={contractForm.employeeId}
               onChange={(e) => setContractForm({ ...contractForm, employeeId: e.target.value })}
-              required 
+              required
               disabled={creating}
               className="w-full px-6 py-4 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-indigo-500 transition-all font-bold text-sm disabled:opacity-50"
             >
@@ -1538,19 +1571,19 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
               ))}
             </select>
             <p className="text-xs text-slate-500">
-              {getAvailableEmployees().length === 0 ? 
-                'Aucun employé disponible (tous ont déjà un contrat actif)' : 
+              {getAvailableEmployees().length === 0 ?
+                'Aucun employé disponible (tous ont déjà un contrat actif)' :
                 `${getAvailableEmployees().length} employé(s) disponible(s)`
               }
             </p>
           </div>
-          
+
           <div className="space-y-2">
             <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Type de Contrat *</label>
-            <select 
+            <select
               value={contractForm.type}
               onChange={(e) => handleContractTypeChange(e.target.value)}
-              required 
+              required
               disabled={creating}
               className="w-full px-6 py-4 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-indigo-500 transition-all font-bold text-sm disabled:opacity-50"
             >
@@ -1563,26 +1596,26 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
               {getContractTypeRules(contractForm.type).helpText}
             </p>
           </div>
-          
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="space-y-2">
               <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Date de Début *</label>
-              <input 
-                type="date" 
+              <input
+                type="date"
                 value={contractForm.startDate}
                 onChange={(e) => setContractForm({ ...contractForm, startDate: e.target.value })}
-                required 
+                required
                 disabled={creating}
-                className="w-full px-6 py-4 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-indigo-500 transition-all font-bold text-sm disabled:opacity-50" 
+                className="w-full px-6 py-4 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-indigo-500 transition-all font-bold text-sm disabled:opacity-50"
               />
             </div>
-            
+
             <div className="space-y-2">
               <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">
                 Date de Fin {(contractForm.type === 'CDD' || contractForm.type === 'STAGE') ? '*' : ''}
               </label>
-              <input 
-                type="date" 
+              <input
+                type="date"
                 value={contractForm.endDate}
                 onChange={(e) => setContractForm({ ...contractForm, endDate: e.target.value })}
                 required={contractForm.type === 'CDD' || contractForm.type === 'STAGE'}
@@ -1594,12 +1627,12 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
               )}
             </div>
           </div>
-          
+
           {contractForm.type !== 'STAGE' && (
             <div className="space-y-2">
               <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Fin de Période d'Essai</label>
-              <input 
-                type="date" 
+              <input
+                type="date"
                 value={contractForm.trialPeriodEnd}
                 onChange={(e) => setContractForm({ ...contractForm, trialPeriodEnd: e.target.value })}
                 disabled={creating}
@@ -1610,19 +1643,19 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
               </p>
             </div>
           )}
-          
+
           <div className="space-y-2">
             <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Salaire de Base Mensuel</label>
             <div className="flex gap-2">
-              <input 
-                type="number" 
+              <input
+                type="number"
                 value={contractForm.salary}
                 onChange={(e) => setContractForm({ ...contractForm, salary: e.target.value })}
                 disabled={creating}
-                placeholder="Ex: 1500000" 
-                className="flex-1 px-6 py-4 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-indigo-500 transition-all font-bold text-sm disabled:opacity-50" 
+                placeholder="Ex: 1500000"
+                className="flex-1 px-6 py-4 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-indigo-500 transition-all font-bold text-sm disabled:opacity-50"
               />
-              <select 
+              <select
                 value={contractForm.currency}
                 onChange={(e) => setContractForm({ ...contractForm, currency: e.target.value })}
                 disabled={creating}
@@ -1634,7 +1667,7 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
               </select>
             </div>
           </div>
-          
+
           <div className="space-y-2">
             <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Lieu de Travail</label>
             <input
@@ -1671,31 +1704,31 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
           )}
         </form>
       </HRModal>
-      
+
       {/* Edit Contract Modal */}
-      <HRModal 
-        isOpen={isEditModalOpen} 
+      <HRModal
+        isOpen={isEditModalOpen}
         onClose={() => {
           setIsEditModalOpen(false);
           resetEditForm();
-        }} 
+        }}
         title="Modifier le Contrat"
         size="lg"
         footer={
           <div className="flex justify-end gap-4">
-            <button 
-              type="button" 
+            <button
+              type="button"
               onClick={() => {
                 setIsEditModalOpen(false);
                 resetEditForm();
-              }} 
+              }}
               disabled={isEditing}
               className="px-8 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-slate-900 transition-all disabled:opacity-50"
             >
               Annuler
             </button>
-            <button 
-              type="submit" 
+            <button
+              type="submit"
               form="edit-contract-form"
               disabled={isEditing || !editForm.modificationReason.trim()}
               className="px-4 md:px-10 py-4 bg-indigo-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-indigo-700 transition-all shadow-xl disabled:opacity-50 flex items-center gap-2"
@@ -1709,10 +1742,10 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
         <form id="edit-contract-form" onSubmit={handleEditContract} className="space-y-6">
           <div className="space-y-2">
             <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Type de Contrat *</label>
-            <select 
+            <select
               value={editForm.type}
               onChange={(e) => setEditForm({ ...editForm, type: e.target.value })}
-              required 
+              required
               disabled={isEditing}
               className="w-full px-6 py-4 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-indigo-500 transition-all font-bold text-sm disabled:opacity-50"
             >
@@ -1721,26 +1754,26 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
               ))}
             </select>
           </div>
-          
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="space-y-2">
               <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Date de Début *</label>
-              <input 
-                type="date" 
+              <input
+                type="date"
                 value={editForm.startDate}
                 onChange={(e) => setEditForm({ ...editForm, startDate: e.target.value })}
-                required 
+                required
                 disabled={isEditing}
-                className="w-full px-6 py-4 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-indigo-500 transition-all font-bold text-sm disabled:opacity-50" 
+                className="w-full px-6 py-4 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-indigo-500 transition-all font-bold text-sm disabled:opacity-50"
               />
             </div>
-            
+
             <div className="space-y-2">
               <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">
                 Date de Fin {(editForm.type === 'CDD' || editForm.type === 'STAGE') ? '*' : '(Optionnelle)'}
               </label>
-              <input 
-                type="date" 
+              <input
+                type="date"
                 value={editForm.endDate}
                 onChange={(e) => setEditForm({ ...editForm, endDate: e.target.value })}
                 required={editForm.type === 'CDD' || editForm.type === 'STAGE'}
@@ -1749,37 +1782,37 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
               />
             </div>
           </div>
-          
+
           {editForm.type !== 'STAGE' && (
             <div className="space-y-2">
               <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Fin de Période d'Essai (Optionnelle)</label>
-              <input 
-                type="date" 
+              <input
+                type="date"
                 value={editForm.trialPeriodEnd}
                 onChange={(e) => setEditForm({ ...editForm, trialPeriodEnd: e.target.value })}
                 disabled={isEditing}
-                className="w-full px-6 py-4 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-indigo-500 transition-all font-bold text-sm disabled:opacity-50" 
+                className="w-full px-6 py-4 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-indigo-500 transition-all font-bold text-sm disabled:opacity-50"
               />
             </div>
           )}
-          
+
           <div className="grid grid-cols-2 gap-6">
             <div className="space-y-2">
               <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Salaire de Base</label>
-              <input 
-                type="number" 
+              <input
+                type="number"
                 value={editForm.salary}
                 onChange={(e) => setEditForm({ ...editForm, salary: e.target.value })}
                 disabled={isEditing}
                 step="0.01"
                 min="0"
-                placeholder="Ex: 500000" 
-                className="w-full px-6 py-4 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-indigo-500 transition-all font-bold text-sm disabled:opacity-50" 
+                placeholder="Ex: 500000"
+                className="w-full px-6 py-4 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-indigo-500 transition-all font-bold text-sm disabled:opacity-50"
               />
             </div>
             <div className="space-y-2">
               <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Devise</label>
-              <select 
+              <select
                 value={editForm.currency}
                 onChange={(e) => setEditForm({ ...editForm, currency: e.target.value })}
                 disabled={isEditing}
@@ -1791,29 +1824,29 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
               </select>
             </div>
           </div>
-          
+
           <div className="space-y-2">
             <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Lieu de Travail</label>
-            <input 
-              type="text" 
+            <input
+              type="text"
               value={editForm.workLocation}
               onChange={(e) => setEditForm({ ...editForm, workLocation: e.target.value })}
               disabled={isEditing}
-              placeholder="Ex: Dakar Plateau" 
-              className="w-full px-6 py-4 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-indigo-500 transition-all font-bold text-sm disabled:opacity-50" 
+              placeholder="Ex: Dakar Plateau"
+              className="w-full px-6 py-4 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-indigo-500 transition-all font-bold text-sm disabled:opacity-50"
             />
           </div>
-          
+
           <div className="space-y-2">
             <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Raison de la Modification *</label>
-            <textarea 
+            <textarea
               value={editForm.modificationReason}
               onChange={(e) => setEditForm({ ...editForm, modificationReason: e.target.value })}
               required
               disabled={isEditing}
               rows={3}
-              placeholder="Décrivez la raison de cette modification (augmentation salariale, changement de type, etc.)" 
-              className="w-full px-6 py-4 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-indigo-500 transition-all font-bold text-sm disabled:opacity-50 resize-none" 
+              placeholder="Décrivez la raison de cette modification (augmentation salariale, changement de type, etc.)"
+              className="w-full px-6 py-4 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-indigo-500 transition-all font-bold text-sm disabled:opacity-50 resize-none"
             />
             <p className="text-xs text-slate-500">
               Cette justification sera conservée dans l'historique du contrat
@@ -1821,7 +1854,7 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
           </div>
         </form>
       </HRModal>
-      
+
       {/* Bulk Payslip Generation Modal */}
       <HRModal
         isOpen={isBulkPayslipModalOpen}
@@ -1900,9 +1933,9 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
       </HRModal>
 
       {/* Contract Details Modal */}
-      <HRModal 
-        isOpen={isDetailsModalOpen} 
-        onClose={() => setIsDetailsModalOpen(false)} 
+      <HRModal
+        isOpen={isDetailsModalOpen}
+        onClose={() => setIsDetailsModalOpen(false)}
         title="Détails du Contrat"
         size="lg"
       >
@@ -1920,20 +1953,19 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
                 </div>
                 <div>
                   <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Statut</label>
-                  <span className={`inline-flex items-center gap-2 text-[10px] font-black uppercase tracking-widest ${
-                    selectedContract.status === 'ACTIVE' ? 'text-emerald-500' :
-                    selectedContract.status === 'SUSPENDED' ? 'text-amber-500' :
-                    selectedContract.status === 'TERMINATED' ? 'text-slate-500' :
-                    'text-red-500'
-                  }`}>
+                  <span className={`inline-flex items-center gap-2 text-[10px] font-black uppercase tracking-widest ${selectedContract.status === 'ACTIVE' ? 'text-emerald-500' :
+                      selectedContract.status === 'SUSPENDED' ? 'text-amber-500' :
+                        selectedContract.status === 'TERMINATED' ? 'text-slate-500' :
+                          'text-red-500'
+                    }`}>
                     {selectedContract.status === 'ACTIVE' && <CheckCircle2 size={14} />}
                     {selectedContract.status === 'SUSPENDED' && <Clock size={14} />}
                     {selectedContract.status === 'TERMINATED' && <Clock size={14} />}
                     {selectedContract.status === 'EXPIRED' && <AlertCircle size={14} />}
                     {selectedContract.status === 'ACTIVE' ? 'Actif' :
-                     selectedContract.status === 'SUSPENDED' ? 'Suspendu' :
-                     selectedContract.status === 'TERMINATED' ? 'Résilié' :
-                     'Expiré'}
+                      selectedContract.status === 'SUSPENDED' ? 'Suspendu' :
+                        selectedContract.status === 'TERMINATED' ? 'Résilié' :
+                          'Expiré'}
                   </span>
                 </div>
               </div>
@@ -1952,7 +1984,7 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
                 </div>
               </div>
             </div>
-            
+
             {/* Document joint au contrat */}
             {selectedContract.documentUrl && (
               <div className="border-t pt-6">
@@ -1961,7 +1993,7 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
                 </h3>
                 <div className="bg-slate-50 rounded-2xl border border-slate-100 overflow-hidden">
                   {selectedContract.documentUrl.toLowerCase().includes('.pdf') ||
-                   selectedContract.documentUrl.toLowerCase().includes('/raw/') ? (
+                    selectedContract.documentUrl.toLowerCase().includes('/raw/') ? (
                     <div>
                       <div className="flex items-center justify-between p-4 bg-white border-b border-slate-100">
                         <div className="flex items-center gap-3">
@@ -1985,7 +2017,7 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
                       />
                     </div>
                   ) : selectedContract.documentUrl.match(/\.(jpg|jpeg|png|gif|webp)$/i) ||
-                     selectedContract.documentUrl.includes('/image/') ? (
+                    selectedContract.documentUrl.includes('/image/') ? (
                     <div className="p-4 flex flex-col items-center gap-4">
                       <img
                         src={selectedContract.documentUrl}
@@ -2026,18 +2058,18 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
 
             <div className="border-t pt-6 space-y-6">
               <h3 className="text-lg font-bold text-slate-900">Historique Complet</h3>
-              
+
               {selectedContract.meta && (() => {
                 const meta = safeJSONParse(selectedContract.meta);
                 if (!meta) return null;
-                
+
                 const modifications = meta.modificationHistory || [];
-                
+
                 if (modifications.length > 0) {
                   return (
                     <div className="space-y-4">
                       <h4 className="text-sm font-bold text-slate-700 flex items-center gap-2">
-                        <Edit2 size={16} /> 
+                        <Edit2 size={16} />
                         Modifications du Contrat Actuel
                       </h4>
                       <div className="space-y-3 max-h-48 overflow-y-auto">
@@ -2052,14 +2084,14 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
                                 </span>
                               </div>
                               <p className="text-xs text-slate-600 mt-1 italic">{modification.reason}</p>
-                              
+
                               {modification.changes && modification.changes.length > 0 && (
                                 <div className="mt-2 space-y-1">
                                   <p className="text-xs font-medium text-slate-700">Changements effectués:</p>
                                   {modification.changes.map((change: any, changeIndex: number) => (
                                     <div key={changeIndex} className="text-xs text-slate-600 ml-2">
                                       <span className="font-medium">{change.field}:</span>{' '}
-                                      <span className="text-red-600">{change.oldValue || 'Non défini'}</span> → 
+                                      <span className="text-red-600">{change.oldValue || 'Non défini'}</span> →
                                       <span className="text-green-600 ml-1">{change.newValue || 'Non défini'}</span>
                                     </div>
                                   ))}
@@ -2074,27 +2106,25 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
                 }
                 return null;
               })()}
-              
+
               {contractHistory && contractHistory.length > 0 && (
                 <div className="space-y-4">
                   <h4 className="text-sm font-bold text-slate-700 flex items-center gap-2">
-                    <FileText size={16} /> 
+                    <FileText size={16} />
                     Historique des Contrats de l'Employé
                   </h4>
                   <div className="space-y-3 max-h-64 overflow-y-auto">
                     {contractHistory.map((event: any) => (
-                      <div key={event.id} className={`flex items-start gap-4 p-4 rounded-xl border ${
-                        event.isRenewal ? 'bg-green-50 border-green-200' :
-                        event.type === 'CONTRACT_START' ? 'bg-indigo-50 border-indigo-200' :
-                        event.type === 'CONTRACT_TERMINATION' ? 'bg-red-50 border-red-200' :
-                        'bg-slate-50 border-slate-100'
-                      }`}>
-                        <div className={`w-3 h-3 rounded-full mt-1 flex-shrink-0 ${
-                          event.isRenewal ? 'bg-green-500' :
-                          event.type === 'CONTRACT_START' ? 'bg-indigo-500' :
-                          event.type === 'CONTRACT_TERMINATION' ? 'bg-red-500' :
-                          'bg-slate-400'
-                        }`}></div>
+                      <div key={event.id} className={`flex items-start gap-4 p-4 rounded-xl border ${event.isRenewal ? 'bg-green-50 border-green-200' :
+                          event.type === 'CONTRACT_START' ? 'bg-indigo-50 border-indigo-200' :
+                            event.type === 'CONTRACT_TERMINATION' ? 'bg-red-50 border-red-200' :
+                              'bg-slate-50 border-slate-100'
+                        }`}>
+                        <div className={`w-3 h-3 rounded-full mt-1 flex-shrink-0 ${event.isRenewal ? 'bg-green-500' :
+                            event.type === 'CONTRACT_START' ? 'bg-indigo-500' :
+                              event.type === 'CONTRACT_TERMINATION' ? 'bg-red-500' :
+                                'bg-slate-400'
+                          }`}></div>
                         <div className="flex-grow">
                           <div className="flex items-center justify-between">
                             <h5 className="text-sm font-bold text-slate-900">{event.title}</h5>
@@ -2119,16 +2149,16 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
                   </div>
                 </div>
               )}
-              
+
               {(() => {
                 let hasModifications = false;
                 if (selectedContract.meta) {
                   const meta = safeJSONParse(selectedContract.meta);
                   hasModifications = meta && meta.modificationHistory && meta.modificationHistory.length > 0;
                 }
-                
+
                 const hasContractHistory = contractHistory && contractHistory.length > 0;
-                
+
                 if (!hasModifications && !hasContractHistory) {
                   return (
                     <div className="text-center py-8 text-slate-400">
@@ -2143,38 +2173,37 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
           </div>
         )}
       </HRModal>
-      
+
       {/* Contract Renewal Modal */}
-      <HRModal 
-        isOpen={isRenewModalOpen} 
+      <HRModal
+        isOpen={isRenewModalOpen}
         onClose={() => {
           setIsRenewModalOpen(false);
           resetRenewalForm();
-        }} 
+        }}
         title="Renouveler le Contrat"
         size="lg"
         footer={
           <div className="flex justify-end gap-4">
-            <button 
-              type="button" 
+            <button
+              type="button"
               onClick={() => {
                 setIsRenewModalOpen(false);
                 resetRenewalForm();
-              }} 
+              }}
               disabled={isRenewing}
               className="px-8 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-slate-900 transition-all disabled:opacity-50"
             >
               Annuler
             </button>
-            <button 
-              type="submit" 
+            <button
+              type="submit"
               form="renewal-form"
               disabled={isRenewing || hasRenewalFormErrors()}
-              className={`px-4 md:px-10 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all shadow-xl disabled:opacity-50 flex items-center gap-2 ${
-                hasRenewalFormErrors() 
-                  ? 'bg-gray-400 text-gray-200 cursor-not-allowed' 
+              className={`px-4 md:px-10 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all shadow-xl disabled:opacity-50 flex items-center gap-2 ${hasRenewalFormErrors()
+                  ? 'bg-gray-400 text-gray-200 cursor-not-allowed'
                   : 'bg-green-600 text-white hover:bg-green-700'
-              }`}
+                }`}
             >
               {isRenewing ? (
                 <><RefreshCw className="animate-spin" size={16} /> Renouvellement...</>
@@ -2192,18 +2221,17 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
             <div className="bg-green-50 border border-green-200 rounded-2xl p-6">
               <h3 className="text-green-800 font-bold mb-2">Renouvellement de Contrat</h3>
               <p className="text-green-700 text-sm">
-                Employé: <strong>{getEmployeeName(selectedContract)}</strong><br/>
-                Contrat actuel: <strong>{selectedContract.type}</strong><br/>
+                Employé: <strong>{getEmployeeName(selectedContract)}</strong><br />
+                Contrat actuel: <strong>{selectedContract.type}</strong><br />
                 Date de fin actuelle: <strong>{selectedContract.endDate ? new Date(selectedContract.endDate).toLocaleDateString('fr-FR') : 'Indéterminée'}</strong>
               </p>
               {selectedContract.maxRenewals !== undefined && selectedContract.maxRenewals !== null && (
-                <div className={`mt-3 px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 ${
-                  (selectedContract.renewalCount ?? 0) >= selectedContract.maxRenewals
+                <div className={`mt-3 px-4 py-2 rounded-xl text-sm font-bold flex items-center gap-2 ${(selectedContract.renewalCount ?? 0) >= selectedContract.maxRenewals
                     ? 'bg-red-100 text-red-700 border border-red-200'
                     : (selectedContract.renewalCount ?? 0) >= selectedContract.maxRenewals - 1
-                    ? 'bg-amber-100 text-amber-700 border border-amber-200'
-                    : 'bg-white text-green-700 border border-green-200'
-                }`}>
+                      ? 'bg-amber-100 text-amber-700 border border-amber-200'
+                      : 'bg-white text-green-700 border border-green-200'
+                  }`}>
                   <RefreshCw size={14} />
                   Renouvellements : {selectedContract.renewalCount ?? 0} / {selectedContract.maxRenewals}
                   {(selectedContract.renewalCount ?? 0) >= selectedContract.maxRenewals && (
@@ -2215,25 +2243,24 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
                 </div>
               )}
             </div>
-            
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div className="space-y-2">
                 <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">
                   Date d'Effet du Renouvellement *
                 </label>
-                <input 
-                  type="date" 
+                <input
+                  type="date"
                   value={renewalForm.effectiveDate}
                   onChange={(e) => handleRenewalFormChange('effectiveDate', e.target.value)}
                   required
                   disabled={isRenewing}
-                  className={`w-full px-6 py-4 border-2 rounded-2xl focus:ring-2 transition-all font-bold text-sm disabled:opacity-50 ${
-                    renewalErrors.effectiveDate 
-                      ? 'bg-red-50 border-red-300 text-red-900 focus:ring-red-500' 
+                  className={`w-full px-6 py-4 border-2 rounded-2xl focus:ring-2 transition-all font-bold text-sm disabled:opacity-50 ${renewalErrors.effectiveDate
+                      ? 'bg-red-50 border-red-300 text-red-900 focus:ring-red-500'
                       : renewalWarnings.effectiveDate
                         ? 'bg-yellow-50 border-yellow-300 focus:ring-yellow-500'
                         : 'bg-slate-50 border-slate-200 focus:ring-green-500'
-                  }`}
+                    }`}
                 />
                 {renewalErrors.effectiveDate && (
                   <p className="text-xs text-red-600 font-medium flex items-center gap-1">
@@ -2251,24 +2278,23 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
                   </p>
                 )}
               </div>
-              
+
               <div className="space-y-2">
                 <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">
                   Nouvelle Date de Fin {(renewalForm.newType === 'CDD' || renewalForm.newType === 'STAGE') ? '*' : '(Optionnelle)'}
                 </label>
-                <input 
-                  type="date" 
+                <input
+                  type="date"
                   value={renewalForm.newEndDate}
                   onChange={(e) => handleRenewalFormChange('newEndDate', e.target.value)}
                   required={renewalForm.newType === 'CDD' || renewalForm.newType === 'STAGE'}
                   disabled={isRenewing || renewalForm.newType === 'CDI'}
-                  className={`w-full px-6 py-4 border-2 rounded-2xl focus:ring-2 transition-all font-bold text-sm disabled:opacity-30 ${
-                    renewalErrors.newEndDate 
-                      ? 'bg-red-50 border-red-300 text-red-900 focus:ring-red-500' 
+                  className={`w-full px-6 py-4 border-2 rounded-2xl focus:ring-2 transition-all font-bold text-sm disabled:opacity-30 ${renewalErrors.newEndDate
+                      ? 'bg-red-50 border-red-300 text-red-900 focus:ring-red-500'
                       : renewalWarnings.newEndDate
                         ? 'bg-yellow-50 border-yellow-300 focus:ring-yellow-500'
                         : 'bg-slate-50 border-slate-200 focus:ring-green-500'
-                  }`}
+                    }`}
                 />
                 {renewalErrors.newEndDate && (
                   <p className="text-xs text-red-600 font-medium flex items-center gap-1">
@@ -2302,21 +2328,20 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
                 )}
               </div>
             </div>
-            
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div className="space-y-2">
                 <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">
                   Nouveau Type de Contrat *
                 </label>
-                <select 
+                <select
                   value={renewalForm.newType}
                   onChange={(e) => handleRenewalFormChange('newType', e.target.value)}
                   disabled={isRenewing}
-                  className={`w-full px-6 py-4 border-2 rounded-2xl focus:ring-2 transition-all font-bold text-sm disabled:opacity-50 ${
-                    renewalErrors.newType 
-                      ? 'bg-red-50 border-red-300 focus:ring-red-500' 
+                  className={`w-full px-6 py-4 border-2 rounded-2xl focus:ring-2 transition-all font-bold text-sm disabled:opacity-50 ${renewalErrors.newType
+                      ? 'bg-red-50 border-red-300 focus:ring-red-500'
                       : 'bg-slate-50 border-slate-200 focus:ring-green-500'
-                  }`}
+                    }`}
                 >
                   <option value="">Sélectionnez un type</option>
                   <option value="CDI">CDI - Contrat à Durée Indéterminée</option>
@@ -2335,24 +2360,23 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
                   </p>
                 )}
               </div>
-              
+
               <div className="space-y-2">
                 <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">
                   Nouveau Salaire (optionnel)
                 </label>
-                <input 
-                  type="number" 
+                <input
+                  type="number"
                   value={renewalForm.newSalary}
                   onChange={(e) => handleRenewalFormChange('newSalary', e.target.value)}
                   placeholder="Laisser vide pour conserver le salaire actuel"
                   disabled={isRenewing}
                   min="0"
                   step="1000"
-                  className={`w-full px-6 py-4 border-2 rounded-2xl focus:ring-2 transition-all font-bold text-sm disabled:opacity-50 ${
-                    renewalErrors.newSalary 
-                      ? 'bg-red-50 border-red-300 focus:ring-red-500' 
+                  className={`w-full px-6 py-4 border-2 rounded-2xl focus:ring-2 transition-all font-bold text-sm disabled:opacity-50 ${renewalErrors.newSalary
+                      ? 'bg-red-50 border-red-300 focus:ring-red-500'
                       : 'bg-slate-50 border-slate-200 focus:ring-green-500'
-                  }`}
+                    }`}
                 />
                 {renewalErrors.newSalary && (
                   <p className="text-xs text-red-600 font-medium flex items-center gap-1">
@@ -2366,21 +2390,20 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
                 )}
               </div>
             </div>
-            
+
             <div className="space-y-2">
               <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">
                 Raison du Renouvellement *
               </label>
-              <textarea 
+              <textarea
                 value={renewalForm.renewalReason}
                 onChange={(e) => handleRenewalFormChange('renewalReason', e.target.value)}
                 placeholder="Veuillez expliquer la raison du renouvellement (minimum 10 caractères)..."
                 rows={4}
-                className={`w-full px-6 py-4 border-2 rounded-2xl focus:ring-2 transition-all font-medium text-sm resize-none disabled:opacity-50 ${
-                  renewalErrors.renewalReason 
-                    ? 'bg-red-50 border-red-300 focus:ring-red-500' 
+                className={`w-full px-6 py-4 border-2 rounded-2xl focus:ring-2 transition-all font-medium text-sm resize-none disabled:opacity-50 ${renewalErrors.renewalReason
+                    ? 'bg-red-50 border-red-300 focus:ring-red-500'
                     : 'bg-slate-50 border-slate-200 focus:ring-green-500'
-                }`}
+                  }`}
                 disabled={isRenewing}
                 required
                 minLength={10}
@@ -2402,7 +2425,7 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
                 </p>
               </div>
             </div>
-            
+
             {!hasRenewalFormErrors() && renewalForm.effectiveDate && renewalForm.newType && (
               <div className="bg-gradient-to-r from-green-50 to-blue-50 border border-green-200 rounded-2xl p-6">
                 <h4 className="text-green-800 font-bold mb-3 flex items-center gap-2">
@@ -2428,10 +2451,10 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
                 </div>
               </div>
             )}
-            
+
             <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4">
               <p className="text-amber-800 text-xs">
-                <strong>⚠️ Attention :</strong> Le renouvellement va marquer le contrat actuel comme "RENOUVELÉ" 
+                <strong>⚠️ Attention :</strong> Le renouvellement va marquer le contrat actuel comme "RENOUVELÉ"
                 et créer un nouveau contrat actif avec les nouvelles conditions à partir de la date d'effet.
               </p>
             </div>
@@ -2440,23 +2463,23 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
       </HRModal>
 
       {/* Terminate Contract Modal */}
-      <HRModal 
-        isOpen={isTerminateModalOpen} 
-        onClose={() => setIsTerminateModalOpen(false)} 
+      <HRModal
+        isOpen={isTerminateModalOpen}
+        onClose={() => setIsTerminateModalOpen(false)}
         title="Résilier le Contrat"
         size="md"
         footer={
           <div className="flex justify-end gap-4">
-            <button 
-              type="button" 
-              onClick={() => setIsTerminateModalOpen(false)} 
+            <button
+              type="button"
+              onClick={() => setIsTerminateModalOpen(false)}
               disabled={processing}
               className="px-8 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-slate-900 transition-all disabled:opacity-50"
             >
               Annuler
             </button>
-            <button 
-              type="submit" 
+            <button
+              type="submit"
               form="terminate-form"
               disabled={processing || !terminationForm.reason.trim() || terminationForm.reason.trim().length < 15}
               className="px-4 md:px-10 py-4 bg-red-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-red-700 transition-all shadow-xl disabled:opacity-50 flex items-center gap-2"
@@ -2478,7 +2501,7 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
               <p>✅ <strong>Action suivante possible :</strong> Après résiliation, vous pourrez désactiver l'employé si nécessaire.</p>
             </div>
           </div>
-          
+
           <div className="bg-blue-50 border border-blue-200 rounded-2xl p-4">
             <div className="flex items-start gap-2">
               <Info className="text-blue-600 shrink-0 mt-0.5" size={16} />
@@ -2488,12 +2511,12 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
               </div>
             </div>
           </div>
-          
+
           <div className="space-y-2">
             <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">
               Motif de Résiliation * (Obligatoire)
             </label>
-            <textarea 
+            <textarea
               value={terminationForm.reason}
               onChange={(e) => setTerminationForm({ reason: e.target.value })}
               placeholder="Exemple: Fin de mission, démission, licenciement pour motif économique, rupture conventionnelle... (minimum 15 caractères requis)"
@@ -2518,23 +2541,23 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
       </HRModal>
 
       {/* Suspend Contract Modal */}
-      <HRModal 
-        isOpen={isSuspendModalOpen} 
-        onClose={() => setIsSuspendModalOpen(false)} 
+      <HRModal
+        isOpen={isSuspendModalOpen}
+        onClose={() => setIsSuspendModalOpen(false)}
         title="Suspendre le Contrat"
         size="md"
         footer={
           <div className="flex justify-end gap-4">
-            <button 
-              type="button" 
-              onClick={() => setIsSuspendModalOpen(false)} 
+            <button
+              type="button"
+              onClick={() => setIsSuspendModalOpen(false)}
               disabled={processing}
               className="px-8 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-slate-900 transition-all disabled:opacity-50"
             >
               Annuler
             </button>
-            <button 
-              type="submit" 
+            <button
+              type="submit"
               form="suspend-form"
               disabled={processing || !suspensionForm.reason.trim()}
               className="px-4 md:px-10 py-4 bg-amber-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-amber-700 transition-all shadow-xl disabled:opacity-50 flex items-center gap-2"
@@ -2559,7 +2582,7 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
             <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">
               Raison de la Suspension *
             </label>
-            <textarea 
+            <textarea
               value={suspensionForm.reason}
               onChange={(e) => setSuspensionForm({ reason: e.target.value })}
               placeholder="Veuillez expliquer la raison de la suspension (minimum 10 caractères)..."

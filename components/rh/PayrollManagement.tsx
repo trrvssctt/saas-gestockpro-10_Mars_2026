@@ -1,21 +1,21 @@
 
-import React, { useState, useEffect } from 'react';
-import { 
-  ArrowLeft, 
-  Settings, 
-  Play, 
-  ClipboardList, 
-  TrendingUp, 
-  CreditCard, 
-  FileCheck, 
+import React, { useState, useEffect, useMemo } from 'react';
+import {
+  ArrowLeft,
+  Settings,
+  Play,
+  ClipboardList,
+  TrendingUp,
+  CreditCard,
+  FileCheck,
   Download,
   FolderDown,
   Plus,
   Search,
   Filter,
-  DollarSign, 
-  Calendar, 
-  CheckCircle2, 
+  DollarSign,
+  Calendar,
+  CheckCircle2,
   CheckCircle,
   Send,
   Eye,
@@ -36,7 +36,12 @@ import {
   MinusCircle,
   Zap,
   ToggleLeft,
-  ToggleRight
+  ToggleRight,
+  Clock,
+  ChevronDown,
+  ChevronUp,
+  UserCheck,
+  UserX
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import HRModal from './HRModal';
@@ -88,7 +93,11 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
   const [settingsForm, setSettingsForm] = useState({
     employerSocialChargeRate: 18.5,
     employeeSocialChargeRate: 8.2,
-    currency: 'F CFA'
+    currency: 'F CFA',
+    paymentDay: 28,
+    workStartTime: '08:00',
+    workEndTime: '17:00',
+    workingDaysPerMonth: 26
   });
   const [newItemForm, setNewItemForm] = useState({
     name: '',
@@ -104,7 +113,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
   const [isRejectModalOpen, setIsRejectModalOpen] = useState(false);
   const [selectedAdvance, setSelectedAdvance] = useState<any>(null);
   const [rejectReason, setRejectReason] = useState('');
-  
+
   // États pour les déductions mensuelles
   const [monthlyDeductions, setMonthlyDeductions] = useState<Record<string, any>>({});
   const [loadingDeductions, setLoadingDeductions] = useState(false);
@@ -122,6 +131,11 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
   const [isRegenerateModalOpen, setIsRegenerateModalOpen] = useState(false);
   const [regeneratingPayslip, setRegeneratingPayslip] = useState(false);
   const [confirmPayroll, setConfirmPayroll] = useState(false);
+
+  // ---- États Pré-Paie & Jour de Paie ----
+  const [prePayrollData, setPrePayrollData] = useState<any>(null);
+  const [loadingPrePayroll, setLoadingPrePayroll] = useState(false);
+  const [showPrePayrollDetails, setShowPrePayrollDetails] = useState(false);
 
   // États pour la prévisualisation des bulletins
   const [selectedEmployeeForPreview, setSelectedEmployeeForPreview] = useState<any>(null);
@@ -152,6 +166,61 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
   const [editingRuleId, setEditingRuleId] = useState<string | null>(null);
 
   const [zipDownloading, setZipDownloading] = useState(false);
+
+  // ---- Calcul du jour de paie ----
+  const paydayInfo = useMemo(() => {
+    const payDay = payrollSettings?.paymentDay || 28;
+    const today = new Date();
+    const todayDay = today.getDate();
+    const currentMonth = today.getMonth();
+    const currentYear = today.getFullYear();
+
+    // Prochaine date de paie
+    let nextPayDate: Date;
+    if (todayDay <= payDay) {
+      nextPayDate = new Date(currentYear, currentMonth, payDay);
+    } else {
+      nextPayDate = new Date(currentYear, currentMonth + 1, payDay);
+    }
+
+    const diffTime = nextPayDate.getTime() - today.getTime();
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+    const isPayday = todayDay === payDay;
+    const isSoon = diffDays <= 3 && !isPayday;
+
+    const nextPayDateStr = nextPayDate.toLocaleDateString('fr-FR', {
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric'
+    });
+
+    return { payDay, isPayday, isSoon, diffDays, nextPayDateStr };
+  }, [payrollSettings?.paymentDay]);
+
+  // ---- Charger la vérification pré-paie ----
+  const loadPrePayrollCheck = async () => {
+    try {
+      setLoadingPrePayroll(true);
+      const currentMonth = new Date().toISOString().substring(0, 7);
+      const data = await api.get(`/hr/payroll/pre-payroll-check?month=${currentMonth}`);
+      setPrePayrollData(data);
+    } catch (error) {
+      console.error('Erreur chargement pré-paie:', error);
+      setPrePayrollData(null);
+    } finally {
+      setLoadingPrePayroll(false);
+    }
+  };
+
+  // Ouvrir le modal de génération avec chargement automatique de la vérification
+  const handleOpenGenModal = () => {
+    setIsGenModalOpen(true);
+    setPrePayrollData(null);
+    setShowPrePayrollDetails(false);
+    setConfirmPayroll(false);
+    loadPrePayrollCheck();
+  };
 
   const handleDownloadAllZip = async () => {
     try {
@@ -287,7 +356,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
     // Toujours charger les avances et primes pour les calculs de paie
     loadAdvances();
     loadPrimes();
-    
+
     if (activeTab === 'settings') {
       loadPayrollItems();
     }
@@ -316,7 +385,11 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
       setSettingsForm({
         employerSocialChargeRate: data?.employerSocialChargeRate || 18.5,
         employeeSocialChargeRate: data?.employeeSocialChargeRate || 8.2,
-        currency: data?.currency || 'F CFA'
+        currency: data?.currency || 'F CFA',
+        paymentDay: data?.paymentDay || 28,
+        workStartTime: data?.workStartTime || '08:00',
+        workEndTime: data?.workEndTime || '17:00',
+        workingDaysPerMonth: data?.workingDaysPerMonth || 26
       });
     } catch (error) {
       console.error('Erreur lors du chargement des paramètres:', error);
@@ -355,18 +428,18 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
       // Charger les employés
       const employeesResponse = await api.get('/hr/employees');
       const employeesData = employeesResponse?.rows || employeesResponse || [];
-      
+
       // Charger les contrats actifs
       const contractsResponse = await api.get('/hr/contracts');
       const contractsData = contractsResponse?.rows || contractsResponse || [];
-      
+
       // Mapper les employés avec leurs contrats actifs
       const employeesWithContracts = employeesData.map(employee => {
-        const activeContract = contractsData.find(contract => 
-          contract.employeeId === employee.id && 
+        const activeContract = contractsData.find(contract =>
+          contract.employeeId === employee.id &&
           contract.status === 'ACTIVE'
         );
-        
+
         return {
           ...employee,
           activeContract,
@@ -375,7 +448,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
           hasActiveContract: !!activeContract
         };
       });
-      
+
       setEmployees(Array.isArray(employeesWithContracts) ? employeesWithContracts : []);
     } catch (error) {
       console.error('Erreur lors du chargement des employés:', error);
@@ -412,15 +485,15 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
     try {
       setLoadingDeductions(true);
       const deductionsData: Record<string, any> = {};
-      
+
       // Charger les déductions pour chaque employé ayant des avances actives
-      const employeesWithAdvances = employees.filter(emp => 
-        advances.some(advance => 
-          advance.employeeId === emp.id && 
+      const employeesWithAdvances = employees.filter(emp =>
+        advances.some(advance =>
+          advance.employeeId === emp.id &&
           advance.status === 'APPROVED'
         )
       );
-      
+
       for (const employee of employeesWithAdvances) {
         try {
           const response = await api.get(`/hr/employees/${employee.id}/monthly-deductions`);
@@ -431,7 +504,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
           console.error(`Erreur lors du chargement des déductions pour ${employee.firstName}:`, error);
         }
       }
-      
+
       setMonthlyDeductions(deductionsData);
     } catch (error) {
       console.error('Erreur lors du chargement des déductions mensuelles:', error);
@@ -462,11 +535,11 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
     try {
       setLoadingPreview(true);
       setSelectedEmployeeForPreview(employee);
-      
+
       // Calculer les données du bulletin
       const employeePrimes = primes.filter(p => p.employeeId === employee.id && p.status === 'APPROVED');
       const employeeAdvances = advances.filter(a => a.employeeId === employee.id && a.status === 'APPROVED');
-      
+
       // Vérifier que l'employé a un contrat actif
       if (!employee.hasActiveContract) {
         setAlertMessage('Cet employé n\'a pas de contrat actif valide');
@@ -474,13 +547,13 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
         setTimeout(() => setShowSuccessAlert(false), 3000);
         return;
       }
-      
+
       // Fonction pour valider et nettoyer les montants
       const validateAmount = (amount: any): number => {
         const num = parseFloat(amount || 0);
         return isNaN(num) || num < 0 ? 0 : Math.round(num * 100) / 100;
       };
-      
+
       const baseSalary = validateAmount(employee.currentSalary);
       const totalPrimes = employeePrimes.reduce((sum, p) => sum + validateAmount(p.amount), 0);
       const grossSalary = baseSalary + totalPrimes;
@@ -500,7 +573,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
         return sum + monthlyDeduction;
       }, 0);
       const netSalary = Math.max(0, grossSalary - socialChargesEmployee - incomeTax - totalAdvanceDeductions);
-      
+
       // Préparer les données pour PayslipPreview
       const payslipData = {
         employee: {
@@ -543,10 +616,10 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
         month: currentPeriod.month,
         year: currentPeriod.year
       };
-      
+
       setPreviewPayslipData(payslipData);
       setIsPreviewModalOpen(true);
-      
+
     } catch (error) {
       console.error('Erreur lors de la préparation du bulletin:', error);
       setAlertMessage('Erreur lors de la prévisualisation du bulletin');
@@ -575,13 +648,13 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
       // Utiliser fetch directement comme dans DocumentPreview.tsx pour un meilleur contrôle des erreurs
       const session = authBridge.getSession();
       const token = session?.token;
-      
+
       const url = new URL('https://gestock.realtechprint.com/api/hr/payslips/download');
       //const url = new URL('http://localhost:3000/api/hr/payslips/download');
       url.searchParams.set('employeeId', payslip.employeeId);
       url.searchParams.set('month', payslip.month);
       url.searchParams.set('format', format);
-      
+
       const response = await fetch(url.toString(), {
         method: 'GET',
         headers: {
@@ -627,18 +700,18 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
 
     try {
       setRegeneratingPayslip(true);
-      
+
       // Utiliser l'endpoint de génération existant pour régénérer
       await api.post('/hr/payslips/generate', {
         employeeId: selectedPayslip.employeeId,
         month: selectedPayslip.month
       });
-      
+
       setIsRegenerateModalOpen(false);
       setAlertMessage('Bulletin régénéré avec succès');
       setShowSuccessAlert(true);
       setTimeout(() => setShowSuccessAlert(false), 3000);
-      
+
       await loadPayslips();
     } catch (error: any) {
       console.error('Erreur lors de la régénération:', error);
@@ -722,15 +795,15 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
     return employees.filter(employee => {
       // Vérifier qu'il a un contrat actif et un salaire
       const hasValidContract = employee.hasActiveContract && (employee.currentSalary || 0) > 0;
-      
-      const matchesSearch = searchTerm === '' || 
+
+      const matchesSearch = searchTerm === '' ||
         employee.firstName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         employee.lastName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         employee.matricule?.toLowerCase().includes(searchTerm.toLowerCase());
-      
-      const matchesDepartment = departmentFilter === '' || 
+
+      const matchesDepartment = departmentFilter === '' ||
         employee.departmentInfo?.name === departmentFilter;
-      
+
       return hasValidContract && matchesSearch && matchesDepartment;
     });
   };
@@ -749,12 +822,12 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
     return employees.filter(employee => {
       // Vérifier qu'il a un contrat actif et un salaire
       const hasValidContract = employee.hasActiveContract && (employee.currentSalary || 0) > 0;
-      
-      const matchesSearch = primeEmployeeSearchTerm === '' || 
+
+      const matchesSearch = primeEmployeeSearchTerm === '' ||
         employee.firstName?.toLowerCase().includes(primeEmployeeSearchTerm.toLowerCase()) ||
         employee.lastName?.toLowerCase().includes(primeEmployeeSearchTerm.toLowerCase()) ||
         employee.matricule?.toLowerCase().includes(primeEmployeeSearchTerm.toLowerCase());
-      
+
       return hasValidContract && matchesSearch;
     });
   };
@@ -768,7 +841,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
       const itemsResponse = await api.get('/hr/payroll-items');
       const items = itemsResponse?.data || itemsResponse || [];
       const activeItems = Array.isArray(items) ? items.filter(item => item.isActive !== false) : [];
-      
+
       if (activeItems.length === 0) {
         errors.push('Aucune rubrique de paie configurée. Veuillez configurer les rubriques dans l\'onglet Paramétrage.');
       }
@@ -780,7 +853,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
     try {
       const employeesResponse = await api.get('/hr/employees', { params: { status: 'ACTIVE' } });
       const employeesList = employeesResponse?.rows || employeesResponse || [];
-      
+
       if (!Array.isArray(employeesList) || employeesList.length === 0) {
         errors.push('Aucun employé actif trouvé. Veuillez ajouter des employés avant de lancer la paie.');
       }
@@ -793,7 +866,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
       const contractsResponse = await api.get('/hr/contracts');
       const contractsList = contractsResponse?.rows || contractsResponse || [];
       const activeContracts = Array.isArray(contractsList) ? contractsList.filter(contract => contract.status === 'ACTIVE') : [];
-      
+
       if (activeContracts.length === 0) {
         errors.push('Aucun contrat actif trouvé. Veuillez créer des contrats actifs pour vos employés.');
       }
@@ -806,7 +879,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
 
   const handleRunPayroll = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     // Vérifier que la confirmation est cochée
     if (!confirmPayroll) {
       setAlertMessage('Veuillez confirmer le lancement du traitement de paie');
@@ -814,14 +887,14 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
       setTimeout(() => setShowSuccessAlert(false), 3000);
       return;
     }
-    
+
     setIsLoading(true);
-    
+
     try {
       // Vérifier les prérequis avant de continuer
       console.log('Vérification des prérequis pour le traitement de paie...');
       const prerequisiteErrors = await checkPayrollPrerequisites();
-      
+
       if (prerequisiteErrors.length > 0) {
         setIsLoading(false);
         setAlertMessage(`Prérequis manquants : ${prerequisiteErrors.join(' • ')}`);
@@ -829,12 +902,12 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
         setTimeout(() => setShowSuccessAlert(false), 8000);
         return;
       }
-      
+
       // 4. Vérifier qu'il y a des employés avec contrat actif
-      const employeesWithActiveContracts = employees.filter(emp => 
+      const employeesWithActiveContracts = employees.filter(emp =>
         emp.status === 'ACTIVE' && emp.hasActiveContract && (emp.currentSalary || 0) > 0
       );
-      
+
       if (employeesWithActiveContracts.length === 0) {
         setIsLoading(false);
         setAlertMessage('Aucun employé avec contrat actif et salaire défini trouvé pour le traitement de paie.');
@@ -842,9 +915,9 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
         setTimeout(() => setShowSuccessAlert(false), 8000);
         return;
       }
-      
+
       console.log(`Tous les prérequis sont remplis, lancement du traitement pour ${employeesWithActiveContracts.length} employé(s)...`);
-      
+
     } catch (error) {
       setIsLoading(false);
       setAlertMessage('Erreur lors de la vérification des prérequis');
@@ -857,9 +930,9 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
       const currentMonth = new Date().toISOString().substring(0, 7); // YYYY-MM format
       const currentYear = new Date().getFullYear();
       const currentMonthName = new Date().toLocaleDateString('fr-FR', { month: 'long' });
-      
+
       console.log(`Lancement du traitement de paie pour ${currentMonthName} ${currentYear}`);
-      
+
       // Appeler l'endpoint de génération de paie pour le mois courant
       // Traite automatiquement tous les employés avec contrat actif
       const response = await api.post('/hr/payroll/generate-monthly', {
@@ -871,43 +944,43 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
       });
 
       const result = response.data || response;
-      
+
       setIsGenModalOpen(false);
       setSelectedEmployees([]);
       setSelectAll(false);
       setConfirmPayroll(false);
-      
+
       if (result.success) {
         const { processedEmployees, generatedFiles, totalAmount, skippedEmployees } = result;
         let message = `Traitement de paie terminé: ${processedEmployees} employé(s) traité(s)`;
-        
+
         if (generatedFiles > 0) {
           message += `, ${generatedFiles} fiche(s) de paie générée(s)`;
         }
-        
+
         if (totalAmount) {
           message += `. Montant total: ${totalAmount.toLocaleString('fr-FR')} F CFA`;
         }
-        
+
         if (skippedEmployees && skippedEmployees.length > 0) {
           message += ` (${skippedEmployees.length} employé(s) sans contrat actif)`;
         }
-        
+
         setAlertMessage(message);
       } else {
         setAlertMessage(`Traitement partiel: ${result.message || 'Certains employés n\'ont pas pu être traités'}`);
       }
-      
+
       setShowSuccessAlert(true);
       setTimeout(() => setShowSuccessAlert(false), 5000);
-      
+
       // Recharger les données pour refléter les nouveaux bulletins
       await Promise.all([
         loadPayslips(),
         loadMonthlyDeductions(),
         loadEmployees()
       ]);
-      
+
     } catch (error: any) {
       console.error('Erreur lors du traitement de paie:', error);
       const errorMsg = error.response?.data?.message || error.message || 'Erreur lors du traitement de la paie';
@@ -921,7 +994,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
 
   const handleSaveAdvance = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     // Validation
     if (selectedEmployees.length === 0) {
       setAlertMessage('Veuillez sélectionner au moins un employé');
@@ -947,7 +1020,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
     // Validation du montant par rapport au salaire
     const amount = parseFloat(advanceForm.amount);
     const totalMonthlyAmount = amount * advanceForm.months;
-    
+
     for (const employeeId of selectedEmployees) {
       const maxAmount = getMaxAdvanceAmount(employeeId) * advanceForm.months;
       if (totalMonthlyAmount > maxAmount) {
@@ -981,7 +1054,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
       setAlertMessage(`Avances créées pour ${selectedEmployees.length} employé(s)`);
       setShowSuccessAlert(true);
       setTimeout(() => setShowSuccessAlert(false), 3000);
-      
+
       // Recharger les avances
       await loadAdvances();
     } catch (error: any) {
@@ -997,7 +1070,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
   // Fonction pour sauvegarder une prime exceptionnelle
   const handleSavePrime = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     // Validation
     if (!primeForm.employeeId) {
       setAlertMessage('Veuillez sélectionner un employé');
@@ -1037,7 +1110,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
       setAlertMessage('Prime exceptionnelle créée avec succès');
       setShowSuccessAlert(true);
       setTimeout(() => setShowSuccessAlert(false), 3000);
-      
+
       // Recharger les primes
       await loadPrimes();
     } catch (error: any) {
@@ -1055,18 +1128,22 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
     e.preventDefault();
     try {
       setIsLoading(true);
-      
+
       await api.put('/hr/payroll-settings', {
         employerSocialChargeRate: parseFloat(settingsForm.employerSocialChargeRate.toString()),
         employeeSocialChargeRate: parseFloat(settingsForm.employeeSocialChargeRate.toString()),
-        currency: settingsForm.currency
+        currency: settingsForm.currency,
+        paymentDay: parseInt(settingsForm.paymentDay.toString()),
+        workStartTime: settingsForm.workStartTime,
+        workEndTime: settingsForm.workEndTime,
+        workingDaysPerMonth: parseInt(settingsForm.workingDaysPerMonth.toString())
       });
 
       setIsSettingModalOpen(false);
       setAlertMessage('Paramètres de paie mis à jour avec succès');
       setShowSuccessAlert(true);
       setTimeout(() => setShowSuccessAlert(false), 3000);
-      
+
       // Recharger les paramètres
       await loadPayrollSettings();
     } catch (error) {
@@ -1084,7 +1161,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
     e.preventDefault();
     try {
       setIsLoading(true);
-      
+
       // Générer un code automatiquement basé sur le nom
       const code = newItemForm.name
         .toUpperCase()
@@ -1103,7 +1180,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
       setAlertMessage('Nouvelle rubrique créée avec succès');
       setShowSuccessAlert(true);
       setTimeout(() => setShowSuccessAlert(false), 3000);
-      
+
       // Recharger les rubriques
       await loadPayrollItems();
     } catch (error) {
@@ -1132,20 +1209,20 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
   const handleSaveEditItem = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingItem) return;
-    
+
     try {
       setIsLoading(true);
-      
+
       // Pour les éléments système, n'envoyer que le statut isActive
-      const updateData = editingItem.isSystemItem 
+      const updateData = editingItem.isSystemItem
         ? { isActive: editingItem.isActive }
         : {
-            name: editingItem.name,
-            type: editingItem.type,
-            category: editingItem.category,
-            isActive: editingItem.isActive
-          };
-      
+          name: editingItem.name,
+          type: editingItem.type,
+          category: editingItem.category,
+          isActive: editingItem.isActive
+        };
+
       await api.put(`/hr/payroll-items/${editingItem.id}`, updateData);
 
       setIsEditModalOpen(false);
@@ -1153,7 +1230,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
       setAlertMessage('Rubrique modifiée avec succès');
       setShowSuccessAlert(true);
       setTimeout(() => setShowSuccessAlert(false), 3000);
-      
+
       // Recharger les rubriques
       await loadPayrollItems();
     } catch (error) {
@@ -1175,10 +1252,10 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
   // Fonction pour supprimer définitivement
   const confirmDeleteItem = async () => {
     if (!itemToDelete) return;
-    
+
     try {
       setIsLoading(true);
-      
+
       await api.delete(`/hr/payroll-items/${itemToDelete.id}`);
 
       setIsDeleteModalOpen(false);
@@ -1186,7 +1263,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
       setAlertMessage('Rubrique supprimée avec succès');
       setShowSuccessAlert(true);
       setTimeout(() => setShowSuccessAlert(false), 3000);
-      
+
       // Recharger les rubriques
       await loadPayrollItems();
     } catch (error) {
@@ -1206,7 +1283,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
       setAlertMessage(`Rubrique ${item.isActive ? 'désactivée' : 'activée'} avec succès`);
       setShowSuccessAlert(true);
       setTimeout(() => setShowSuccessAlert(false), 3000);
-      
+
       // Recharger les rubriques
       await loadPayrollItems();
     } catch (error) {
@@ -1230,20 +1307,20 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
   // Fonction pour confirmer l'approbation
   const confirmApprovalAdvance = async () => {
     if (!selectedAdvance) return;
-    
+
     try {
       setIsLoading(true);
       await api.post(`/hr/advances/${selectedAdvance.id}/approve`, {});
-      
+
       setIsApproveModalOpen(false);
       setSelectedAdvance(null);
       setAlertMessage('Avance approuvée avec succès');
       setShowSuccessAlert(true);
       setTimeout(() => setShowSuccessAlert(false), 3000);
-      
+
       // Recharger les avances
       await loadAdvances();
-      
+
       // Recharger les déductions mensuelles
       if (employees.length > 0) {
         await loadMonthlyDeductions();
@@ -1266,23 +1343,23 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
       setTimeout(() => setShowSuccessAlert(false), 3000);
       return;
     }
-    
+
     try {
       setIsLoading(true);
       await api.post(`/hr/advances/${selectedAdvance.id}/reject`, {
         reason: rejectReason.trim()
       });
-      
+
       setIsRejectModalOpen(false);
       setSelectedAdvance(null);
       setRejectReason('');
       setAlertMessage('Avance rejetée avec succès');
       setShowSuccessAlert(true);
       setTimeout(() => setShowSuccessAlert(false), 3000);
-      
+
       // Recharger les avances
       await loadAdvances();
-      
+
       // Recharger les déductions mensuelles
       if (employees.length > 0) {
         await loadMonthlyDeductions();
@@ -1302,7 +1379,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
       {/* Success Alert */}
       <AnimatePresence>
         {showSuccessAlert && (
-          <motion.div 
+          <motion.div
             initial={{ opacity: 0, y: -20 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -20 }}
@@ -1316,7 +1393,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
         <div className="flex items-center gap-4">
-          <button 
+          <button
             onClick={() => onNavigate('rh')}
             className="w-10 h-10 bg-white border border-slate-100 rounded-xl flex items-center justify-center text-slate-400 hover:text-slate-900 transition-all shadow-sm"
           >
@@ -1331,35 +1408,91 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
           <button className="px-6 py-3 bg-white border border-slate-100 text-slate-900 rounded-2xl font-black text-[10px] uppercase tracking-widest flex items-center gap-2 hover:bg-slate-50 transition-all shadow-sm">
             <History size={16} /> Historique
           </button>
-          <button 
-            onClick={() => setIsGenModalOpen(true)}
-            className="px-6 py-3 bg-slate-900 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest flex items-center gap-2 hover:bg-indigo-600 transition-all shadow-xl active:scale-95"
+          {!paydayInfo.isPayday && (
+            <div className="flex flex-col items-end mr-2">
+              <span className="text-[9px] font-bold text-amber-600 uppercase tracking-tighter">Prochaine paie : {paydayInfo.nextPayDateStr}</span>
+              <span className="text-[8px] text-slate-400 uppercase">Traitement groupé limité au jour J</span>
+            </div>
+          )}
+          <button
+            onClick={handleOpenGenModal}
+            disabled={!paydayInfo.isPayday && authBridge.getSession()?.user?.role !== 'ADMIN'} // Allow ADMIN to bypass for emergencies if needed
+            className={`px-6 py-3 rounded-2xl font-black text-[10px] uppercase tracking-widest flex items-center gap-2 transition-all shadow-xl active:scale-95 ${paydayInfo.isPayday
+                ? "bg-slate-900 text-white hover:bg-indigo-600 shadow-indigo-200"
+                : "bg-slate-100 text-slate-400 cursor-not-allowed opacity-60 shadow-none border border-slate-200"
+              }`}
+            title={!paydayInfo.isPayday ? `Disponible uniquement le ${paydayInfo.payDay} du mois` : "Lancer le traitement de la paie"}
           >
-            <Play size={16} /> Lancer Traitement
+            <Play size={16} /> {paydayInfo.isPayday ? "Lancer Traitement" : "En attente du " + paydayInfo.payDay}
           </button>
         </div>
       </div>
 
+      {/* ══════  BANDEAU JOUR DE PAIE  ══════ */}
+      <motion.div
+        initial={{ opacity: 0, y: -10 }}
+        animate={{ opacity: 1, y: 0 }}
+        className={`relative overflow-hidden rounded-[2rem] border p-5 flex items-center gap-4 ${paydayInfo.isPayday
+          ? 'bg-gradient-to-r from-emerald-50 to-green-50 border-emerald-200'
+          : paydayInfo.isSoon
+            ? 'bg-gradient-to-r from-amber-50 to-orange-50 border-amber-200'
+            : 'bg-gradient-to-r from-slate-50 to-indigo-50 border-slate-200'
+          }`}
+      >
+        <div className={`w-12 h-12 rounded-2xl flex items-center justify-center flex-shrink-0 shadow-sm ${paydayInfo.isPayday
+          ? 'bg-emerald-500 text-white'
+          : paydayInfo.isSoon
+            ? 'bg-amber-500 text-white'
+            : 'bg-white text-indigo-500'
+          }`}>
+          {paydayInfo.isPayday ? <DollarSign size={22} /> : <Clock size={22} />}
+        </div>
+        <div className="flex-1">
+          <p className={`text-sm font-black uppercase tracking-tight ${paydayInfo.isPayday ? 'text-emerald-800' : paydayInfo.isSoon ? 'text-amber-800' : 'text-slate-800'
+            }`}>
+            {paydayInfo.isPayday
+              ? '🎉 C\'est le jour de paie !'
+              : paydayInfo.isSoon
+                ? `⏰ Paie dans ${paydayInfo.diffDays} jour${paydayInfo.diffDays > 1 ? 's' : ''}`
+                : `Prochain jour de paie : le ${paydayInfo.nextPayDateStr}`
+            }
+          </p>
+          <p className={`text-[10px] font-bold uppercase tracking-widest mt-0.5 ${paydayInfo.isPayday ? 'text-emerald-600' : paydayInfo.isSoon ? 'text-amber-600' : 'text-slate-400'
+            }`}>
+            Jour de versement configuré : le {paydayInfo.payDay} de chaque mois
+          </p>
+        </div>
+        {paydayInfo.isPayday && (
+          <button
+            onClick={handleOpenGenModal}
+            className="px-5 py-2.5 bg-emerald-600 text-white rounded-xl font-black text-[10px] uppercase tracking-widest hover:bg-emerald-700 transition-all shadow-lg flex items-center gap-2"
+          >
+            <Play size={14} /> Lancer la Paie
+          </button>
+        )}
+      </motion.div>
+
       {/* Generation Modal */}
-      <HRModal 
-        isOpen={isGenModalOpen} 
-        onClose={() => setIsGenModalOpen(false)} 
+      <HRModal
+        isOpen={isGenModalOpen}
+        onClose={() => { setIsGenModalOpen(false); setPrePayrollData(null); }}
         title="Lancer le traitement de la paie"
-        size="md"
+        size="lg"
         footer={
           <div className="flex justify-end gap-4">
-            <button 
+            <button
               onClick={() => {
                 setIsGenModalOpen(false);
                 setConfirmPayroll(false);
+                setPrePayrollData(null);
               }}
               className="px-8 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-slate-900 transition-all"
             >
               Annuler
             </button>
-            <button 
+            <button
               onClick={handleRunPayroll}
-              disabled={!confirmPayroll || isLoading}
+              disabled={!confirmPayroll || isLoading || loadingPrePayroll}
               className="px-4 md:px-10 py-4 bg-slate-900 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-indigo-600 transition-all shadow-xl disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {isLoading ? 'Traitement en cours...' : 'Démarrer le Traitement'}
@@ -1368,6 +1501,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
         }
       >
         <div className="space-y-6">
+          {/* Période */}
           <div className="p-6 bg-indigo-50 rounded-[2rem] border border-indigo-100">
             <div className="flex items-center gap-4 mb-4">
               <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center text-indigo-500 shadow-sm">
@@ -1383,10 +1517,133 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
               </div>
             </div>
             <p className="text-xs text-slate-600 font-medium leading-relaxed">
-              Le traitement va calculer automatiquement les salaires de tous les employés avec contrat actif, 
+              Le traitement va calculer automatiquement les salaires de tous les employés avec contrat actif,
               incluant les avances, primes et charges sociales, puis générer les fiches de paie.
             </p>
           </div>
+
+          {/* ══════  VÉRIFICATION PRÉ-PAIE  ══════ */}
+          <div className="rounded-[2rem] border border-slate-200 overflow-hidden">
+            <div className="p-5 bg-slate-50 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <UserCheck size={20} className="text-indigo-500" />
+                <h4 className="font-black text-slate-900 text-xs uppercase tracking-widest">Vérification des heures & présence</h4>
+              </div>
+              {loadingPrePayroll && (
+                <div className="flex items-center gap-2 text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                  <RefreshCw size={14} className="animate-spin" /> Vérification...
+                </div>
+              )}
+            </div>
+
+            {prePayrollData && !loadingPrePayroll && (
+              <div className="p-5 space-y-4">
+                {/* Résumé global */}
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="p-4 bg-emerald-50 rounded-2xl border border-emerald-100 text-center">
+                    <p className="text-2xl font-black text-emerald-700">{prePayrollData.summary?.readyForFullPay || 0}</p>
+                    <p className="text-[9px] font-bold text-emerald-600 uppercase tracking-widest mt-1 flex items-center justify-center gap-1">
+                      <CheckCircle size={12} /> Salaire complet
+                    </p>
+                  </div>
+                  <div className="p-4 bg-amber-50 rounded-2xl border border-amber-100 text-center">
+                    <p className="text-2xl font-black text-amber-700">{prePayrollData.summary?.readyForPartialPay || 0}</p>
+                    <p className="text-[9px] font-bold text-amber-600 uppercase tracking-widest mt-1 flex items-center justify-center gap-1">
+                      <AlertTriangle size={12} /> Avertissements
+                    </p>
+                  </div>
+                  <div className="p-4 bg-red-50 rounded-2xl border border-red-100 text-center">
+                    <p className="text-2xl font-black text-red-700">{prePayrollData.summary?.blocked || 0}</p>
+                    <p className="text-[9px] font-bold text-red-600 uppercase tracking-widest mt-1 flex items-center justify-center gap-1">
+                      <UserX size={12} /> Bloqués
+                    </p>
+                  </div>
+                </div>
+
+                {/* Détail par employé (toggle) */}
+                <button
+                  onClick={() => setShowPrePayrollDetails(prev => !prev)}
+                  className="w-full flex items-center justify-between px-4 py-3 bg-slate-50 rounded-xl text-[10px] font-black uppercase tracking-widest text-slate-600 hover:bg-slate-100 transition-all"
+                >
+                  <span>Détail par employé ({prePayrollData.employees?.length || 0})</span>
+                  {showPrePayrollDetails ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                </button>
+
+                <AnimatePresence>
+                  {showPrePayrollDetails && (
+                    <motion.div
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: 'auto', opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      className="overflow-hidden"
+                    >
+                      <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+                        {(prePayrollData.employees || []).map((emp: any, idx: number) => {
+                          const isReady = emp.eligibility?.isEligibleForFullPay;
+                          const isBlocked = emp.eligibility?.isBlocked;
+                          const isWarning = !isReady && !isBlocked;
+                          return (
+                            <div
+                              key={emp.employeeId || idx}
+                              className={`p-4 rounded-2xl border flex items-start gap-3 ${isReady
+                                ? 'bg-emerald-50/50 border-emerald-100'
+                                : isBlocked
+                                  ? 'bg-red-50/50 border-red-100'
+                                  : 'bg-amber-50/50 border-amber-100'
+                                }`}
+                            >
+                              <div className={`w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 mt-0.5 ${isReady ? 'bg-emerald-500 text-white' : isBlocked ? 'bg-red-500 text-white' : 'bg-amber-500 text-white'
+                                }`}>
+                                {isReady ? <CheckCircle size={16} /> : isBlocked ? <UserX size={16} /> : <AlertTriangle size={16} />}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-xs font-black text-slate-900 truncate">
+                                  {emp.employeeName || 'Employé'}
+                                </p>
+                                <div className="grid grid-cols-2 gap-x-4 gap-y-1 mt-2">
+                                  <p className="text-[10px] text-slate-500">
+                                    <span className="font-bold">Présence:</span> {emp.attendance?.attendanceRate || 0}%
+                                    ({emp.attendance?.presentDays || 0}/{emp.attendance?.totalWorkDaysInPeriod || 0} jours)
+                                  </p>
+                                  <p className="text-[10px] text-slate-500">
+                                    <span className="font-bold">Heures:</span> {emp.hours?.totalWorkedHours || 0}h
+                                    / {emp.hours?.expectedMonthlyHours || 0}h attendues
+                                  </p>
+                                  {emp.attendance?.lateDays > 0 && (
+                                    <p className="text-[10px] text-amber-600 font-bold">
+                                      ⚠ {emp.attendance.lateDays} jour(s) de retard
+                                    </p>
+                                  )}
+                                  {emp.attendance?.totalAbsentDays > 0 && (
+                                    <p className="text-[10px] text-red-600 font-bold">
+                                      ✗ {emp.attendance.totalAbsentDays} jour(s) d'absence
+                                    </p>
+                                  )}
+                                </div>
+                                {emp.warnings && emp.warnings.length > 0 && (
+                                  <div className="mt-2 space-y-0.5">
+                                    {emp.warnings.map((w: string, i: number) => (
+                                      <p key={i} className="text-[9px] text-amber-700 font-medium">• {w}</p>
+                                    ))}
+                                  </div>
+                                )}
+                                {isReady && (
+                                  <p className="text-[10px] text-emerald-700 font-bold mt-1">
+                                    ✓ Heures complètes — éligible au salaire complet
+                                  </p>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+            )}
+          </div>
+
           <div className="space-y-4">
             <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4">
               <div className="flex items-start gap-3">
@@ -1398,34 +1655,20 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
                     <p>• Les avances du mois seront automatiquement déduites</p>
                     <p>• Les primes du mois seront incluses dans le calcul</p>
                     <p>• Les fiches de paie seront générées au format PNG</p>
-                    <p>• Fichiers sauvegardés: uploads/fiches_paiement/YYYY-MM/</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-            <div className="bg-indigo-50 border border-indigo-200 rounded-2xl p-4 mb-4">
-              <div className="flex items-start gap-3">
-                <Shield className="h-5 w-5 text-indigo-600 flex-shrink-0 mt-0.5" />
-                <div>
-                  <h4 className="font-bold text-indigo-800 text-sm">Prérequis Obligatoires</h4>
-                  <div className="text-xs text-indigo-700 mt-2 space-y-1">
-                    <p>• Au moins une rubrique de paie doit être configurée</p>
-                    <p>• Au moins un employé actif doit être présent</p>
-                    <p>• Au moins un contrat actif doit exister</p>
                   </div>
                 </div>
               </div>
             </div>
             <div className="flex items-center gap-3">
-              <input 
-                type="checkbox" 
-                id="confirm" 
+              <input
+                type="checkbox"
+                id="confirm"
                 checked={confirmPayroll}
                 onChange={(e) => setConfirmPayroll(e.target.checked)}
-                className="w-5 h-5 rounded border-slate-200 text-indigo-600 focus:ring-indigo-500" 
+                className="w-5 h-5 rounded border-slate-200 text-indigo-600 focus:ring-indigo-500"
               />
               <label htmlFor="confirm" className="text-xs font-bold text-slate-700">
-                J'ai vérifié les prérequis et confirme le lancement du traitement
+                J'ai vérifié la présence des employés et confirme le lancement du traitement
               </label>
             </div>
           </div>
@@ -1435,7 +1678,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
       {/* Tabs Navigation */}
       <div className="flex items-center gap-2 bg-slate-100 p-1.5 rounded-[2rem] w-fit overflow-x-auto no-scrollbar">
         {tabs.map(tab => (
-          <button 
+          <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
             className={`px-6 py-3 rounded-full font-black text-[10px] uppercase tracking-widest transition-all flex items-center gap-2 whitespace-nowrap ${activeTab === tab.id ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
@@ -1447,7 +1690,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
 
       {/* Tab Content */}
       <AnimatePresence mode="wait">
-        <motion.div 
+        <motion.div
           key={activeTab}
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
@@ -1464,7 +1707,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
                     </h3>
                     <span className="px-4 py-1.5 bg-amber-50 text-amber-600 rounded-full text-[10px] font-black uppercase tracking-widest border border-amber-100">En préparation</span>
                   </div>
-                  
+
                   <div className="space-y-8">
                     <div className="grid sm:grid-cols-3 gap-8">
                       <div className="p-6 bg-slate-50 rounded-[2rem] border border-slate-100">
@@ -1520,7 +1763,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
                           </p>
                         </div>
                       </div>
-                      <button 
+                      <button
                         onClick={() => setIsGenModalOpen(true)}
                         className="px-8 py-4 bg-indigo-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-indigo-700 transition-all shadow-xl shadow-indigo-200"
                       >
@@ -1538,7 +1781,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
                   <div className="space-y-6 relative z-10">
                     {(() => {
                       const anomalies = [];
-                      
+
                       // Vérifier les employés sans contrat actif
                       const noContractEmps = employees.filter(emp => emp.status === 'ACTIVE' && !emp.hasActiveContract);
                       noContractEmps.forEach(emp => {
@@ -1548,9 +1791,9 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
                           type: 'CRITICAL'
                         });
                       });
-                      
+
                       // Vérifier les employés avec contrat mais sans salaire de base défini
-                      const noSalaryEmps = employees.filter(emp => 
+                      const noSalaryEmps = employees.filter(emp =>
                         emp.status === 'ACTIVE' && emp.hasActiveContract && (!emp.currentSalary || emp.currentSalary === 0)
                       );
                       noSalaryEmps.forEach(emp => {
@@ -1560,19 +1803,19 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
                           type: 'CRITICAL'
                         });
                       });
-                      
+
                       // Vérifier les primes exceptionnelles
                       primes.filter(prime => prime.amount > 500000).forEach(prime => {
                         const emp = employees.find(e => e.id === prime.employeeId);
                         if (emp) {
                           anomalies.push({
                             emp: `${emp.firstName} ${emp.lastName}`,
-                            issue: `Prime exceptionnelle: ${(prime.amount/1000).toFixed(0)}K F CFA`,
+                            issue: `Prime exceptionnelle: ${(prime.amount / 1000).toFixed(0)}K F CFA`,
                             type: 'WARNING'
                           });
                         }
                       });
-                      
+
                       return anomalies.length > 0 ? anomalies.slice(0, 3).map((anomaly, i) => (
                         <div key={i} className="flex items-start gap-4 p-4 bg-white/5 rounded-2xl border border-white/10">
                           <div className={`w-2 h-2 rounded-full mt-1.5 ${anomaly.type === 'CRITICAL' ? 'bg-rose-500' : 'bg-amber-500'}`}></div>
@@ -1590,9 +1833,9 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
                           </div>
                         </div>
                       ];
-                    })()} 
+                    })()}
                     <div className="pt-4">
-                      <button 
+                      <button
                         onClick={() => onNavigate('rh', { tab: 'employees' })}
                         className="w-full py-4 bg-white/10 hover:bg-white/20 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all border border-white/10"
                       >
@@ -1657,105 +1900,104 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
                           return 0;
                         })
                         .slice(0, 15).map((employee, i) => {
-                        // Fonction pour valider les montants dans la liste des employés
-                        const validateAmount = (amount: any): number => {
-                          const num = parseFloat(amount || 0);
-                          return isNaN(num) || num < 0 ? 0 : Math.round(num * 100) / 100;
-                        };
-                        
-                        const employeePrimes = primes.filter(p => p.employeeId === employee.id && p.status === 'APPROVED');
-                        const employeeAdvances = advances.filter(a => a.employeeId === employee.id && a.status === 'APPROVED');
-                        const totalPrimes = employeePrimes.reduce((sum, p) => sum + validateAmount(p.amount), 0);
-                        // Calculer les déductions mensuelles des avances
-                        const totalAdvances = employeeAdvances.reduce((sum, a) => {
-                          const monthlyDeduction = validateAmount(a.monthlyDeduction) > 0 
-                            ? validateAmount(a.monthlyDeduction)
-                            : validateAmount(a.amount) / Math.max(1, a.months || 1);
-                          return sum + monthlyDeduction;
-                        }, 0);
-                        const baseSalary = validateAmount(employee.currentSalary);
-                        const socialChargeRate = validateAmount(payrollSettings?.employeeSocialChargeRate) || 8.2;
-                        const socialCharges = Math.round(baseSalary * socialChargeRate) / 100;
-                        const netEstimated = Math.max(0, baseSalary + totalPrimes - totalAdvances - socialCharges);
-                        
-                        const contractInfo = employee.activeContract ? {
-                          type: employee.activeContract.type || 'N/A',
-                          startDate: employee.activeContract.startDate ? new Date(employee.activeContract.startDate).toLocaleDateString('fr-FR') : 'N/A'
-                        } : null;
-                        
-                        return (
-                          <tr key={employee.id} className={`border-b border-slate-50 hover:bg-slate-50 transition-colors ${
-                            !employee.hasActiveContract ? 'opacity-60 bg-red-50' : ''
-                          }`}>
-                            <td className="py-6">
-                              <div className="flex items-center gap-3">
-                                <div className="w-10 h-10 bg-slate-100 rounded-xl overflow-hidden flex items-center justify-center relative">
-                                  {employee.photoUrl ? (
-                                    <img src={employee.photoUrl} className="w-full h-full object-cover" alt={employee.firstName} referrerPolicy="no-referrer" />
-                                  ) : (
-                                    <span className="text-xs font-bold text-slate-500">
-                                      {employee.firstName?.charAt(0)}{employee.lastName?.charAt(0)}
-                                    </span>
-                                  )}
-                                  {!employee.hasActiveContract && (
-                                    <div className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 rounded-full" title="Pas de contrat actif" />
-                                  )}
-                                </div>
-                                <div>
-                                  <div className="flex items-center gap-2">
-                                    <span className="text-sm font-bold text-slate-900">{employee.firstName} {employee.lastName}</span>
-                                    {contractInfo && (
-                                      <span className="px-2 py-1 bg-indigo-50 text-indigo-600 rounded text-[8px] font-black uppercase">
-                                        {contractInfo.type}
+                          // Fonction pour valider les montants dans la liste des employés
+                          const validateAmount = (amount: any): number => {
+                            const num = parseFloat(amount || 0);
+                            return isNaN(num) || num < 0 ? 0 : Math.round(num * 100) / 100;
+                          };
+
+                          const employeePrimes = primes.filter(p => p.employeeId === employee.id && p.status === 'APPROVED');
+                          const employeeAdvances = advances.filter(a => a.employeeId === employee.id && a.status === 'APPROVED');
+                          const totalPrimes = employeePrimes.reduce((sum, p) => sum + validateAmount(p.amount), 0);
+                          // Calculer les déductions mensuelles des avances
+                          const totalAdvances = employeeAdvances.reduce((sum, a) => {
+                            const monthlyDeduction = validateAmount(a.monthlyDeduction) > 0
+                              ? validateAmount(a.monthlyDeduction)
+                              : validateAmount(a.amount) / Math.max(1, a.months || 1);
+                            return sum + monthlyDeduction;
+                          }, 0);
+                          const baseSalary = validateAmount(employee.currentSalary);
+                          const socialChargeRate = validateAmount(payrollSettings?.employeeSocialChargeRate) || 8.2;
+                          const socialCharges = Math.round(baseSalary * socialChargeRate) / 100;
+                          const netEstimated = Math.max(0, baseSalary + totalPrimes - totalAdvances - socialCharges);
+
+                          const contractInfo = employee.activeContract ? {
+                            type: employee.activeContract.type || 'N/A',
+                            startDate: employee.activeContract.startDate ? new Date(employee.activeContract.startDate).toLocaleDateString('fr-FR') : 'N/A'
+                          } : null;
+
+                          return (
+                            <tr key={employee.id} className={`border-b border-slate-50 hover:bg-slate-50 transition-colors ${!employee.hasActiveContract ? 'opacity-60 bg-red-50' : ''
+                              }`}>
+                              <td className="py-6">
+                                <div className="flex items-center gap-3">
+                                  <div className="w-10 h-10 bg-slate-100 rounded-xl overflow-hidden flex items-center justify-center relative">
+                                    {employee.photoUrl ? (
+                                      <img src={employee.photoUrl} className="w-full h-full object-cover" alt={employee.firstName} referrerPolicy="no-referrer" />
+                                    ) : (
+                                      <span className="text-xs font-bold text-slate-500">
+                                        {employee.firstName?.charAt(0)}{employee.lastName?.charAt(0)}
                                       </span>
                                     )}
+                                    {!employee.hasActiveContract && (
+                                      <div className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 rounded-full" title="Pas de contrat actif" />
+                                    )}
                                   </div>
-                                  <p className="text-[10px] text-slate-400 font-medium uppercase tracking-widest">
-                                    {employee.departmentInfo?.name || 'N/A'}
-                                    {!employee.hasActiveContract && ' • SANS CONTRAT'}
-                                  </p>
+                                  <div>
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-sm font-bold text-slate-900">{employee.firstName} {employee.lastName}</span>
+                                      {contractInfo && (
+                                        <span className="px-2 py-1 bg-indigo-50 text-indigo-600 rounded text-[8px] font-black uppercase">
+                                          {contractInfo.type}
+                                        </span>
+                                      )}
+                                    </div>
+                                    <p className="text-[10px] text-slate-400 font-medium uppercase tracking-widest">
+                                      {employee.departmentInfo?.name || 'N/A'}
+                                      {!employee.hasActiveContract && ' • SANS CONTRAT'}
+                                    </p>
+                                  </div>
                                 </div>
-                              </div>
-                            </td>
-                            <td className="py-6">
-                              <div className="text-sm font-bold text-slate-900">
-                                {baseSalary > 0 ? `${baseSalary.toLocaleString('fr-FR')} F CFA` : '-'}
-                              </div>
-                              {contractInfo && (
-                                <p className="text-[8px] text-slate-400 font-medium">
-                                  du {contractInfo.startDate}
-                                </p>
-                              )}
-                            </td>
-                            <td className="py-6 text-sm font-bold text-emerald-600">
-                              {totalPrimes > 0 ? `+${totalPrimes.toLocaleString('fr-FR')} F CFA` : '-'}
-                            </td>
-                            <td className="py-6 text-sm font-bold text-rose-600">
-                              {totalAdvances > 0 ? `-${totalAdvances.toLocaleString('fr-FR')} F CFA` : '-'}
-                            </td>
-                            <td className="py-6 text-sm font-black text-slate-900">
-                              {employee.hasActiveContract && baseSalary > 0 ? `${netEstimated.toLocaleString('fr-FR')} F CFA` : 'N/A'}
-                            </td>
-                            <td className="py-6 text-right">
-                              <button 
-                                onClick={() => handlePreviewPayslip(employee)}
-                                disabled={!employee.hasActiveContract || baseSalary === 0}
-                                className="w-10 h-10 bg-white border border-slate-100 rounded-xl flex items-center justify-center text-slate-400 hover:text-slate-900 transition-all shadow-sm disabled:opacity-30 disabled:cursor-not-allowed"
-                                title={employee.hasActiveContract ? "Prévisualiser le bulletin" : "Contrat requis"}
-                              >
-                                <Eye size={16} />
-                              </button>
-                            </td>
-                          </tr>
-                        );
-                      })}
+                              </td>
+                              <td className="py-6">
+                                <div className="text-sm font-bold text-slate-900">
+                                  {baseSalary > 0 ? `${baseSalary.toLocaleString('fr-FR')} F CFA` : '-'}
+                                </div>
+                                {contractInfo && (
+                                  <p className="text-[8px] text-slate-400 font-medium">
+                                    du {contractInfo.startDate}
+                                  </p>
+                                )}
+                              </td>
+                              <td className="py-6 text-sm font-bold text-emerald-600">
+                                {totalPrimes > 0 ? `+${totalPrimes.toLocaleString('fr-FR')} F CFA` : '-'}
+                              </td>
+                              <td className="py-6 text-sm font-bold text-rose-600">
+                                {totalAdvances > 0 ? `-${totalAdvances.toLocaleString('fr-FR')} F CFA` : '-'}
+                              </td>
+                              <td className="py-6 text-sm font-black text-slate-900">
+                                {employee.hasActiveContract && baseSalary > 0 ? `${netEstimated.toLocaleString('fr-FR')} F CFA` : 'N/A'}
+                              </td>
+                              <td className="py-6 text-right">
+                                <button
+                                  onClick={() => handlePreviewPayslip(employee)}
+                                  disabled={!employee.hasActiveContract || baseSalary === 0}
+                                  className="w-10 h-10 bg-white border border-slate-100 rounded-xl flex items-center justify-center text-slate-400 hover:text-slate-900 transition-all shadow-sm disabled:opacity-30 disabled:cursor-not-allowed"
+                                  title={employee.hasActiveContract ? "Prévisualiser le bulletin" : "Contrat requis"}
+                                >
+                                  <Eye size={16} />
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
                       {employees.filter(emp => emp.status === 'ACTIVE').length === 0 && (
                         <tr>
                           <td colSpan={6} className="py-12 text-center text-slate-400">
                             <div className="flex flex-col items-center gap-4">
                               <Users className="text-slate-300" size={48} />
                               <p className="text-sm font-bold">Aucun employé actif trouvé</p>
-                              <button 
+                              <button
                                 onClick={() => onNavigate('rh', { tab: 'employees' })}
                                 className="px-6 py-2 bg-indigo-50 text-indigo-600 rounded-xl text-xs font-bold hover:bg-indigo-100 transition-all"
                               >
@@ -1765,28 +2007,28 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
                           </td>
                         </tr>
                       )}
-                      {employees.filter(emp => emp.status === 'ACTIVE').length > 0 && 
-                       employees.filter(emp => emp.status === 'ACTIVE' && emp.hasActiveContract).length === 0 && (
-                        <tr>
-                          <td colSpan={6} className="py-8 text-center">
-                            <div className="bg-amber-50 border border-amber-200 rounded-2xl p-6 mx-4">
-                              <div className="flex items-center justify-center gap-3 text-amber-600 mb-3">
-                                <AlertCircle size={20} />
-                                <span className="text-sm font-bold">Aucun contrat actif</span>
+                      {employees.filter(emp => emp.status === 'ACTIVE').length > 0 &&
+                        employees.filter(emp => emp.status === 'ACTIVE' && emp.hasActiveContract).length === 0 && (
+                          <tr>
+                            <td colSpan={6} className="py-8 text-center">
+                              <div className="bg-amber-50 border border-amber-200 rounded-2xl p-6 mx-4">
+                                <div className="flex items-center justify-center gap-3 text-amber-600 mb-3">
+                                  <AlertCircle size={20} />
+                                  <span className="text-sm font-bold">Aucun contrat actif</span>
+                                </div>
+                                <p className="text-xs text-amber-700 mb-4">
+                                  Les employés actifs n'ont pas de contrat valide pour le traitement de paie
+                                </p>
+                                <button
+                                  onClick={() => onNavigate('rh', { tab: 'contracts' })}
+                                  className="px-6 py-2 bg-amber-100 text-amber-700 rounded-xl text-xs font-bold hover:bg-amber-200 transition-all"
+                                >
+                                  Gérer les contrats
+                                </button>
                               </div>
-                              <p className="text-xs text-amber-700 mb-4">
-                                Les employés actifs n'ont pas de contrat valide pour le traitement de paie
-                              </p>
-                              <button 
-                                onClick={() => onNavigate('rh', { tab: 'contracts' })}
-                                className="px-6 py-2 bg-amber-100 text-amber-700 rounded-xl text-xs font-bold hover:bg-amber-200 transition-all"
-                              >
-                                Gérer les contrats
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      )}
+                            </td>
+                          </tr>
+                        )}
                     </tbody>
                   </table>
                 </div>
@@ -1805,14 +2047,14 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
                     <div className="space-y-2">
                       <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Charges Sociales (Employeur)</label>
                       <div className="flex items-center gap-3">
-                        <input 
-                          type="number" 
-                          step="0.1" 
-                          min="0" 
+                        <input
+                          type="number"
+                          step="0.1"
+                          min="0"
                           max="100"
-                          value={settingsForm.employerSocialChargeRate} 
-                          onChange={(e) => setSettingsForm(prev => ({...prev, employerSocialChargeRate: parseFloat(e.target.value) || 0}))}
-                          className="w-full px-6 py-4 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-indigo-500 transition-all font-bold text-sm" 
+                          value={settingsForm.employerSocialChargeRate}
+                          onChange={(e) => setSettingsForm(prev => ({ ...prev, employerSocialChargeRate: parseFloat(e.target.value) || 0 }))}
+                          className="w-full px-6 py-4 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-indigo-500 transition-all font-bold text-sm"
                         />
                         <span className="font-black text-slate-400">%</span>
                       </div>
@@ -1820,14 +2062,14 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
                     <div className="space-y-2">
                       <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Charges Sociales (Salarié)</label>
                       <div className="flex items-center gap-3">
-                        <input 
-                          type="number" 
-                          step="0.1" 
-                          min="0" 
+                        <input
+                          type="number"
+                          step="0.1"
+                          min="0"
                           max="100"
-                          value={settingsForm.employeeSocialChargeRate} 
-                          onChange={(e) => setSettingsForm(prev => ({...prev, employeeSocialChargeRate: parseFloat(e.target.value) || 0}))}
-                          className="w-full px-6 py-4 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-indigo-500 transition-all font-bold text-sm" 
+                          value={settingsForm.employeeSocialChargeRate}
+                          onChange={(e) => setSettingsForm(prev => ({ ...prev, employeeSocialChargeRate: parseFloat(e.target.value) || 0 }))}
+                          className="w-full px-6 py-4 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-indigo-500 transition-all font-bold text-sm"
                         />
                         <span className="font-black text-slate-400">%</span>
                       </div>
@@ -1835,9 +2077,9 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
                   </div>
                   <div className="space-y-2">
                     <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Devise de Paie</label>
-                    <select 
+                    <select
                       value={settingsForm.currency}
-                      onChange={(e) => setSettingsForm(prev => ({...prev, currency: e.target.value}))}
+                      onChange={(e) => setSettingsForm(prev => ({ ...prev, currency: e.target.value }))}
                       className="w-full px-6 py-4 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-indigo-500 transition-all font-bold text-sm"
                     >
                       <option value="F CFA">F CFA (XOF)</option>
@@ -1845,8 +2087,52 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
                       <option value="USD">US Dollar ($)</option>
                     </select>
                   </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Jour de Paie</label>
+                    <input
+                      type="number"
+                      min="1"
+                      max="31"
+                      value={settingsForm.paymentDay}
+                      onChange={(e) => setSettingsForm(prev => ({ ...prev, paymentDay: parseInt(e.target.value) || 28 }))}
+                      className="w-full px-6 py-4 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-indigo-500 transition-all font-bold text-sm"
+                    />
+                    <p className="text-[9px] text-slate-400 font-medium">Jour du mois où la paie est versée (1-31)</p>
+                  </div>
+                  <div className="grid sm:grid-cols-2 gap-6">
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Heure de Début</label>
+                      <input
+                        type="time"
+                        value={settingsForm.workStartTime}
+                        onChange={(e) => setSettingsForm(prev => ({ ...prev, workStartTime: e.target.value }))}
+                        className="w-full px-6 py-4 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-indigo-500 transition-all font-bold text-sm"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Heure de Fin</label>
+                      <input
+                        type="time"
+                        value={settingsForm.workEndTime}
+                        onChange={(e) => setSettingsForm(prev => ({ ...prev, workEndTime: e.target.value }))}
+                        className="w-full px-6 py-4 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-indigo-500 transition-all font-bold text-sm"
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Jours Ouvrables / Mois</label>
+                    <input
+                      type="number"
+                      min="20"
+                      max="31"
+                      value={settingsForm.workingDaysPerMonth}
+                      onChange={(e) => setSettingsForm(prev => ({ ...prev, workingDaysPerMonth: parseInt(e.target.value) || 26 }))}
+                      className="w-full px-6 py-4 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-indigo-500 transition-all font-bold text-sm"
+                    />
+                    <p className="text-[9px] text-slate-400 font-medium">Nombre de jours travaillés par mois (pour calcul taux journalier)</p>
+                  </div>
                   <div className="pt-6">
-                    <button 
+                    <button
                       onClick={handleSaveSetting}
                       className="w-full py-5 bg-slate-900 text-white rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-indigo-600 transition-all shadow-xl active:scale-95"
                     >
@@ -1861,7 +2147,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
                   <h3 className="text-lg font-black text-slate-900 uppercase tracking-tighter flex items-center gap-3">
                     <Layers className="text-indigo-500" /> Rubriques de Paie
                   </h3>
-                  <button 
+                  <button
                     onClick={() => setIsSettingModalOpen(true)}
                     className="w-10 h-10 bg-slate-50 text-slate-900 rounded-xl flex items-center justify-center hover:bg-slate-900 hover:text-white transition-all"
                   >
@@ -1869,15 +2155,15 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
                   </button>
                 </div>
 
-                <HRModal 
-                  isOpen={isSettingModalOpen} 
-                  onClose={() => setIsSettingModalOpen(false)} 
+                <HRModal
+                  isOpen={isSettingModalOpen}
+                  onClose={() => setIsSettingModalOpen(false)}
                   title="Nouvelle Rubrique de Paie"
                   size="md"
                   footer={
                     <div className="flex justify-end gap-4">
                       <button onClick={() => setIsSettingModalOpen(false)} className="px-8 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-slate-900 transition-all">Annuler</button>
-                      <button 
+                      <button
                         onClick={handleSaveNewItem}
                         disabled={isLoading}
                         className="px-4 md:px-10 py-4 bg-slate-900 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-indigo-600 transition-all shadow-xl disabled:opacity-50"
@@ -1890,20 +2176,20 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
                   <form className="space-y-6">
                     <div className="space-y-2">
                       <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Nom de la Rubrique</label>
-                      <input 
-                        type="text" 
-                        placeholder="Ex: Prime de Panier" 
+                      <input
+                        type="text"
+                        placeholder="Ex: Prime de Panier"
                         value={newItemForm.name}
-                        onChange={(e) => setNewItemForm(prev => ({...prev, name: e.target.value}))}
-                        className="w-full px-6 py-4 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-indigo-500 transition-all font-bold text-sm" 
+                        onChange={(e) => setNewItemForm(prev => ({ ...prev, name: e.target.value }))}
+                        className="w-full px-6 py-4 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-indigo-500 transition-all font-bold text-sm"
                       />
                     </div>
                     <div className="grid grid-cols-2 gap-6">
                       <div className="space-y-2">
                         <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Type</label>
-                        <select 
+                        <select
                           value={newItemForm.type}
-                          onChange={(e) => setNewItemForm(prev => ({...prev, type: e.target.value}))}
+                          onChange={(e) => setNewItemForm(prev => ({ ...prev, type: e.target.value }))}
                           className="w-full px-6 py-4 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-indigo-500 transition-all font-bold text-sm"
                         >
                           <option value="EARNING">Gain (Earning)</option>
@@ -1912,9 +2198,9 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
                       </div>
                       <div className="space-y-2">
                         <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Catégorie</label>
-                        <select 
+                        <select
                           value={newItemForm.category}
-                          onChange={(e) => setNewItemForm(prev => ({...prev, category: e.target.value}))}
+                          onChange={(e) => setNewItemForm(prev => ({ ...prev, category: e.target.value }))}
                           className="w-full px-6 py-4 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-indigo-500 transition-all font-bold text-sm"
                         >
                           {newItemForm.type === 'EARNING' ? (
@@ -1939,26 +2225,26 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
                 </HRModal>
 
                 {/* Edit Modal */}
-                <HRModal 
-                  isOpen={isEditModalOpen} 
+                <HRModal
+                  isOpen={isEditModalOpen}
                   onClose={() => {
                     setIsEditModalOpen(false);
                     setEditingItem(null);
-                  }} 
+                  }}
                   title="Modifier la Rubrique de Paie"
                   size="md"
                   footer={
                     <div className="flex justify-end gap-4">
-                      <button 
+                      <button
                         onClick={() => {
                           setIsEditModalOpen(false);
                           setEditingItem(null);
-                        }} 
+                        }}
                         className="px-8 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-slate-900 transition-all"
                       >
                         Annuler
                       </button>
-                      <button 
+                      <button
                         onClick={handleSaveEditItem}
                         disabled={isLoading}
                         className="px-4 md:px-10 py-4 bg-slate-900 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-indigo-600 transition-all shadow-xl disabled:opacity-50"
@@ -1980,45 +2266,45 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
                             </div>
                             <p className="text-xs text-amber-700">Cette rubrique fait partie du système de paie. Seul le statut actif/inactif peut être modifié.</p>
                           </div>
-                          
+
                           <div className="space-y-2">
                             <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Nom (non modifiable)</label>
-                            <input 
-                              type="text" 
+                            <input
+                              type="text"
                               value={editingItem.name}
                               disabled
-                              className="w-full px-6 py-4 bg-slate-100 border-none rounded-2xl font-bold text-sm text-slate-500 cursor-not-allowed" 
+                              className="w-full px-6 py-4 bg-slate-100 border-none rounded-2xl font-bold text-sm text-slate-500 cursor-not-allowed"
                             />
                           </div>
-                          
+
                           <div className="grid grid-cols-2 gap-6">
                             <div className="space-y-2">
                               <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Type (non modifiable)</label>
-                              <input 
-                                type="text" 
+                              <input
+                                type="text"
                                 value={editingItem.type === 'EARNING' ? 'Gain (Earning)' : 'Retenue (Deduction)'}
                                 disabled
-                                className="w-full px-6 py-4 bg-slate-100 border-none rounded-2xl font-bold text-sm text-slate-500 cursor-not-allowed" 
+                                className="w-full px-6 py-4 bg-slate-100 border-none rounded-2xl font-bold text-sm text-slate-500 cursor-not-allowed"
                               />
                             </div>
                             <div className="space-y-2">
                               <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Catégorie (non modifiable)</label>
-                              <input 
-                                type="text" 
+                              <input
+                                type="text"
                                 value={editingItem.category}
                                 disabled
-                                className="w-full px-6 py-4 bg-slate-100 border-none rounded-2xl font-bold text-sm text-slate-500 cursor-not-allowed" 
+                                className="w-full px-6 py-4 bg-slate-100 border-none rounded-2xl font-bold text-sm text-slate-500 cursor-not-allowed"
                               />
                             </div>
                           </div>
-                          
+
                           <div className="flex items-center gap-3">
-                            <input 
-                              type="checkbox" 
-                              id="editActive" 
+                            <input
+                              type="checkbox"
+                              id="editActive"
                               checked={editingItem.isActive}
-                              onChange={(e) => setEditingItem(prev => ({...prev, isActive: e.target.checked}))}
-                              className="w-5 h-5 rounded border-slate-200 text-indigo-600 focus:ring-indigo-500" 
+                              onChange={(e) => setEditingItem(prev => ({ ...prev, isActive: e.target.checked }))}
+                              className="w-5 h-5 rounded border-slate-200 text-indigo-600 focus:ring-indigo-500"
                             />
                             <label htmlFor="editActive" className="text-xs font-bold text-slate-700">Rubrique active</label>
                           </div>
@@ -2028,20 +2314,20 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
                         <div className="space-y-6">
                           <div className="space-y-2">
                             <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Nom de la Rubrique</label>
-                            <input 
-                              type="text" 
-                              placeholder="Ex: Prime de Panier" 
+                            <input
+                              type="text"
+                              placeholder="Ex: Prime de Panier"
                               value={editingItem.name}
-                              onChange={(e) => setEditingItem(prev => ({...prev, name: e.target.value}))}
-                              className="w-full px-6 py-4 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-indigo-500 transition-all font-bold text-sm" 
+                              onChange={(e) => setEditingItem(prev => ({ ...prev, name: e.target.value }))}
+                              className="w-full px-6 py-4 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-indigo-500 transition-all font-bold text-sm"
                             />
                           </div>
                           <div className="grid grid-cols-2 gap-6">
                             <div className="space-y-2">
                               <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Type</label>
-                              <select 
+                              <select
                                 value={editingItem.type}
-                                onChange={(e) => setEditingItem(prev => ({...prev, type: e.target.value}))}
+                                onChange={(e) => setEditingItem(prev => ({ ...prev, type: e.target.value }))}
                                 className="w-full px-6 py-4 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-indigo-500 transition-all font-bold text-sm"
                               >
                                 <option value="EARNING">Gain (Earning)</option>
@@ -2050,9 +2336,9 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
                             </div>
                             <div className="space-y-2">
                               <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Catégorie</label>
-                              <select 
+                              <select
                                 value={editingItem.category}
-                                onChange={(e) => setEditingItem(prev => ({...prev, category: e.target.value}))}
+                                onChange={(e) => setEditingItem(prev => ({ ...prev, category: e.target.value }))}
                                 className="w-full px-6 py-4 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-indigo-500 transition-all font-bold text-sm"
                               >
                                 {editingItem.type === 'EARNING' ? (
@@ -2074,12 +2360,12 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
                             </div>
                           </div>
                           <div className="flex items-center gap-3">
-                            <input 
-                              type="checkbox" 
-                              id="editActive" 
+                            <input
+                              type="checkbox"
+                              id="editActive"
                               checked={editingItem.isActive}
-                              onChange={(e) => setEditingItem(prev => ({...prev, isActive: e.target.checked}))}
-                              className="w-5 h-5 rounded border-slate-200 text-indigo-600 focus:ring-indigo-500" 
+                              onChange={(e) => setEditingItem(prev => ({ ...prev, isActive: e.target.checked }))}
+                              className="w-5 h-5 rounded border-slate-200 text-indigo-600 focus:ring-indigo-500"
                             />
                             <label htmlFor="editActive" className="text-xs font-bold text-slate-700">Rubrique active</label>
                           </div>
@@ -2090,26 +2376,26 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
                 </HRModal>
 
                 {/* Delete Confirmation Modal */}
-                <HRModal 
-                  isOpen={isDeleteModalOpen} 
+                <HRModal
+                  isOpen={isDeleteModalOpen}
                   onClose={() => {
                     setIsDeleteModalOpen(false);
                     setItemToDelete(null);
-                  }} 
+                  }}
                   title="Confirmer la suppression"
                   size="sm"
                   footer={
                     <div className="flex justify-end gap-4">
-                      <button 
+                      <button
                         onClick={() => {
                           setIsDeleteModalOpen(false);
                           setItemToDelete(null);
-                        }} 
+                        }}
                         className="px-8 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-slate-900 transition-all"
                       >
                         Annuler
                       </button>
-                      <button 
+                      <button
                         onClick={confirmDeleteItem}
                         disabled={isLoading || (itemToDelete && itemToDelete.isSystemItem)}
                         className="px-4 md:px-10 py-4 bg-red-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-red-700 transition-all shadow-xl disabled:opacity-50"
@@ -2145,7 +2431,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
                   {(!payrollItems || payrollItems.length === 0) ? (
                     <div className="text-center py-8">
                       <p className="text-slate-400 font-medium">Aucune rubrique configurée</p>
-                      <button 
+                      <button
                         onClick={async () => {
                           try {
                             await api.post('/hr/payroll-items/initialize-defaults', {});
@@ -2173,26 +2459,25 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
                           </div>
                         </div>
                         <div className="flex items-center gap-2">
-                          <button 
+                          <button
                             onClick={() => handleToggleItemStatus(item)}
-                            className={`px-2 py-1 rounded text-[8px] font-black uppercase tracking-widest transition-all cursor-pointer ${
-                              item.isActive ? 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100' : 'bg-red-50 text-red-600 hover:bg-red-100'
-                            }`}
+                            className={`px-2 py-1 rounded text-[8px] font-black uppercase tracking-widest transition-all cursor-pointer ${item.isActive ? 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100' : 'bg-red-50 text-red-600 hover:bg-red-100'
+                              }`}
                             title={`${item.isActive ? 'Désactiver' : 'Activer'} la rubrique`}
                           >
                             {item.isActive ? 'Actif' : 'Inactif'}
                           </button>
-                          
-                          <button 
+
+                          <button
                             onClick={() => handleEditItem(item)}
                             className="w-8 h-8 bg-white border border-slate-100 rounded-lg flex items-center justify-center text-slate-400 hover:text-indigo-600 hover:border-indigo-200 transition-all"
                             title="Modifier la rubrique"
                           >
                             <Settings size={14} />
                           </button>
-                          
+
                           {!item.isSystemItem && (
-                            <button 
+                            <button
                               onClick={() => handleDeleteItem(item)}
                               className="w-8 h-8 bg-white border border-slate-100 rounded-lg flex items-center justify-center text-slate-400 hover:text-red-600 hover:border-red-200 transition-all"
                               title="Supprimer la rubrique"
@@ -2200,7 +2485,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
                               <X size={14} />
                             </button>
                           )}
-                          
+
                           {item.isSystemItem && (
                             <div className="w-8 h-8 flex items-center justify-center text-slate-300" title="Rubrique système - Non supprimable">
                               <Settings size={14} />
@@ -2235,7 +2520,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
                           <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Total Bulletins</p>
                         </div>
                       </div>
-                      
+
                       <div className="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm">
                         <div className="flex items-center justify-between mb-4">
                           <div className="w-12 h-12 bg-emerald-50 text-emerald-600 rounded-xl flex items-center justify-center">
@@ -2247,7 +2532,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
                           <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Générés</p>
                         </div>
                       </div>
-                      
+
                       <div className="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm">
                         <div className="flex items-center justify-between mb-4">
                           <div className="w-12 h-12 bg-indigo-50 text-indigo-600 rounded-xl flex items-center justify-center">
@@ -2259,7 +2544,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
                           <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Envoyés</p>
                         </div>
                       </div>
-                      
+
                       <div className="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm">
                         <div className="flex items-center justify-between mb-4">
                           <div className="w-12 h-12 bg-red-50 text-red-600 rounded-xl flex items-center justify-center">
@@ -2283,7 +2568,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
                     <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2 block">
                       Mois de Paie
                     </label>
-                    <input 
+                    <input
                       type="month"
                       value={payslipFilters.month}
                       onChange={(e) => {
@@ -2298,7 +2583,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
                     <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2 block">
                       Employé
                     </label>
-                    <select 
+                    <select
                       value={payslipFilters.employeeId}
                       onChange={(e) => {
                         setPayslipFilters(prev => ({ ...prev, employeeId: e.target.value }));
@@ -2319,7 +2604,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
                     <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2 block">
                       Statut
                     </label>
-                    <select 
+                    <select
                       value={payslipFilters.status}
                       onChange={(e) => {
                         setPayslipFilters(prev => ({ ...prev, status: e.target.value }));
@@ -2406,7 +2691,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
                               <td className="px-6 py-4">
                                 <div className="flex items-center gap-3">
                                   <div className="w-10 h-10 bg-slate-200 rounded-lg overflow-hidden">
-                                    <img 
+                                    <img
                                       src={employee?.photoUrl || `https://picsum.photos/seed/${payslip.employeeId}/100/100`}
                                       alt={employee?.firstName}
                                       className="w-full h-full object-cover"
@@ -2422,9 +2707,9 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
                               </td>
                               <td className="px-6 py-4">
                                 <p className="font-bold text-slate-900">
-                                  {new Date(payslip.month + '-01').toLocaleDateString('fr-FR', { 
-                                    year: 'numeric', 
-                                    month: 'long' 
+                                  {new Date(payslip.month + '-01').toLocaleDateString('fr-FR', {
+                                    year: 'numeric',
+                                    month: 'long'
                                   })}
                                 </p>
                               </td>
@@ -2434,16 +2719,15 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
                                 </p>
                               </td>
                               <td className="px-6 py-4">
-                                <span className={`px-3 py-1 rounded-full text-xs font-bold ${
-                                  payslip.status === 'GENERATED' ? 'bg-emerald-50 text-emerald-600' :
+                                <span className={`px-3 py-1 rounded-full text-xs font-bold ${payslip.status === 'GENERATED' ? 'bg-emerald-50 text-emerald-600' :
                                   payslip.status === 'SENT' ? 'bg-blue-50 text-blue-600' :
-                                  payslip.status === 'ERROR' ? 'bg-red-50 text-red-600' :
-                                  'bg-slate-50 text-slate-600'
-                                }`}>
+                                    payslip.status === 'ERROR' ? 'bg-red-50 text-red-600' :
+                                      'bg-slate-50 text-slate-600'
+                                  }`}>
                                   {payslip.status === 'GENERATED' ? 'Généré' :
-                                   payslip.status === 'SENT' ? 'Envoyé' :
-                                   payslip.status === 'ERROR' ? 'Erreur' :
-                                   payslip.status}
+                                    payslip.status === 'SENT' ? 'Envoyé' :
+                                      payslip.status === 'ERROR' ? 'Erreur' :
+                                        payslip.status}
                                 </span>
                               </td>
                               <td className="px-6 py-4">
@@ -2512,7 +2796,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
                   <h3 className="text-lg font-black text-slate-900 uppercase tracking-tighter flex items-center gap-3">
                     <CreditCard className="text-indigo-500" /> Avances sur Salaire
                   </h3>
-                  <button 
+                  <button
                     onClick={() => setIsAdvanceModalOpen(true)}
                     className="px-6 py-3 bg-slate-900 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest flex items-center gap-2 hover:bg-indigo-600 transition-all shadow-xl active:scale-95"
                   >
@@ -2521,8 +2805,8 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
                 </div>
 
                 {/* Modal Avances */}
-                <HRModal 
-                  isOpen={isAdvanceModalOpen} 
+                <HRModal
+                  isOpen={isAdvanceModalOpen}
                   onClose={() => {
                     setIsAdvanceModalOpen(false);
                     setSelectedEmployees([]);
@@ -2530,12 +2814,12 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
                     setAdvanceForm({ amount: '', months: 1, reason: '', currency: 'F CFA' });
                     setEmployeeSearchTerm('');
                     setSelectedDepartment('');
-                  }} 
+                  }}
                   title="Nouvelle Demande d'Avance sur Salaire"
                   size="lg"
                   footer={
                     <div className="flex justify-end gap-4">
-                      <button 
+                      <button
                         onClick={() => {
                           setIsAdvanceModalOpen(false);
                           setSelectedEmployees([]);
@@ -2543,12 +2827,12 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
                           setAdvanceForm({ amount: '', months: 1, reason: '', currency: 'F CFA' });
                           setEmployeeSearchTerm('');
                           setSelectedDepartment('');
-                        }} 
+                        }}
                         className="px-8 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-slate-900 transition-all"
                       >
                         Annuler
                       </button>
-                      <button 
+                      <button
                         onClick={handleSaveAdvance}
                         disabled={isLoading || selectedEmployees.length === 0}
                         className="px-4 md:px-10 py-4 bg-slate-900 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-indigo-600 transition-all shadow-xl disabled:opacity-50"
@@ -2563,7 +2847,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
                     <div className="space-y-4">
                       <div className="flex items-center justify-between">
                         <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Sélection des Employés</label>
-                        <button 
+                        <button
                           type="button"
                           onClick={handleSelectAll}
                           className="text-xs font-bold text-indigo-600 hover:text-indigo-800 transition-colors"
@@ -2571,12 +2855,12 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
                           {selectAll ? 'Désélectionner tout' : 'Sélectionner tout'}
                         </button>
                       </div>
-                      
+
                       {/* Filtres de recherche */}
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div className="relative">
                           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
-                          <input 
+                          <input
                             type="text"
                             placeholder="Rechercher par nom ou matricule..."
                             value={employeeSearchTerm}
@@ -2584,7 +2868,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
                             className="w-full pl-10 pr-4 py-3 bg-white border border-slate-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all"
                           />
                         </div>
-                        <select 
+                        <select
                           value={selectedDepartment}
                           onChange={(e) => setSelectedDepartment(e.target.value)}
                           className="px-4 py-3 bg-white border border-slate-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all"
@@ -2595,22 +2879,21 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
                           ))}
                         </select>
                       </div>
-                      
+
                       <div className="max-h-64 overflow-y-auto bg-slate-50 rounded-2xl p-4 space-y-3">
                         {getFilteredEmployees(employeeSearchTerm, selectedDepartment).map((employee) => {
                           const isSelected = selectedEmployees.includes(employee.id);
                           const maxAmount = getMaxAdvanceAmount(employee.id);
                           return (
-                            <div 
+                            <div
                               key={employee.id}
                               onClick={() => handleEmployeeSelection(employee.id)}
-                              className={`flex items-center justify-between p-4 rounded-xl cursor-pointer transition-all ${
-                                isSelected ? 'bg-indigo-100 border-2 border-indigo-300' : 'bg-white border-2 border-transparent hover:bg-slate-50'
-                              }`}
+                              className={`flex items-center justify-between p-4 rounded-xl cursor-pointer transition-all ${isSelected ? 'bg-indigo-100 border-2 border-indigo-300' : 'bg-white border-2 border-transparent hover:bg-slate-50'
+                                }`}
                             >
                               <div className="flex items-center gap-3">
-                                <input 
-                                  type="checkbox" 
+                                <input
+                                  type="checkbox"
                                   checked={isSelected}
                                   onChange={() => handleEmployeeSelection(employee.id)}
                                   className="w-5 h-5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
@@ -2642,19 +2925,19 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                       <div className="space-y-2">
                         <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Montant par employé</label>
-                        <input 
-                          type="number" 
-                          placeholder="Ex: 200000" 
+                        <input
+                          type="number"
+                          placeholder="Ex: 200000"
                           value={advanceForm.amount}
-                          onChange={(e) => setAdvanceForm(prev => ({...prev, amount: e.target.value}))}
-                          className="w-full px-6 py-4 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-indigo-500 transition-all font-bold text-sm" 
+                          onChange={(e) => setAdvanceForm(prev => ({ ...prev, amount: e.target.value }))}
+                          className="w-full px-6 py-4 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-indigo-500 transition-all font-bold text-sm"
                         />
                       </div>
                       <div className="space-y-2">
                         <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Nombre de mois</label>
-                        <select 
+                        <select
                           value={advanceForm.months}
-                          onChange={(e) => setAdvanceForm(prev => ({...prev, months: parseInt(e.target.value)}))}
+                          onChange={(e) => setAdvanceForm(prev => ({ ...prev, months: parseInt(e.target.value) }))}
                           className="w-full px-6 py-4 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-indigo-500 transition-all font-bold text-sm"
                         >
                           <option value={1}>1 mois</option>
@@ -2667,10 +2950,10 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
 
                     <div className="space-y-2">
                       <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Raison de l'avance *</label>
-                      <textarea 
-                        placeholder="Ex: Avance pour frais médicaux urgents, Achat de véhicule, etc." 
+                      <textarea
+                        placeholder="Ex: Avance pour frais médicaux urgents, Achat de véhicule, etc."
                         value={advanceForm.reason}
-                        onChange={(e) => setAdvanceForm(prev => ({...prev, reason: e.target.value}))}
+                        onChange={(e) => setAdvanceForm(prev => ({ ...prev, reason: e.target.value }))}
                         className="w-full px-6 py-4 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-indigo-500 transition-all font-medium text-sm resize-none"
                         rows={3}
                       />
@@ -2734,25 +3017,24 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
                           <div className="flex items-center gap-3">
                             <div className="text-right">
                               <p className="text-xs text-slate-500">{new Date(advance.createdAt).toLocaleDateString('fr-FR')}</p>
-                              <span className={`inline-block px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest ${
-                                advance.status === 'APPROVED' ? 'bg-emerald-50 text-emerald-600' : 
+                              <span className={`inline-block px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest ${advance.status === 'APPROVED' ? 'bg-emerald-50 text-emerald-600' :
                                 advance.status === 'REJECTED' ? 'bg-red-50 text-red-600' :
-                                'bg-amber-50 text-amber-600'
-                              }`}>
-                                {advance.status === 'APPROVED' ? 'Approuvée' : 
-                                 advance.status === 'REJECTED' ? 'Refusée' : 'En attente'}
+                                  'bg-amber-50 text-amber-600'
+                                }`}>
+                                {advance.status === 'APPROVED' ? 'Approuvée' :
+                                  advance.status === 'REJECTED' ? 'Refusée' : 'En attente'}
                               </span>
                             </div>
                             {advance.status === 'PENDING' && (
                               <div className="flex gap-2">
-                                <button 
+                                <button
                                   onClick={() => handleApproveAdvance(advance)}
                                   className="w-8 h-8 bg-emerald-500 text-white rounded-lg hover:bg-emerald-600 transition-colors flex items-center justify-center"
                                   title="Approuver l'avance"
                                 >
                                   ✓
                                 </button>
-                                <button 
+                                <button
                                   onClick={() => handleRejectAdvance(advance)}
                                   className="w-8 h-8 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors flex items-center justify-center"
                                   title="Rejeter l'avance"
@@ -2769,26 +3051,26 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
                 </div>
 
                 {/* Modal d'approbation d'avance */}
-                <HRModal 
-                  isOpen={isApproveModalOpen} 
+                <HRModal
+                  isOpen={isApproveModalOpen}
                   onClose={() => {
                     setIsApproveModalOpen(false);
                     setSelectedAdvance(null);
-                  }} 
+                  }}
                   title="Approuver l'avance sur salaire"
                   size="md"
                   footer={
                     <div className="flex justify-end gap-4">
-                      <button 
+                      <button
                         onClick={() => {
                           setIsApproveModalOpen(false);
                           setSelectedAdvance(null);
-                        }} 
+                        }}
                         className="px-8 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-slate-900 transition-all"
                       >
                         Annuler
                       </button>
-                      <button 
+                      <button
                         onClick={confirmApprovalAdvance}
                         disabled={isLoading}
                         className="px-4 md:px-10 py-4 bg-emerald-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-emerald-700 transition-all shadow-xl disabled:opacity-50"
@@ -2815,7 +3097,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
                           </div>
                         </div>
                       </div>
-                      
+
                       <div className="space-y-4">
                         <div className="grid grid-cols-2 gap-4">
                           <div className="p-4 bg-slate-50 rounded-xl">
@@ -2835,12 +3117,12 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
                             </p>
                           </div>
                         </div>
-                        
+
                         <div className="p-4 bg-slate-50 rounded-xl">
                           <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Raison</p>
                           <p className="text-sm text-slate-700">{selectedAdvance.reason}</p>
                         </div>
-                        
+
                         <div className="p-4 bg-amber-50 rounded-xl border border-amber-200">
                           <p className="text-xs text-amber-700 font-medium">
                             ⚠️ Cette action approuvera définitivement l'avance sur salaire. Elle sera prise en compte dans le prochain traitement de paie.
@@ -2852,28 +3134,28 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
                 </HRModal>
 
                 {/* Modal de rejet d'avance */}
-                <HRModal 
-                  isOpen={isRejectModalOpen} 
+                <HRModal
+                  isOpen={isRejectModalOpen}
                   onClose={() => {
                     setIsRejectModalOpen(false);
                     setSelectedAdvance(null);
                     setRejectReason('');
-                  }} 
+                  }}
                   title="Rejeter l'avance sur salaire"
                   size="md"
                   footer={
                     <div className="flex justify-end gap-4">
-                      <button 
+                      <button
                         onClick={() => {
                           setIsRejectModalOpen(false);
                           setSelectedAdvance(null);
                           setRejectReason('');
-                        }} 
+                        }}
                         className="px-8 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-slate-900 transition-all"
                       >
                         Annuler
                       </button>
-                      <button 
+                      <button
                         onClick={confirmRejectAdvance}
                         disabled={isLoading || !rejectReason.trim()}
                         className="px-4 md:px-10 py-4 bg-red-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-red-700 transition-all shadow-xl disabled:opacity-50"
@@ -2900,7 +3182,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
                           </div>
                         </div>
                       </div>
-                      
+
                       <div className="space-y-4">
                         <div className="grid grid-cols-2 gap-4">
                           <div className="p-4 bg-slate-50 rounded-xl">
@@ -2920,25 +3202,25 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
                             </p>
                           </div>
                         </div>
-                        
+
                         <div className="p-4 bg-slate-50 rounded-xl">
                           <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Raison de la demande</p>
                           <p className="text-sm text-slate-700">{selectedAdvance.reason}</p>
                         </div>
-                        
+
                         <div className="space-y-2">
                           <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">
                             Raison du rejet *
                           </label>
-                          <textarea 
-                            placeholder="Ex: Montant trop élevé, dossier incomplet, ne respecte pas la politique de l'entreprise..." 
+                          <textarea
+                            placeholder="Ex: Montant trop élevé, dossier incomplet, ne respecte pas la politique de l'entreprise..."
                             value={rejectReason}
                             onChange={(e) => setRejectReason(e.target.value)}
                             className="w-full px-6 py-4 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-red-500 transition-all font-medium text-sm resize-none"
                             rows={4}
                           />
                         </div>
-                        
+
                         <div className="p-4 bg-amber-50 rounded-xl border border-amber-200">
                           <p className="text-xs text-amber-700 font-medium">
                             ⚠️ Cette action rejettera définitivement la demande d'avance. L'employé sera notifié avec la raison du rejet.
@@ -2975,13 +3257,13 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
                     <tbody>
                       {employees.filter(emp => monthlyDeductions[emp.id]?.totalMonthlyDeduction > 0).map(employee => {
                         const deductionInfo = monthlyDeductions[employee.id];
-                        
+
                         return (
                           <tr key={employee.id} className="border-b border-slate-50 hover:bg-slate-50">
                             <td className="py-6">
                               <div className="flex items-center gap-4">
                                 <div className="w-10 h-10 bg-slate-100 rounded-xl overflow-hidden">
-                                  <img 
+                                  <img
                                     src={employee.photoUrl || `https://ui-avatars.com/api/?name=${encodeURIComponent(employee.firstName + ' ' + employee.lastName)}&background=6366f1&color=fff&size=40`}
                                     alt={`${employee.firstName} ${employee.lastName}`}
                                     className="w-full h-full object-cover"
@@ -3017,7 +3299,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
                               </span>
                             </td>
                             <td className="py-6">
-                              <button 
+                              <button
                                 onClick={() => onNavigate('rh.employee', { employeeId: employee.id })}
                                 className="px-4 py-2 bg-slate-100 text-slate-700 rounded-xl text-xs font-bold hover:bg-slate-200 transition-all"
                               >
@@ -3029,7 +3311,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
                       })}
                     </tbody>
                   </table>
-                  
+
                   {loadingDeductions ? (
                     <div className="text-center py-16">
                       <div className="w-16 h-16 bg-slate-100 text-slate-300 rounded-2xl flex items-center justify-center mx-auto mb-4">
@@ -3055,7 +3337,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
                   <h3 className="text-lg font-black text-slate-900 uppercase tracking-tighter flex items-center gap-3">
                     <TrendingUp className="text-emerald-500" /> Primes Exceptionnelles
                   </h3>
-                  <button 
+                  <button
                     onClick={() => setIsPrimeModalOpen(true)}
                     className="px-6 py-3 bg-emerald-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest flex items-center gap-2 hover:bg-emerald-700 transition-all shadow-xl active:scale-95"
                   >
@@ -3064,28 +3346,28 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
                 </div>
 
                 {/* Modal Primes */}
-                <HRModal 
-                  isOpen={isPrimeModalOpen} 
+                <HRModal
+                  isOpen={isPrimeModalOpen}
                   onClose={() => {
                     setIsPrimeModalOpen(false);
                     setPrimeForm({ employeeId: '', amount: '', reason: '', type: 'PERFORMANCE', currency: 'F CFA' });
                     setPrimeEmployeeSearchTerm('');
-                  }} 
+                  }}
                   title="Nouvelle Prime Exceptionnelle"
                   size="md"
                   footer={
                     <div className="flex justify-end gap-4">
-                      <button 
+                      <button
                         onClick={() => {
                           setIsPrimeModalOpen(false);
                           setPrimeForm({ employeeId: '', amount: '', reason: '', type: 'PERFORMANCE', currency: 'F CFA' });
                           setPrimeEmployeeSearchTerm('');
-                        }} 
+                        }}
                         className="px-8 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-slate-900 transition-all"
                       >
                         Annuler
                       </button>
-                      <button 
+                      <button
                         onClick={handleSavePrime}
                         disabled={isLoading}
                         className="px-4 md:px-10 py-4 bg-emerald-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-emerald-700 transition-all shadow-xl disabled:opacity-50"
@@ -3098,11 +3380,11 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
                   <div className="space-y-6">
                     <div className="space-y-4">
                       <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Employé Bénéficiaire *</label>
-                      
+
                       {/* Champ de recherche pour les primes */}
                       <div className="relative">
                         <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
-                        <input 
+                        <input
                           type="text"
                           placeholder="Rechercher un employé..."
                           value={primeEmployeeSearchTerm}
@@ -3110,16 +3392,16 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
                           className="w-full pl-10 pr-4 py-3 bg-white border border-slate-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-all"
                         />
                       </div>
-                      
-                      <select 
+
+                      <select
                         value={primeForm.employeeId}
-                        onChange={(e) => setPrimeForm(prev => ({...prev, employeeId: e.target.value}))}
+                        onChange={(e) => setPrimeForm(prev => ({ ...prev, employeeId: e.target.value }))}
                         className="w-full px-6 py-4 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-emerald-500 transition-all font-bold text-sm"
                       >
                         <option value="">Sélectionner un employé...</option>
                         {getFilteredEmployeesForPrimes().map((employee) => {
                           const activeContracts = employee?.contracts || [];
-                          const latestContract = activeContracts.length > 0 
+                          const latestContract = activeContracts.length > 0
                             ? activeContracts.sort((a, b) => new Date(b.startDate).getTime() - new Date(a.startDate).getTime())[0]
                             : null;
                           const currentSalary = latestContract?.salary || employee?.baseSalary || 0;
@@ -3135,19 +3417,19 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
                     <div className="grid grid-cols-2 gap-6">
                       <div className="space-y-2">
                         <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Montant *</label>
-                        <input 
-                          type="number" 
-                          placeholder="Ex: 150000" 
+                        <input
+                          type="number"
+                          placeholder="Ex: 150000"
                           value={primeForm.amount}
-                          onChange={(e) => setPrimeForm(prev => ({...prev, amount: e.target.value}))}
-                          className="w-full px-6 py-4 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-emerald-500 transition-all font-bold text-sm" 
+                          onChange={(e) => setPrimeForm(prev => ({ ...prev, amount: e.target.value }))}
+                          className="w-full px-6 py-4 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-emerald-500 transition-all font-bold text-sm"
                         />
                       </div>
                       <div className="space-y-2">
                         <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Type de Prime</label>
-                        <select 
+                        <select
                           value={primeForm.type}
-                          onChange={(e) => setPrimeForm(prev => ({...prev, type: e.target.value}))}
+                          onChange={(e) => setPrimeForm(prev => ({ ...prev, type: e.target.value }))}
                           className="w-full px-6 py-4 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-emerald-500 transition-all font-bold text-sm"
                         >
                           <option value="PERFORMANCE">Performance</option>
@@ -3161,10 +3443,10 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
 
                     <div className="space-y-2">
                       <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Raison de la Prime *</label>
-                      <textarea 
-                        placeholder="Ex: Excellent travail sur le projet X, Atteinte des objectifs trimestriels, Performance exceptionnelle..." 
+                      <textarea
+                        placeholder="Ex: Excellent travail sur le projet X, Atteinte des objectifs trimestriels, Performance exceptionnelle..."
                         value={primeForm.reason}
-                        onChange={(e) => setPrimeForm(prev => ({...prev, reason: e.target.value}))}
+                        onChange={(e) => setPrimeForm(prev => ({ ...prev, reason: e.target.value }))}
                         className="w-full px-6 py-4 bg-slate-50 border-none rounded-2xl focus:ring-2 focus:ring-emerald-500 transition-all font-medium text-sm resize-none"
                         rows={4}
                       />
@@ -3424,12 +3706,11 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
                           <div className="flex-grow min-w-0">
                             <div className="flex items-center gap-3 mb-2 flex-wrap">
                               <span className="text-sm font-black text-slate-900">{rule.name}</span>
-                              <span className={`text-[9px] font-black uppercase tracking-widest px-2 py-1 rounded-full ${
-                                rule.type === 'LATE' ? 'bg-orange-50 text-orange-600' :
+                              <span className={`text-[9px] font-black uppercase tracking-widest px-2 py-1 rounded-full ${rule.type === 'LATE' ? 'bg-orange-50 text-orange-600' :
                                 rule.type === 'ABSENCE' ? 'bg-red-50 text-red-600' :
-                                rule.type === 'OVERTIME' ? 'bg-emerald-50 text-emerald-600' :
-                                'bg-blue-50 text-blue-600'
-                              }`}>
+                                  rule.type === 'OVERTIME' ? 'bg-emerald-50 text-emerald-600' :
+                                    'bg-blue-50 text-blue-600'
+                                }`}>
                                 {RULE_TYPE_LABELS[rule.type] || rule.type}
                               </span>
                               {!rule.isActive && (
@@ -3503,15 +3784,15 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
       </AnimatePresence>
 
       {/* Modal de visualisation de bulletin */}
-      <HRModal 
-        isOpen={isPayslipViewModalOpen} 
-        onClose={() => setIsPayslipViewModalOpen(false)} 
-        title={`Bulletin de ${selectedPayslip ? 
+      <HRModal
+        isOpen={isPayslipViewModalOpen}
+        onClose={() => setIsPayslipViewModalOpen(false)}
+        title={`Bulletin de ${selectedPayslip ?
           (() => {
             const emp = employees.find(e => e.id === selectedPayslip.employeeId);
             return emp ? `${emp.firstName} ${emp.lastName}` : 'Employé';
           })() : 'Employé'
-        }`}
+          }`}
         size="lg"
       >
         {selectedPayslip && (
@@ -3523,9 +3804,9 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
                     Période
                   </label>
                   <p className="text-lg font-bold text-slate-900">
-                    {new Date(selectedPayslip.month + '-01').toLocaleDateString('fr-FR', { 
-                      year: 'numeric', 
-                      month: 'long' 
+                    {new Date(selectedPayslip.month + '-01').toLocaleDateString('fr-FR', {
+                      year: 'numeric',
+                      month: 'long'
                     })}
                   </p>
                 </div>
@@ -3593,20 +3874,20 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
       </HRModal>
 
       {/* Modal de régénération de bulletin */}
-      <HRModal 
-        isOpen={isRegenerateModalOpen} 
-        onClose={() => setIsRegenerateModalOpen(false)} 
+      <HRModal
+        isOpen={isRegenerateModalOpen}
+        onClose={() => setIsRegenerateModalOpen(false)}
         title="Régénérer le Bulletin"
         size="md"
         footer={
           <div className="flex justify-end gap-4">
-            <button 
+            <button
               onClick={() => setIsRegenerateModalOpen(false)}
               className="px-8 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-slate-900 transition-all"
             >
               Annuler
             </button>
-            <button 
+            <button
               onClick={handleRegeneratePayslip}
               disabled={regeneratingPayslip}
               className="px-4 md:px-10 py-4 bg-orange-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-orange-700 transition-all shadow-xl disabled:opacity-50 flex items-center gap-2"
@@ -3642,9 +3923,9 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
               <h5 className="font-bold text-slate-900 mb-2">Bulletin à régénérer :</h5>
               <div className="flex items-center gap-3 mb-4">
                 <div className="w-10 h-10 bg-slate-200 rounded-lg overflow-hidden">
-                  <img 
-                    src={employees.find(e => e.id === selectedPayslip.employeeId)?.photoUrl || 
-                         `https://picsum.photos/seed/${selectedPayslip.employeeId}/100/100`}
+                  <img
+                    src={employees.find(e => e.id === selectedPayslip.employeeId)?.photoUrl ||
+                      `https://picsum.photos/seed/${selectedPayslip.employeeId}/100/100`}
                     alt="Employé"
                     className="w-full h-full object-cover"
                   />
@@ -3657,9 +3938,9 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
                     })()}
                   </p>
                   <p className="text-sm text-slate-600">
-                    {new Date(selectedPayslip.month + '-01').toLocaleDateString('fr-FR', { 
-                      year: 'numeric', 
-                      month: 'long' 
+                    {new Date(selectedPayslip.month + '-01').toLocaleDateString('fr-FR', {
+                      year: 'numeric',
+                      month: 'long'
                     })}
                   </p>
                 </div>
@@ -3670,19 +3951,19 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
       </HRModal>
 
       {/* Modal de prévisualisation du bulletin */}
-      <HRModal 
-        isOpen={isPreviewModalOpen} 
+      <HRModal
+        isOpen={isPreviewModalOpen}
         onClose={() => {
           setIsPreviewModalOpen(false);
           setSelectedEmployeeForPreview(null);
           setPreviewPayslipData(null);
-        }} 
+        }}
         title={`Prévisualisation - ${selectedEmployeeForPreview?.firstName} ${selectedEmployeeForPreview?.lastName}`}
         size="full"
         footer={
           <div className="flex justify-between items-center w-full">
             <div className="flex items-center gap-4">
-              <button 
+              <button
                 onClick={() => handleChangePeriod('prev')}
                 className="px-6 py-3 bg-slate-100 text-slate-600 rounded-xl font-black text-[10px] uppercase tracking-widest hover:bg-slate-200 transition-all"
               >
@@ -3691,7 +3972,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
               <span className="px-4 py-2 bg-indigo-50 text-indigo-600 rounded-lg text-xs font-bold">
                 {currentPeriod.displayName}
               </span>
-              <button 
+              <button
                 onClick={() => handleChangePeriod('next')}
                 className="px-6 py-3 bg-slate-100 text-slate-600 rounded-xl font-black text-[10px] uppercase tracking-widest hover:bg-slate-200 transition-all"
               >
@@ -3699,7 +3980,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
               </button>
             </div>
             <div className="flex gap-4">
-              <button 
+              <button
                 onClick={() => {
                   setIsPreviewModalOpen(false);
                   setSelectedEmployeeForPreview(null);
@@ -3709,7 +3990,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
               >
                 Fermer
               </button>
-              <button 
+              <button
                 onClick={() => {
                   if (previewPayslipData) {
                     // Simulation du téléchargement - en réalité, il faudrait intégrer avec l'API
@@ -3736,7 +4017,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
             </div>
           ) : previewPayslipData ? (
             <div className="flex justify-center p-8">
-              <PayslipPreview 
+              <PayslipPreview
                 employee={previewPayslipData.employee}
                 contract={previewPayslipData.contract}
                 tenant={previewPayslipData.tenant}
