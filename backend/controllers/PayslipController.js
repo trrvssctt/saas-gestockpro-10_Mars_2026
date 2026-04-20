@@ -20,7 +20,7 @@ export class PayslipController {
     try {
       const { month } = req.body;
       const tenantId = req.user.tenantId;
-      
+
       if (!month) {
         return res.status(400).json({ error: 'Le mois est requis (format YYYY-MM)' });
       }
@@ -68,14 +68,14 @@ export class PayslipController {
         HRRule.findAll({ where: { tenantId, isActive: true }, order: [['sort_order', 'ASC']] })
       ]);
 
-      const empSocialRate    = parseFloat(settings?.employeeSocialChargeRate ?? 8.2) / 100;
-      const taxRate          = parseFloat(settings?.taxRate                  ?? 10.0) / 100;
-      const workingDaysMonth = parseInt(settings?.workingDaysPerMonth        ?? 26);
+      const empSocialRate = parseFloat(settings?.employeeSocialChargeRate ?? 8.2) / 100;
+      const taxRate = parseFloat(settings?.taxRate ?? 10.0) / 100;
+      const workingDaysMonth = parseInt(settings?.workingDaysPerMonth ?? 26);
       const deductionEnabled = settings?.deductionEnabled ?? false;
-      const currency         = settings?.currency || tenant.currency || 'F CFA';
+      const currency = settings?.currency || tenant.currency || 'F CFA';
 
-      const startH       = parseInt((settings?.workStartTime || '08:00').split(':')[0]);
-      const endH         = parseInt((settings?.workEndTime   || '17:00').split(':')[0]);
+      const startH = parseInt((settings?.workStartTime || '08:00').split(':')[0]);
+      const endH = parseInt((settings?.workEndTime || '17:00').split(':')[0]);
       const dailyWorkHours = Math.max(1, endH - startH);
 
       // Récupérer tous les employés actifs avec leur contrat actif
@@ -129,6 +129,23 @@ export class PayslipController {
           // Prendre le contrat le plus récent s'il y en a plusieurs actifs
           const contract = employee.contracts[0];
 
+          // VÉRIFICATION : Date d'embauche vs Mois de génération
+          if (employee.hireDate) {
+            const hDate = new Date(employee.hireDate);
+            const hMonthStart = new Date(hDate.getFullYear(), hDate.getMonth(), 1);
+            const targetMonthStart = new Date(month + '-01');
+
+            if (targetMonthStart < hMonthStart) {
+              results.errors.push({
+                employeeId: employee.id,
+                employeeName: `${employee.firstName} ${employee.lastName}`,
+                error: `Antérieur à l'embauche (${hDate.toLocaleDateString('fr-FR')})`
+              });
+              results.summary.errorCount++;
+              continue;
+            }
+          }
+
           // Calculer le salaire avec les vrais taux PayrollSettings
           const baseSalary = parseFloat(contract.salary) || 0;
 
@@ -143,8 +160,8 @@ export class PayslipController {
           }
 
           // Primes et avances de cet employé
-          const empPrimes   = allPrimes.filter(p => p.employeeId === employee.id);
-          const empAdvances  = allAdvances.filter(a => a.employeeId === employee.id);
+          const empPrimes = allPrimes.filter(p => p.employeeId === employee.id);
+          const empAdvances = allAdvances.filter(a => a.employeeId === employee.id);
 
           const totalPrimes = empPrimes.reduce((s, p) => s + parseFloat(p.amount || 0), 0);
           const totalAdvanceDeductions = empAdvances.reduce((s, a) => {
@@ -158,18 +175,18 @@ export class PayslipController {
 
           // Cotisations sociales et impôt selon PayrollSettings
           const socialContributions = Math.round(grossSalary * empSocialRate);
-          const taxableBase  = Math.max(0, grossSalary - socialContributions);
-          const incomeTax    = Math.round(taxableBase * taxRate);
+          const taxableBase = Math.max(0, grossSalary - socialContributions);
+          const incomeTax = Math.round(taxableBase * taxRate);
 
           // Déductions règles RH si activé
           let hrRulesDeduction = 0;
           if (deductionEnabled && hrRules.length > 0) {
-            const dailyRate  = workingDaysMonth > 0 ? baseSalary / workingDaysMonth : 0;
-            const hourlyRate = dailyWorkHours   > 0 ? dailyRate  / dailyWorkHours   : 0;
+            const dailyRate = workingDaysMonth > 0 ? baseSalary / workingDaysMonth : 0;
+            const hourlyRate = dailyWorkHours > 0 ? dailyRate / dailyWorkHours : 0;
 
             // Plage du mois
             const monthStart = new Date(`${year}-${monthNum.padStart(2, '0')}-01`);
-            const monthEnd   = new Date(monthStart);
+            const monthEnd = new Date(monthStart);
             monthEnd.setMonth(monthEnd.getMonth() + 1);
             monthEnd.setDate(monthEnd.getDate() - 1);
 
@@ -179,8 +196,10 @@ export class PayslipController {
                 where: { employeeId: employee.id, tenantId, date: { [Op.between]: [monthStart, monthEnd] } }
               }),
               Leave.findAll({
-                where: { employeeId: employee.id, tenantId, status: 'APPROVED',
-                  startDate: { [Op.lte]: monthEnd }, endDate: { [Op.gte]: monthStart } }
+                where: {
+                  employeeId: employee.id, tenantId, status: 'APPROVED',
+                  startDate: { [Op.lte]: monthEnd }, endDate: { [Op.gte]: monthStart }
+                }
               })
             ]);
 
@@ -210,24 +229,24 @@ export class PayslipController {
             const _cmpOp = (a, op, b) => ({ GT: a > b, GTE: a >= b, LT: a < b, LTE: a <= b, EQ: a === b }[op] ?? false);
 
             for (const rule of hrRules) {
-              const av      = parseFloat(rule.actionValue   || 0);
+              const av = parseFloat(rule.actionValue || 0);
               const condVal = parseFloat(rule.conditionValue || 0);
-              const op      = rule.conditionOperator || 'GT';
+              const op = rule.conditionOperator || 'GT';
 
               if (rule.type === 'LATE') {
                 const compareVal = rule.conditionUnit === 'HOURS' ? lateDays : totalLateMinutes;
                 if (!_cmpOp(compareVal, op, condVal)) continue;
-                if (rule.actionType === 'DEDUCT_FIXED')            hrRulesDeduction += av * lateDays;
+                if (rule.actionType === 'DEDUCT_FIXED') hrRulesDeduction += av * lateDays;
                 else if (rule.actionType === 'DEDUCT_SALARY_HOURS') hrRulesDeduction += av * hourlyRate * lateDays;
-                else if (rule.actionType === 'DEDUCT_SALARY_DAYS')  hrRulesDeduction += av * dailyRate  * lateDays;
-                else if (rule.actionType === 'DEDUCT_PERCENT')      hrRulesDeduction += baseSalary * (av / 100) * lateDays;
+                else if (rule.actionType === 'DEDUCT_SALARY_DAYS') hrRulesDeduction += av * dailyRate * lateDays;
+                else if (rule.actionType === 'DEDUCT_PERCENT') hrRulesDeduction += baseSalary * (av / 100) * lateDays;
 
               } else if (rule.type === 'ABSENCE' || rule.type === 'UNPAID_LEAVE') {
                 if (!_cmpOp(unapprovedAbsences, op, condVal)) continue;
-                if (rule.actionType === 'DEDUCT_FIXED')            hrRulesDeduction += av * unapprovedAbsences;
+                if (rule.actionType === 'DEDUCT_FIXED') hrRulesDeduction += av * unapprovedAbsences;
                 else if (rule.actionType === 'DEDUCT_SALARY_HOURS') hrRulesDeduction += av * hourlyRate * unapprovedAbsences;
-                else if (rule.actionType === 'DEDUCT_SALARY_DAYS')  hrRulesDeduction += av * dailyRate  * unapprovedAbsences;
-                else if (rule.actionType === 'DEDUCT_PERCENT')      hrRulesDeduction += baseSalary * (av / 100) * unapprovedAbsences;
+                else if (rule.actionType === 'DEDUCT_SALARY_DAYS') hrRulesDeduction += av * dailyRate * unapprovedAbsences;
+                else if (rule.actionType === 'DEDUCT_PERCENT') hrRulesDeduction += baseSalary * (av / 100) * unapprovedAbsences;
               }
             }
             hrRulesDeduction = Math.round(hrRulesDeduction);
@@ -265,7 +284,7 @@ export class PayslipController {
           const sanitizedPosition = (employee.position || 'Employee').replace(/[^a-zA-Z0-9_-]/g, '_');
           const filename = `${employee.firstName}_${employee.lastName}_${sanitizedPosition}.png`;
           const filePath = path.join(payslipFolder, filename);
-          
+
           // Générer l'image PNG à partir du HTML
           await nodeHtmlToImage({
             output: filePath,
@@ -276,7 +295,7 @@ export class PayslipController {
               args: ['--no-sandbox', '--disable-setuid-sandbox']
             }
           });
-          
+
           results.success.push({
             employeeId: employee.id,
             employeeName: `${employee.firstName} ${employee.lastName}`,
@@ -286,9 +305,9 @@ export class PayslipController {
             netSalary: netSalary,
             grossSalary: grossSalary
           });
-          
+
           results.summary.successCount++;
-          
+
         } catch (error) {
           console.error(`Erreur pour employé ${employee.firstName} ${employee.lastName}:`, error);
           results.errors.push({
@@ -350,15 +369,15 @@ export class PayslipController {
       ]);
 
       // Taux réels (ou valeurs par défaut si non configurés)
-      const empSocialRate     = parseFloat(settings?.employeeSocialChargeRate ?? 8.2) / 100;
-      const taxRate           = parseFloat(settings?.taxRate                  ?? 10.0) / 100;
-      const workingDaysMonth  = parseInt(settings?.workingDaysPerMonth        ?? 26);
-      const deductionEnabled  = settings?.deductionEnabled ?? false;
-      const currency          = settings?.currency || tenant.currency || 'F CFA';
+      const empSocialRate = parseFloat(settings?.employeeSocialChargeRate ?? 8.2) / 100;
+      const taxRate = parseFloat(settings?.taxRate ?? 10.0) / 100;
+      const workingDaysMonth = parseInt(settings?.workingDaysPerMonth ?? 26);
+      const deductionEnabled = settings?.deductionEnabled ?? false;
+      const currency = settings?.currency || tenant.currency || 'F CFA';
 
       // Heures de travail journalières (pour DEDUCT_SALARY_HOURS)
-      const startH  = parseInt((settings?.workStartTime || '08:00').split(':')[0]);
-      const endH    = parseInt((settings?.workEndTime   || '17:00').split(':')[0]);
+      const startH = parseInt((settings?.workStartTime || '08:00').split(':')[0]);
+      const endH = parseInt((settings?.workEndTime || '17:00').split(':')[0]);
       const dailyWorkHours = Math.max(1, endH - startH);
 
       // Employés actifs avec contrat actif
@@ -417,19 +436,19 @@ export class PayslipController {
 
         // Impôt (taux PayrollSettings.taxRate, appliqué sur net social)
         const taxableBase = Math.max(0, grossSalary - socialContributions);
-        const incomeTax   = Math.round(taxableBase * taxRate);
+        const incomeTax = Math.round(taxableBase * taxRate);
 
         // Déductions règles RH (retards / absences) si activé dans rh.time-settings
         let hrRulesDeduction = 0;
         if (deductionEnabled && hrRules.length > 0) {
-          const dailyRate  = workingDaysMonth > 0 ? baseSalary / workingDaysMonth : 0;
-          const hourlyRate = dailyWorkHours   > 0 ? dailyRate  / dailyWorkHours   : 0;
+          const dailyRate = workingDaysMonth > 0 ? baseSalary / workingDaysMonth : 0;
+          const hourlyRate = dailyWorkHours > 0 ? dailyRate / dailyWorkHours : 0;
           for (const rule of hrRules) {
             const av = parseFloat(rule.actionValue || 0);
-            if (rule.actionType === 'DEDUCT_FIXED')        hrRulesDeduction += av;
+            if (rule.actionType === 'DEDUCT_FIXED') hrRulesDeduction += av;
             else if (rule.actionType === 'DEDUCT_SALARY_HOURS') hrRulesDeduction += av * hourlyRate;
-            else if (rule.actionType === 'DEDUCT_SALARY_DAYS')  hrRulesDeduction += av * dailyRate;
-            else if (rule.actionType === 'DEDUCT_PERCENT')      hrRulesDeduction += baseSalary * (av / 100);
+            else if (rule.actionType === 'DEDUCT_SALARY_DAYS') hrRulesDeduction += av * dailyRate;
+            else if (rule.actionType === 'DEDUCT_PERCENT') hrRulesDeduction += baseSalary * (av / 100);
           }
           hrRulesDeduction = Math.round(hrRulesDeduction);
         }
@@ -515,8 +534,8 @@ export class PayslipController {
    */
   static generateZipPayslipHTML({ employee, contract, tenant, month, empPrimes, empAdvances, calculations }) {
     const { baseSalary, totalPrimes, grossSalary, socialContributions, incomeTax,
-            totalAdvanceDeductions, hrRulesDeduction = 0, totalDeductions, netSalary, currency,
-            empSocialRate = 0.082, taxRate = 0.10, workingDaysMonth = 26 } = calculations;
+      totalAdvanceDeductions, hrRulesDeduction = 0, totalDeductions, netSalary, currency,
+      empSocialRate = 0.082, taxRate = 0.10, workingDaysMonth = 26 } = calculations;
 
     const fmt = (n) => Math.round(n).toLocaleString('fr-FR');
     const monthYear = new Date(month + '-01').toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
@@ -702,9 +721,9 @@ td.deduction{color:#dc2626;}
    * Helper method to generate payslip HTML with DocumentPreview style
    */
   static async generatePayslipHTML({ employee, contract, tenant, month, calculations }) {
-    const monthYear = new Date(month + '-01').toLocaleDateString('fr-FR', { 
-      month: 'long', 
-      year: 'numeric' 
+    const monthYear = new Date(month + '-01').toLocaleDateString('fr-FR', {
+      month: 'long',
+      year: 'numeric'
     });
 
     const contractStartDate = new Date(contract.startDate).toLocaleDateString('fr-FR');
@@ -1048,15 +1067,15 @@ td.deduction{color:#dc2626;}
     <div class="header">
         <div class="company-info">
             <div class="logo-section">
-                ${tenant.logoUrl ? 
-                    `<img src="${tenant.logoUrl}" style="height: 48px; width: auto; object-fit: contain; max-width: 200px;" alt="Logo" />` :
-                    `<div class="logo-icon">
+                ${tenant.logoUrl ?
+        `<img src="${tenant.logoUrl}" style="height: 48px; width: auto; object-fit: contain; max-width: 200px;" alt="Logo" />` :
+        `<div class="logo-icon">
                         G
                     </div>
                     <div class="company-name">
                         ${tenant.name || tenant.company || 'ENTREPRISE'}<span class="company-highlight">PRO</span>
                     </div>`
-                }
+      }
             </div>
             <div class="company-details">
                 <div class="detail-line">
@@ -1157,10 +1176,10 @@ td.deduction{color:#dc2626;}
         <div class="signature-section">
             <div class="signature-title">VISA & CACHET EMPLOYEUR</div>
             <div class="signature-box">
-                ${tenant.cachetUrl ? 
-                    `<img src="${tenant.cachetUrl}" style="height: 120px; width: auto; object-fit: contain;" alt="Cachet Officiel" />` :
-                    `<div class="paid-stamp">PAYÉ</div>`
-                }
+                ${tenant.cachetUrl ?
+        `<img src="${tenant.cachetUrl}" style="height: 120px; width: auto; object-fit: contain;" alt="Cachet Officiel" />` :
+        `<div class="paid-stamp">PAYÉ</div>`
+      }
             </div>
         </div>
     </div>
@@ -1183,10 +1202,23 @@ td.deduction{color:#dc2626;}
         return res.status(404).json({ error: 'Employé non trouvé' });
       }
 
+      // VÉRIFICATION : Date d'embauche vs Mois de génération
+      if (employee.hireDate) {
+        const hDate = new Date(employee.hireDate);
+        const hMonthStart = new Date(hDate.getFullYear(), hDate.getMonth(), 1);
+        const targetMonthStart = new Date(month + '-01');
+
+        if (targetMonthStart < hMonthStart) {
+          return res.status(400).json({
+            error: `Impossible de générer un bulletin : l'employé a été embauché le ${hDate.toLocaleDateString('fr-FR')}.`
+          });
+        }
+      }
+
       // Récupérer le contrat actif de l'employé
       const contract = await Contract.findOne({
-        where: { 
-          employeeId: employeeId, 
+        where: {
+          employeeId: employeeId,
           tenantId: tenantId,
           status: 'ACTIVE'
         },
@@ -1201,32 +1233,32 @@ td.deduction{color:#dc2626;}
       const tenant = await Tenant.findOne({
         where: { id: tenantId }
       });
-      
+
       if (!tenant) {
         return res.status(404).json({ error: 'Informations de l\'entreprise non trouvées' });
       }
 
       // Calculer le salaire à partir du contrat
       const baseSalary = parseFloat(contract.salary) || 0;
-      
+
       if (baseSalary === 0) {
         return res.status(400).json({ error: 'Salaire non défini dans le contrat' });
       }
-      
+
       const allowances = baseSalary * 0.1; // Indemnités 10%
       const grossSalary = baseSalary + allowances;
-      
+
       // Cotisations sociales (approximatives pour le Sénégal)
       const socialContributions = grossSalary * 0.20; // 20% approximatif
       const incomeTax = Math.max(0, (grossSalary - 30000) * 0.15); // Impôt sur le revenu
-      
+
       const totalDeductions = socialContributions + incomeTax;
       const netSalary = grossSalary - totalDeductions;
 
       // Formater le mois pour l'affichage
-      const monthYear = new Date(month + '-01').toLocaleDateString('fr-FR', { 
-        month: 'long', 
-        year: 'numeric' 
+      const monthYear = new Date(month + '-01').toLocaleDateString('fr-FR', {
+        month: 'long',
+        year: 'numeric'
       });
 
       // Générer le contenu HTML de la fiche de paie avec le design professionnel (style DocumentPreview)
@@ -1527,16 +1559,16 @@ td.deduction{color:#dc2626;}
         <!-- Header -->
         <div class="header">
             <div class="company-info">
-                ${tenant.logoUrl ? 
-                  `<img src="${tenant.logoUrl}" style="height: 96px; width: auto; object-fit: contain; margin-bottom: 16px; max-width: 250px;" alt="Logo" />` :
-                  `<div class="logo-section">
+                ${tenant.logoUrl ?
+          `<img src="${tenant.logoUrl}" style="height: 96px; width: auto; object-fit: contain; margin-bottom: 16px; max-width: 250px;" alt="Logo" />` :
+          `<div class="logo-section">
                      <div class="logo-placeholder">GSP</div>
-                     <div class="company-name">${tenant.name.includes('GeStockPro') ? 
-                        tenant.name.replace(/GeStockPro/g, 'GESTOCK<span class="highlight">PRO</span>') : 
-                        tenant.name.toUpperCase()
-                     }</div>
+                     <div class="company-name">${tenant.name.includes('GeStockPro') ?
+            tenant.name.replace(/GeStockPro/g, 'GESTOCK<span class="highlight">PRO</span>') :
+            tenant.name.toUpperCase()
+          }</div>
                    </div>`
-                }
+        }
                 <div class="company-details">
                     <div class="detail-item">
                         <span class="detail-icon">📍</span> ${tenant.address || 'Adresse Cloud'}
@@ -1651,10 +1683,10 @@ td.deduction{color:#dc2626;}
             <div class="signature-section">
                 <div class="signature-label">Visa & Cachet</div>
                 <div class="signature-area">
-                    ${tenant.cachetUrl ? 
-                      `<img src="${tenant.cachetUrl}" style="height: 128px; width: auto; object-fit: contain; mix-blend-mode: multiply;" alt="Tampon Officiel" />` :
-                      '<div class="paid-stamp">VALIDÉ</div>'
-                    }
+                    ${tenant.cachetUrl ?
+          `<img src="${tenant.cachetUrl}" style="height: 128px; width: auto; object-fit: contain; mix-blend-mode: multiply;" alt="Tampon Officiel" />` :
+          '<div class="paid-stamp">VALIDÉ</div>'
+        }
                 </div>
             </div>
         </div>
@@ -1670,7 +1702,7 @@ td.deduction{color:#dc2626;}
 
       const fileName = `payslip_${employeeId}_${month}.html`;
       const filePath = path.join(uploadsDir, fileName);
-      
+
       fs.writeFileSync(filePath, htmlContent, 'utf8');
 
       const fileUrl = `/uploads/payslips/${fileName}`;
@@ -1715,9 +1747,9 @@ td.deduction{color:#dc2626;}
 
     } catch (error) {
       console.error('Error generating payslip:', error);
-      return res.status(500).json({ 
+      return res.status(500).json({
         error: 'Erreur lors de la génération de la fiche de paie',
-        details: error.message 
+        details: error.message
       });
     }
   }
@@ -1737,8 +1769,8 @@ td.deduction{color:#dc2626;}
       }
 
       const contract = await Contract.findOne({
-        where: { 
-          employeeId: employeeId, 
+        where: {
+          employeeId: employeeId,
           tenantId: tenantId,
           status: 'ACTIVE'
         },
@@ -1758,41 +1790,23 @@ td.deduction{color:#dc2626;}
       const totalDeductions = socialContributions + incomeTax;
       const netSalary = grossSalary - totalDeductions;
 
-      // Pour l'instant on retourne des données calculées depuis le contrat
-      // En production, récupérer depuis une table payslips
-      const mockPayslips = [
-        {
-          id: '1',
-          employeeId,
-          month: '2026-02',
-          baseSalary: Math.round(baseSalary),
-          grossSalary: Math.round(grossSalary),
-          netSalary: Math.round(netSalary),
-          deductions: Math.round(totalDeductions),
-          status: 'PAID',
-          pdfUrl: null,
-          generatedAt: '2026-02-28'
-        },
-        {
-          id: '2',
-          employeeId,
-          month: '2026-01',
-          baseSalary: Math.round(baseSalary),
-          grossSalary: Math.round(grossSalary),
-          netSalary: Math.round(netSalary),
-          deductions: Math.round(totalDeductions),
-          status: 'PAID',
-          pdfUrl: null,
-          generatedAt: '2026-01-31'
-        }
-      ];
+      // Filtrer les bulletins mock par date d'embauche
+      const hireDate = employee.hireDate ? new Date(employee.hireDate) : null;
+      const filteredMockPayslips = mockPayslips.filter(slip => {
+        if (!hireDate) return true;
+        const slipDate = new Date(slip.month + '-01');
+        // On garde si le mois du bulletin est >= au mois d'embauche
+        // (En comparant le 1er du mois pour simplifier)
+        const hireMonthStart = new Date(hireDate.getFullYear(), hireDate.getMonth(), 1);
+        return slipDate >= hireMonthStart;
+      });
 
-      return res.status(200).json(mockPayslips);
+      return res.status(200).json(filteredMockPayslips);
     } catch (error) {
       console.error('Error fetching payslips:', error);
-      return res.status(500).json({ 
+      return res.status(500).json({
         error: 'Erreur lors de la r ecupération des fiches de paie',
-        details: error.message 
+        details: error.message
       });
     }
   }
@@ -1805,16 +1819,16 @@ td.deduction{color:#dc2626;}
 
       // Validation des paramètres
       if (!employeeId || !month) {
-        return res.status(400).json({ 
-          message: 'ID employé et mois requis (ex: ?employeeId=123&month=2026-03)' 
+        return res.status(400).json({
+          message: 'ID employé et mois requis (ex: ?employeeId=123&month=2026-03)'
         });
       }
 
       // Validation du format
       const validFormats = ['html', 'pdf', 'png', 'jpg', 'jpeg'];
       if (!validFormats.includes(format.toLowerCase())) {
-        return res.status(400).json({ 
-          message: `Format non supporté. Utilisez: ${validFormats.join(', ')}` 
+        return res.status(400).json({
+          message: `Format non supporté. Utilisez: ${validFormats.join(', ')}`
         });
       }
 
@@ -1834,8 +1848,8 @@ td.deduction{color:#dc2626;}
 
       // Récupérer le contrat actif
       const contract = await Contract.findOne({
-        where: { 
-          employeeId: employeeId, 
+        where: {
+          employeeId: employeeId,
           tenantId: tenantId,
           status: 'ACTIVE'
         },
@@ -1863,7 +1877,7 @@ td.deduction{color:#dc2626;}
       const totalAdvanceDeductions = 0; // TODO: Récupérer les avances du mois
       const socialChargesEmployer = grossSalary * 0.185; // Info seulement
       const netSalary = grossSalary - socialChargesEmployee - totalAdvanceDeductions;
-      
+
       const salaryCalculation = {
         baseSalary,
         grossSalary,
@@ -1878,8 +1892,8 @@ td.deduction{color:#dc2626;}
       // Parser le mois (format YYYY-MM)
       const [year, monthNum] = month.split('-');
       if (!year || !monthNum) {
-        return res.status(400).json({ 
-          message: 'Format du mois invalide. Utilisez YYYY-MM (ex: 2026-03)' 
+        return res.status(400).json({
+          message: 'Format du mois invalide. Utilisez YYYY-MM (ex: 2026-03)'
         });
       }
 
@@ -1923,11 +1937,11 @@ td.deduction{color:#dc2626;}
       // Envoyer le fichier
       res.setHeader('Content-Type', mimeType);
       res.setHeader('Content-Disposition', `attachment; filename="${downloadName}"`);
-      
+
       // Streamer le fichier vers la response
       const fs = await import('fs');
       const fileStream = fs.default.createReadStream(result.fullPath);
-      
+
       fileStream.on('error', (streamError) => {
         console.error('Error streaming file:', streamError);
         if (!res.headersSent) {
@@ -1936,19 +1950,19 @@ td.deduction{color:#dc2626;}
       });
 
       fileStream.pipe(res);
-      
+
     } catch (error) {
       console.error('Erreur lors du téléchargement de la fiche de paie:', error);
-      
+
       if (!res.headersSent) {
         if (error.message.includes('Puppeteer') || error.message.includes('PDF') || error.message.includes('PNG')) {
-          res.status(503).json({ 
-            message: 'Service de génération PDF/PNG temporairement indisponible', 
+          res.status(503).json({
+            message: 'Service de génération PDF/PNG temporairement indisponible',
             error: error.message,
             suggestion: 'Essayez le format HTML en attendant'
           });
         } else {
-          res.status(500).json({ 
+          res.status(500).json({
             message: 'Erreur lors de la génération de la fiche de paie',
             error: error.message
           });
@@ -1967,14 +1981,14 @@ td.deduction{color:#dc2626;}
 
       // Récupérer tous les employés avec contrats actifs
       const employees = await Employee.findAll({
-        where: { 
+        where: {
           tenantId,
           ...(employeeId && { id: employeeId })
         },
         include: [{
           model: Contract,
           as: 'contracts',
-          where: { 
+          where: {
             tenantId: tenantId,
             status: 'ACTIVE'
           },
@@ -1988,7 +2002,7 @@ td.deduction{color:#dc2626;}
       // Générer des bulletins pour les derniers mois (ou mois spécifié)
       const months = month ? [`${year || new Date().getFullYear()}-${month.padStart(2, '0')}`] : [
         '2026-03',
-        '2026-02', 
+        '2026-02',
         '2026-01'
       ];
 
@@ -2004,7 +2018,17 @@ td.deduction{color:#dc2626;}
         const totalDeductions = socialContributions + incomeTax;
         const netSalary = grossSalary - totalDeductions;
 
+        // Filtrer les mois par date d'embauche
+        const hireDate = employee.hireDate ? new Date(employee.hireDate) : null;
+        const hireMonthStart = hireDate ? new Date(hireDate.getFullYear(), hireDate.getMonth(), 1) : null;
+
         for (const monthPeriod of months) {
+          // Si le mois est antérieur à l'embauche, on ignore
+          if (hireMonthStart) {
+            const currentMonthDate = new Date(monthPeriod + '-01');
+            if (currentMonthDate < hireMonthStart) continue;
+          }
+
           const payslip = {
             id: `${employee.id}-${monthPeriod}`,
             employeeId: employee.id,
@@ -2022,7 +2046,7 @@ td.deduction{color:#dc2626;}
 
           // Appliquer les filtres si spécifiés
           if (status && payslip.status !== status) continue;
-          
+
           payslips.push(payslip);
         }
       }
@@ -2041,9 +2065,9 @@ td.deduction{color:#dc2626;}
       });
     } catch (error) {
       console.error('Error fetching payslips list:', error);
-      return res.status(500).json({ 
+      return res.status(500).json({
         error: 'Erreur lors de la récupération des bulletins de paie',
-        details: error.message 
+        details: error.message
       });
     }
   }
@@ -2059,18 +2083,18 @@ td.deduction{color:#dc2626;}
       // Parse payslipId qui est au format "employeeId-YYYY-MM"
       const parts = payslipId.split('-');
       if (parts.length < 3) {
-        return res.status(400).json({ 
-          error: 'Format d\'ID de bulletin invalide. Attendu: employeeId-YYYY-MM' 
+        return res.status(400).json({
+          error: 'Format d\'ID de bulletin invalide. Attendu: employeeId-YYYY-MM'
         });
       }
-      
+
       const employeeId = parts[0];
       const year = parts[1];
       const month = parts[2];
-      
+
       if (!employeeId || !year || !month) {
-        return res.status(400).json({ 
-          error: 'Format d\'ID de bulletin invalide. Attendu: employeeId-YYYY-MM' 
+        return res.status(400).json({
+          error: 'Format d\'ID de bulletin invalide. Attendu: employeeId-YYYY-MM'
         });
       }
 
@@ -2090,28 +2114,28 @@ td.deduction{color:#dc2626;}
 
       // Construire le nom de fichier selon le format du PayslipGeneratorService
       const monthName = parseInt(month);
-      
+
       // Clean names for file system compatibility (same as PayslipGeneratorService)
       const cleanName = (str) => str.replace(/[^a-zA-Z0-9\-_]/g, '_').replace(/_+/g, '_');
       const firstName = cleanName(employee.firstName || 'Employee');
       const lastName = cleanName(employee.lastName || 'Unknown');
       const departmentName = cleanName(employee.departmentInfo?.name || 'NoDepart');
       const monthPadded = String(monthName).padStart(2, '0');
-      
+
       // Format: prénom-nom-département-MM.extension
       const baseFileName = `${firstName}-${lastName}-${departmentName}-${monthPadded}`;
-      
+
       // Chemin vers le dossier des fiches de paie
       const payslipFolderPath = path.join(process.cwd(), 'uploads', 'fiches_paiement', `${year}-${monthPadded}`);
-      
+
       const filesToDelete = [];
       const extensions = ['html', 'pdf', 'png', 'jpg', 'jpeg'];
-      
+
       // Supprimer tous les fichiers avec différentes extensions
       for (const ext of extensions) {
         const fileName = `${baseFileName}.${ext}`;
         const filePath = path.join(payslipFolderPath, fileName);
-        
+
         try {
           if (await fsPromises.access(filePath).then(() => true).catch(() => false)) {
             await fsPromises.unlink(filePath);
@@ -2120,12 +2144,12 @@ td.deduction{color:#dc2626;}
         } catch (fileError) {
         }
       }
-      
+
       // Également vérifier l'ancien format au cas où
       const oldFormatPath = path.join(process.cwd(), 'uploads');
       const oldFileName = `fiche_paie_${employeeId}_${year}-${monthPadded}.html`;
       const oldFilePath = path.join(oldFormatPath, oldFileName);
-      
+
       try {
         if (await fsPromises.access(oldFilePath).then(() => true).catch(() => false)) {
           await fsPromises.unlink(oldFilePath);
@@ -2134,7 +2158,7 @@ td.deduction{color:#dc2626;}
       } catch (fileError) {
       }
 
-      return res.status(200).json({ 
+      return res.status(200).json({
         message: 'Bulletin de paie supprimé avec succès',
         deletedFiles: filesToDelete,
         employee: `${employee.firstName} ${employee.lastName}`,
@@ -2142,9 +2166,9 @@ td.deduction{color:#dc2626;}
       });
     } catch (error) {
       console.error('Error deleting payslip:', error);
-      return res.status(500).json({ 
+      return res.status(500).json({
         error: 'Erreur lors de la suppression du bulletin de paie',
-        details: error.message 
+        details: error.message
       });
     }
   }

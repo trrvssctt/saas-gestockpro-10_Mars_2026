@@ -874,22 +874,278 @@ export class PayrollController {
     try {
       // Récupérer les informations du tenant
       const tenantInfo = await PayslipGeneratorService.getTenantInfo(employee.tenantId);
-      
+
       // Générer le fichier de paie
       const result = await PayslipGeneratorService.generatePayslipFile(
-        employee, 
-        contract, 
-        tenantInfo, 
-        salaryCalculation, 
-        month, 
-        year, 
+        employee,
+        contract,
+        tenantInfo,
+        salaryCalculation,
+        month,
+        year,
         format
       );
-      
+
       return result;
     } catch (error) {
       console.error(`Erreur génération fichier de paie pour ${employee.firstName} ${employee.lastName}:`, error);
       throw error;
+    }
+  }
+
+  // --- VÉRIFICATION PRÉ-PAIE : Vérifie si un employé a travaillé les heures convenues ---
+  static async validatePayrollEligibility(req, res) {
+    try {
+      const { employeeId, month } = req.query; // month format: YYYY-MM
+      const tenantId = req.user.tenantId;
+
+      if (!employeeId || !month) {
+        return res.status(400).json({ error: 'employeeId et month sont requis' });
+      }
+
+      const targetDate = new Date(month + '-01');
+      const monthStart = new Date(targetDate.getFullYear(), targetDate.getMonth(), 1);
+      const monthEnd = new Date(targetDate.getFullYear(), targetDate.getMonth() + 1, 0, 23, 59, 59);
+
+      // Récupérer l'employé et son contrat actif
+      const employee = await Employee.findOne({
+        where: { id: employeeId, tenantId, status: 'ACTIVE' },
+        include: [{
+          model: Contract,
+          as: 'contracts',
+          where: { status: 'ACTIVE' },
+          required: true
+        }]
+      });
+
+      if (!employee) {
+        return res.status(404).json({ error: 'Employé actif non trouvé' });
+      }
+
+      const activeContract = employee.contracts[0];
+
+      // Récupérer les paramètres de paie
+      const payrollSettings = await PayrollSettings.findOne({ where: { tenantId } });
+      const workStartTime = payrollSettings?.workStartTime || '08:00';
+      const workEndTime = payrollSettings?.workEndTime || '17:00';
+      const workingDaysPerMonth = payrollSettings?.workingDaysPerMonth || 26;
+
+      // Calculer les heures de travail attendues par mois
+      const [startHour, startMin] = workStartTime.split(':').map(Number);
+      const [endHour, endMin] = workEndTime.split(':').map(Number);
+      const dailyWorkMinutes = (endHour * 60 + endMin) - (startHour * 60 + startMin);
+      const expectedMonthlyMinutes = dailyWorkMinutes * workingDaysPerMonth;
+      const expectedMonthlyHours = expectedMonthlyMinutes / 60;
+
+      // Récupérer tous les pointages du mois pour cet employé
+      const attendances = await Attendance.findAll({
+        where: {
+          employeeId,
+          tenantId,
+          date: { [Op.between]: [monthStart, monthEnd] }
+        },
+        order: [['date', 'ASC']]
+      });
+
+      // Calculer les heures réellement travaillées
+      let totalWorkedMinutes = 0;
+      let totalLateMinutes = 0;
+      let totalOvertimeMinutes = 0;
+      let presentDays = 0;
+      let lateDays = 0;
+      let absentDays = 0;
+
+      const attendanceDates = new Set();
+      for (const att of attendances) {
+        if (att.status === 'PRESENT' || att.status === 'LATE' || att.status === 'REMOTE') {
+          presentDays++;
+          attendanceDates.add(att.date);
+
+          // Calculer le temps travaillé
+          if (att.clockIn && att.clockOut) {
+            const clockIn = new Date(att.clockIn);
+            const clockOut = new Date(att.clockOut);
+            const workedMinutes = (clockOut - clockIn) / (1000 * 60);
+            totalWorkedMinutes += workedMinutes;
+          } else {
+            // Si pas de pointage, compter la journée complète
+            totalWorkedMinutes += dailyWorkMinutes;
+          }
+
+          // Retards
+          const lateMin = att.meta?.lateMinutes || 0;
+          if (lateMin > 0) {
+            totalLateMinutes += lateMin;
+            lateDays++;
+          }
+        } else if (att.status === 'ABSENT') {
+          absentDays++;
+        }
+      }
+
+      // Compter les absences implicites (jours ouvrés sans pointage)
+      const [year, monthNum] = month.split('-').map(Number);
+      const isCurrentMonth = month === new Date().toISOString().substring(0, 7);
+      const periodEnd = isCurrentMonth ? new Date() : new Date(year, monthNum, 1);
+
+      let implicitAbsentDays = 0;
+      let totalWorkDaysInPeriod = 0;
+      for (let d = new Date(year, monthNum - 1, 1); d < periodEnd; d.setDate(d.getDate() + 1)) {
+        const dow = d.getDay();
+        if (dow === 0 || dow === 6) continue; // Week-end
+        totalWorkDaysInPeriod++;
+        const dateStr = d.toISOString().substring(0, 10);
+        if (!attendanceDates.has(dateStr)) {
+          implicitAbsentDays++;
+        }
+      }
+
+      const totalAbsentDays = absentDays + implicitAbsentDays;
+      const totalWorkedHours = totalWorkedMinutes / 60;
+      const totalLateHours = totalLateMinutes / 60;
+
+      // Calculer le pourcentage de présence
+      const attendanceRate = totalWorkDaysInPeriod > 0
+        ? Math.round((presentDays / totalWorkDaysInPeriod) * 100)
+        : 100;
+
+      // Déterminer si l'employé est éligible au paiement complet
+      const isEligibleForFullPay = attendanceRate >= 100 && totalAbsentDays === 0 && totalLateMinutes === 0;
+      const isEligibleForPartialPay = attendanceRate >= 50;
+
+      // Calculer le salaire proportionnel
+      const baseSalary = parseFloat(activeContract.salary) || 0;
+      const expectedSalary = baseSalary;
+      const actualSalary = isEligibleForFullPay
+        ? baseSalary
+        : Math.round((presentDays / Math.max(totalWorkDaysInPeriod, 1)) * baseSalary);
+
+      const warnings = [];
+      if (totalLateMinutes > 0) {
+        warnings.push(`${totalLateMinutes} minutes de retard (${lateDays} jour(s))`);
+      }
+      if (totalAbsentDays > 0) {
+        warnings.push(`${totalAbsentDays} jour(s) d'absence (dont ${implicitAbsentDays} non pointé(s))`);
+      }
+      if (totalWorkedMinutes < expectedMonthlyMinutes && !isEligibleForFullPay) {
+        const deficitHours = ((expectedMonthlyMinutes - totalWorkedMinutes) / 60).toFixed(1);
+        warnings.push(`${deficitHours} heures non travaillées sur les ${expectedMonthlyHours}h attendues`);
+      }
+
+      return res.status(200).json({
+        employeeId,
+        employeeName: `${employee.firstName} ${employee.lastName}`,
+        month,
+        eligibility: {
+          isEligibleForFullPay,
+          isEligibleForPartialPay,
+          isBlocked: !isEligibleForPartialPay
+        },
+        attendance: {
+          presentDays,
+          totalAbsentDays,
+          implicitAbsentDays,
+          lateDays,
+          totalWorkDaysInPeriod,
+          attendanceRate
+        },
+        hours: {
+          expectedMonthlyHours: Math.round(expectedMonthlyHours * 100) / 100,
+          totalWorkedHours: Math.round(totalWorkedHours * 100) / 100,
+          totalLateHours: Math.round(totalLateHours * 100) / 100,
+          totalOvertimeHours: Math.round((attendances.reduce((s, a) => s + (a.overtimeMinutes || 0), 0)) / 60 * 100) / 100
+        },
+        salary: {
+          baseSalary,
+          expectedSalary,
+          actualSalary,
+          salaryRate: Math.round((actualSalary / Math.max(expectedSalary, 1)) * 100)
+        },
+        warnings,
+        canProceedToPayroll: isEligibleForPartialPay
+      });
+
+    } catch (error) {
+      console.error('Erreur validatePayrollEligibility:', error);
+      return res.status(500).json({ error: error.message });
+    }
+  }
+
+  // --- VÉRIFICATION GLOBALE AVANT GÉNÉRATION PAIE MENSUELLE ---
+  static async prePayrollCheck(req, res) {
+    try {
+      const { month } = req.query; // YYYY-MM
+      const tenantId = req.user.tenantId;
+
+      if (!month) {
+        return res.status(400).json({ error: 'month est requis (format YYYY-MM)' });
+      }
+
+      // Récupérer tous les employés actifs avec contrat actif
+      const employees = await Employee.findAll({
+        where: { tenantId, status: 'ACTIVE' },
+        include: [{
+          model: Contract,
+          as: 'contracts',
+          where: { status: 'ACTIVE' },
+          required: true
+        }]
+      });
+
+      const payrollSettings = await PayrollSettings.findOne({ where: { tenantId } });
+      const paymentDay = payrollSettings?.paymentDay || 28;
+
+      const results = [];
+      let readyCount = 0;
+      let warningCount = 0;
+      let blockedCount = 0;
+
+      for (const emp of employees) {
+        try {
+          // Appel interne avec mock de response
+          const mockRes = {
+            status: () => ({ json: (data) => data })
+          };
+          const mockReq = {
+            query: { employeeId: emp.id, month },
+            user: { tenantId }
+          };
+          const eligibility = await this.validatePayrollEligibility(mockReq, mockRes);
+
+          results.push(eligibility);
+
+          if (eligibility.eligibility?.isBlocked) {
+            blockedCount++;
+          } else if (!eligibility.eligibility?.isEligibleForFullPay) {
+            warningCount++;
+          } else {
+            readyCount++;
+          }
+        } catch (err) {
+          results.push({
+            employeeId: emp.id,
+            employeeName: `${emp.firstName} ${emp.lastName}`,
+            error: err.message
+          });
+          blockedCount++;
+        }
+      }
+
+      return res.status(200).json({
+        month,
+        paymentDay,
+        summary: {
+          totalEmployees: employees.length,
+          readyForFullPay: readyCount,
+          readyForPartialPay: warningCount,
+          blocked: blockedCount
+        },
+        employees: results
+      });
+
+    } catch (error) {
+      console.error('Erreur prePayrollCheck:', error);
+      return res.status(500).json({ error: error.message });
     }
   }
 }
