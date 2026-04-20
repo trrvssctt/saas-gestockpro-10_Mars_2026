@@ -76,6 +76,8 @@ router.post('/payrolls', checkPermission(['ADMIN','ACCOUNTANT','HR_MANAGER']), P
 router.get('/payrolls/:id', checkPermission(['ADMIN','ACCOUNTANT','HR_MANAGER']), PayrollController.get);
 router.post('/payrolls/:id/generate', checkPermission(['ADMIN','ACCOUNTANT','HR_MANAGER']), PayrollController.generatePaystub);
 router.post('/payroll/generate-monthly', checkPermission(['ADMIN','ACCOUNTANT','HR_MANAGER']), PayrollController.generateMonthlyPayroll);
+router.get('/payroll/validate-eligibility', checkPermission(['ADMIN','ACCOUNTANT','HR_MANAGER']), PayrollController.validatePayrollEligibility);
+router.get('/payroll/pre-payroll-check', checkPermission(['ADMIN','ACCOUNTANT','HR_MANAGER']), PayrollController.prePayrollCheck);
 
 // ========== PAYSLIPS (FICHES DE PAIE) ==========
 router.get('/payslips', checkPermission(['ADMIN','ACCOUNTANT','HR_MANAGER']), PayslipController.list);
