@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
-import { 
-  Lock, Mail, ArrowRight, ShieldCheck, AlertCircle, 
+import {
+  Lock, Mail, ArrowRight, ShieldCheck, AlertCircle,
   Eye, EyeOff, Zap, Check, ChevronLeft, RefreshCw,
   Building2, CreditCard, Sparkles, User as UserIcon,
   Star, WifiOff, X, MapPin, Phone, Briefcase, Info,
@@ -34,7 +34,7 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBackToLanding, initialM
   const [loginAttempts, setLoginAttempts] = useState(0);
   const [blockedUntil, setBlockedUntil] = useState<number | null>(null);
   const [timeRemaining, setTimeRemaining] = useState(0);
-  
+
   // États Auth
   const [loginEmail, setLoginEmail] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
@@ -51,7 +51,7 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBackToLanding, initialM
         const parsed = JSON.parse(saved);
         return Number(parsed.step) || 1;
       }
-    } catch {}
+    } catch { }
     return 1;
   });
 
@@ -79,7 +79,7 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBackToLanding, initialM
           paymentReference: '',
         };
       }
-    } catch {}
+    } catch { }
     return {
       planId: initialPlanId || '', companyName: '', siret: '', address: '', phone: '',
       paymentMethod: 'Wave', adminName: '', adminEmail: '', adminPassword: '',
@@ -96,7 +96,7 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBackToLanding, initialM
         const parsed = JSON.parse(saved);
         return !!(parsed.companyName || parsed.adminEmail);
       }
-    } catch {}
+    } catch { }
     return false;
   });
 
@@ -106,7 +106,7 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBackToLanding, initialM
     try {
       const { adminPassword: _pw, ...safeData } = regData;
       localStorage.setItem(REG_DRAFT_KEY, JSON.stringify({ ...safeData, step: regStep }));
-    } catch {}
+    } catch { }
   }, [regData, regStep, mode]);
 
   useEffect(() => {
@@ -121,7 +121,7 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBackToLanding, initialM
             const parsed = JSON.parse(saved);
             if (parsed.step && parsed.step > 1) setRegStep(parsed.step);
           }
-        } catch {}
+        } catch { }
       }
     }
     if (typeof initialRegStep === 'number') {
@@ -153,12 +153,12 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBackToLanding, initialM
   const checkLoginAttempts = (email: string) => {
     const attemptsKey = `login_attempts_${email}`;
     const blockedKey = `login_blocked_until_${email}`;
-    
+
     const attempts = parseInt(localStorage.getItem(attemptsKey) || '0');
     const blocked = parseInt(localStorage.getItem(blockedKey) || '0');
-    
+
     const now = Date.now();
-    
+
     if (blocked && now < blocked) {
       setBlockedUntil(blocked);
       setLoginAttempts(attempts);
@@ -171,7 +171,7 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBackToLanding, initialM
       setLoginAttempts(0);
       return true;
     }
-    
+
     setLoginAttempts(attempts);
     return attempts < 3;
   };
@@ -179,11 +179,11 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBackToLanding, initialM
   const recordFailedAttempt = (email: string) => {
     const attemptsKey = `login_attempts_${email}`;
     const blockedKey = `login_blocked_until_${email}`;
-    
+
     const attempts = parseInt(localStorage.getItem(attemptsKey) || '0') + 1;
     localStorage.setItem(attemptsKey, attempts.toString());
     setLoginAttempts(attempts);
-    
+
     if (attempts >= 3) {
       const blockUntil = Date.now() + (15 * 60 * 1000); // 15 minutes
       localStorage.setItem(blockedKey, blockUntil.toString());
@@ -203,12 +203,12 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBackToLanding, initialM
   // Timer pour le temps restant de blocage
   useEffect(() => {
     let interval: NodeJS.Timeout;
-    
+
     if (blockedUntil) {
       interval = setInterval(() => {
         const remaining = Math.max(0, Math.ceil((blockedUntil - Date.now()) / 1000));
         setTimeRemaining(remaining);
-        
+
         if (remaining === 0) {
           setBlockedUntil(null);
           setLoginAttempts(0);
@@ -218,7 +218,7 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBackToLanding, initialM
         }
       }, 1000);
     }
-    
+
     return () => {
       if (interval) clearInterval(interval);
     };
@@ -228,28 +228,28 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBackToLanding, initialM
   const generateStrongPassword = () => {
     const chars = {
       upper: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ',
-      lower: 'abcdefghijklmnopqrstuvwxyz', 
+      lower: 'abcdefghijklmnopqrstuvwxyz',
       numbers: '0123456789',
       symbols: '!@#$%^&*()_+-=[]{}|;:,.<>?'
     };
-    
+
     let password = '';
     // Au moins un caractère de chaque type
     password += chars.upper[Math.floor(Math.random() * chars.upper.length)];
     password += chars.lower[Math.floor(Math.random() * chars.lower.length)];
     password += chars.numbers[Math.floor(Math.random() * chars.numbers.length)];
     password += chars.symbols[Math.floor(Math.random() * chars.symbols.length)];
-    
+
     // Compléter avec 8 caractères aléatoires
     const allChars = chars.upper + chars.lower + chars.numbers + chars.symbols;
     for (let i = 0; i < 8; i++) {
       password += allChars[Math.floor(Math.random() * allChars.length)];
     }
-    
+
     // Mélanger le mot de passe
     password = password.split('').sort(() => Math.random() - 0.5).join('');
-    
-    setRegData({...regData, adminPassword: password});
+
+    setRegData({ ...regData, adminPassword: password });
     evaluatePasswordStrength(password);
   };
 
@@ -265,7 +265,7 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBackToLanding, initialM
       hasSymbol: /[!@#$%^&*()_+\-=\[\]{}|;:,.<>?]/.test(password),
       noRepeating: !/(..).*\1/.test(password)
     };
-    
+
     if (checks.length) score += 1;
     if (checks.lengthGood) score += 1;
     if (checks.hasUpper) score += 1;
@@ -273,10 +273,10 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBackToLanding, initialM
     if (checks.hasNumber) score += 1;
     if (checks.hasSymbol) score += 1;
     if (checks.noRepeating) score += 1;
-    
+
     let label = 'Très Faible';
     let color = 'bg-red-500';
-    
+
     if (score >= 6) {
       label = 'Très Fort';
       color = 'bg-emerald-500';
@@ -290,7 +290,7 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBackToLanding, initialM
       label = 'Faible';
       color = 'bg-orange-500';
     }
-    
+
     setPasswordStrength({ score, label, color });
   };
 
@@ -330,7 +330,7 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBackToLanding, initialM
     try {
       const endpoint = mode === 'SUPERADMIN' ? '/auth/superadmin/login' : '/auth/login';
       const data = await apiClient.post(endpoint, { email: loginEmail, password: loginPassword });
-      
+
       if (data.mfaRequired) {
         setTempUserId(data.tempUserId);
         setMode('MFA');
@@ -393,7 +393,7 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBackToLanding, initialM
 
       // Connexion réussie - réinitialiser les tentatives
       resetLoginAttempts(loginEmail);
-      
+
       authBridge.saveSession(user, data.token, data.sessionToken);
       onLoginSuccess(user);
     } catch (err: any) {
@@ -538,14 +538,13 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBackToLanding, initialM
     ) : null;
 
   const inputCls = (key: string) =>
-    `w-full bg-slate-50 border rounded-2xl pl-12 pr-6 py-4 text-sm font-bold outline-none focus:ring-4 transition-all ${
-      stepErrors[key]
-        ? 'border-rose-300 focus:ring-rose-500/10'
-        : 'border-slate-100 focus:ring-indigo-500/10'
+    `w-full bg-slate-50 border rounded-2xl pl-12 pr-6 py-4 text-sm font-bold outline-none focus:ring-4 transition-all ${stepErrors[key]
+      ? 'border-rose-300 focus:ring-rose-500/10'
+      : 'border-slate-100 focus:ring-indigo-500/10'
     }`;
 
   const renderRegistrationStep = () => {
-    switch(regStep) {
+    switch (regStep) {
       case 1:
         return (
           <div className="space-y-6 animate-in slide-in-from-right-4 duration-500">
@@ -578,7 +577,7 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBackToLanding, initialM
                             paymentReference: '',
                           });
                         }
-                      } catch {}
+                      } catch { }
                       // Utilise la valeur capturée au montage (avant que l'auto-save l'écrase)
                       setRegStep(savedDraftStep);
                     }}
@@ -601,9 +600,9 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBackToLanding, initialM
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {dynamicPlans.map(plan => (
-                <button 
+                <button
                   key={plan.id}
-                  onClick={() => setRegData({...regData, planId: plan.id})}
+                  onClick={() => setRegData({ ...regData, planId: plan.id })}
                   className={`p-6 rounded-[2rem] border-2 text-left transition-all relative group ${regData.planId === plan.id ? 'border-indigo-600 bg-indigo-50 shadow-inner' : 'border-slate-100 hover:border-indigo-200'}`}
                 >
                   {regData.planId === plan.id && <Check className="absolute top-4 right-4 text-indigo-600" size={18} />}
@@ -621,24 +620,24 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBackToLanding, initialM
       case 2:
         return (
           <div className="space-y-6 animate-in slide-in-from-right-4 duration-500">
-             <div className="mb-6">
+            <div className="mb-6">
               <h3 className="text-xl font-black text-slate-900 uppercase tracking-tight">Identité de la Structure</h3>
               <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">Information légale pour l'isolation du tenant</p>
             </div>
             <div className="space-y-4">
               <div>
-                <div className="relative"><Building2 className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-300" size={18} /><input type="text" value={regData.companyName} onChange={(e: React.ChangeEvent<HTMLInputElement>) => { setRegData({...regData, companyName: e.target.value}); setStepErrors((p: Record<string,string>) => ({...p, companyName: ''})); }} className={inputCls('companyName')} placeholder="Raison Sociale *" /></div>
+                <div className="relative"><Building2 className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-300" size={18} /><input type="text" value={regData.companyName} onChange={(e: React.ChangeEvent<HTMLInputElement>) => { setRegData({ ...regData, companyName: e.target.value }); setStepErrors((p: Record<string, string>) => ({ ...p, companyName: '' })); }} className={inputCls('companyName')} placeholder="Raison Sociale *" /></div>
                 {fieldErr('companyName')}
               </div>
               <div>
-                <div className="relative"><Shield className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-300" size={18} /><input type="text" value={regData.siret} onChange={(e: React.ChangeEvent<HTMLInputElement>) => { setRegData({...regData, siret: e.target.value}); setStepErrors((p: Record<string,string>) => ({...p, siret: ''})); }} className={inputCls('siret')} placeholder="N° SIRET / Registre Commerce" /></div>
+                <div className="relative"><Shield className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-300" size={18} /><input type="text" value={regData.siret} onChange={(e: React.ChangeEvent<HTMLInputElement>) => { setRegData({ ...regData, siret: e.target.value }); setStepErrors((p: Record<string, string>) => ({ ...p, siret: '' })); }} className={inputCls('siret')} placeholder="N° SIRET / Registre Commerce" /></div>
                 {fieldErr('siret')}
               </div>
               <div>
-                <div className="relative"><Phone className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-300" size={18} /><input type="tel" value={regData.phone} onChange={(e: React.ChangeEvent<HTMLInputElement>) => { setRegData({...regData, phone: e.target.value}); setStepErrors((p: Record<string,string>) => ({...p, phone: ''})); }} className={inputCls('phone')} placeholder="Téléphone Entreprise *" /></div>
+                <div className="relative"><Phone className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-300" size={18} /><input type="tel" value={regData.phone} onChange={(e: React.ChangeEvent<HTMLInputElement>) => { setRegData({ ...regData, phone: e.target.value }); setStepErrors((p: Record<string, string>) => ({ ...p, phone: '' })); }} className={inputCls('phone')} placeholder="Téléphone Entreprise *" /></div>
                 {fieldErr('phone')}
               </div>
-              <div className="relative"><MapPin className="absolute left-5 top-4 text-slate-300" size={18} /><textarea value={regData.address} onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setRegData({...regData, address: e.target.value})} className="w-full bg-slate-50 border border-slate-100 rounded-2xl pl-12 pr-6 py-4 text-sm font-bold outline-none focus:ring-4 focus:ring-indigo-500/10 min-h-[100px]" placeholder="Adresse du Siège Social" /></div>
+              <div className="relative"><MapPin className="absolute left-5 top-4 text-slate-300" size={18} /><textarea value={regData.address} onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setRegData({ ...regData, address: e.target.value })} className="w-full bg-slate-50 border border-slate-100 rounded-2xl pl-12 pr-6 py-4 text-sm font-bold outline-none focus:ring-4 focus:ring-indigo-500/10 min-h-[100px]" placeholder="Adresse du Siège Social" /></div>
             </div>
 
             <div className="flex gap-4 mt-8">
@@ -650,17 +649,17 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBackToLanding, initialM
       case 3:
         return (
           <div className="space-y-6 animate-in slide-in-from-right-4 duration-500">
-             <div className="mb-6">
+            <div className="mb-6">
               <h3 className="text-xl font-black text-slate-900 uppercase tracking-tight">Compte Propriétaire</h3>
               <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">Accès Maître de l'instance {regData.companyName}</p>
             </div>
             <div className="space-y-4">
               <div>
-                <div className="relative"><UserIcon className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-300" size={18} /><input type="text" value={regData.adminName} onChange={(e: React.ChangeEvent<HTMLInputElement>) => { setRegData({...regData, adminName: e.target.value}); setStepErrors((p: Record<string,string>) => ({...p, adminName: ''})); }} className={inputCls('adminName')} placeholder="Nom Complet *" /></div>
+                <div className="relative"><UserIcon className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-300" size={18} /><input type="text" value={regData.adminName} onChange={(e: React.ChangeEvent<HTMLInputElement>) => { setRegData({ ...regData, adminName: e.target.value }); setStepErrors((p: Record<string, string>) => ({ ...p, adminName: '' })); }} className={inputCls('adminName')} placeholder="Nom Complet *" /></div>
                 {fieldErr('adminName')}
               </div>
               <div>
-                <div className="relative"><Mail className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-300" size={18} /><input type="email" value={regData.adminEmail} onChange={(e: React.ChangeEvent<HTMLInputElement>) => { setRegData({...regData, adminEmail: e.target.value}); setStepErrors((p: Record<string,string>) => ({...p, adminEmail: ''})); }} className={inputCls('adminEmail')} placeholder="Email Administrateur *" /></div>
+                <div className="relative"><Mail className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-300" size={18} /><input type="email" value={regData.adminEmail} onChange={(e: React.ChangeEvent<HTMLInputElement>) => { setRegData({ ...regData, adminEmail: e.target.value }); setStepErrors((p: Record<string, string>) => ({ ...p, adminEmail: '' })); }} className={inputCls('adminEmail')} placeholder="Email Administrateur *" /></div>
                 {fieldErr('adminEmail')}
               </div>
 
@@ -672,9 +671,9 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBackToLanding, initialM
                     type={showPassword ? 'text' : 'password'}
                     value={regData.adminPassword}
                     onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
-                      setRegData({...regData, adminPassword: e.target.value});
+                      setRegData({ ...regData, adminPassword: e.target.value });
                       evaluatePasswordStrength(e.target.value);
-                      setStepErrors((p: Record<string,string>) => ({...p, adminPassword: ''}));
+                      setStepErrors((p: Record<string, string>) => ({ ...p, adminPassword: '' }));
                     }}
                     className={`w-full bg-slate-50 border rounded-2xl pl-12 pr-32 py-4 text-sm font-bold outline-none focus:ring-4 transition-all ${stepErrors.adminPassword ? 'border-rose-300 focus:ring-rose-500/10' : 'border-slate-100 focus:ring-indigo-500/10'}`}
                     placeholder="Clé d'Accès de Sécurité *"
@@ -712,12 +711,11 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBackToLanding, initialM
                   <div className="space-y-2">
                     <div className="flex justify-between items-center">
                       <span className="text-[8px] font-bold text-slate-400 uppercase tracking-widest">Force du mot de passe</span>
-                      <span className={`text-[8px] font-black uppercase tracking-widest ${
-                        passwordStrength.score >= 6 ? 'text-emerald-600' :
-                        passwordStrength.score >= 5 ? 'text-green-600' :
-                        passwordStrength.score >= 4 ? 'text-yellow-600' :
-                        passwordStrength.score >= 2 ? 'text-orange-600' : 'text-red-600'
-                      }`}>
+                      <span className={`text-[8px] font-black uppercase tracking-widest ${passwordStrength.score >= 6 ? 'text-emerald-600' :
+                          passwordStrength.score >= 5 ? 'text-green-600' :
+                            passwordStrength.score >= 4 ? 'text-yellow-600' :
+                              passwordStrength.score >= 2 ? 'text-orange-600' : 'text-red-600'
+                        }`}>
                         {passwordStrength.label}
                       </span>
                     </div>
@@ -735,10 +733,18 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBackToLanding, initialM
               <button type="button" onClick={() => setRegStep(2)} className="px-4 py-3 md:py-4 border-2 border-slate-100 text-slate-400 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-slate-50 transition-all">RETOUR</button>
               <button
                 type="button"
-                onClick={() => { if (validateStep3()) setRegStep(4); }}
+                onClick={() => {
+                  if (validateStep3()) {
+                    if (isFree) {
+                      handleFreeRegister();
+                    } else {
+                      setRegStep(4);
+                    }
+                  }
+                }}
                 className="flex-1 py-3 md:py-4 bg-slate-900 text-white rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-indigo-600 transition-all flex items-center justify-center gap-3 shadow-xl disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                PASSER AU PAIEMENT <ArrowRight size={18} />
+                {isFree ? (loading ? <RefreshCw className="animate-spin" size={18} /> : <>ACTIVER GRATUITEMENT <Sparkles size={18} /></>) : <>PASSER AU PAIEMENT <ArrowRight size={18} /></>}
               </button>
             </div>
           </div>
@@ -749,7 +755,7 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBackToLanding, initialM
   };
 
   const selectedPlan = dynamicPlans.find(p => p.id === regData.planId);
-  const isFree = !selectedPlan || selectedPlan.price === 0;
+  const isFree = !selectedPlan || Number(selectedPlan.price) === 0 || selectedPlan.id === 'FREE_TRIAL';
 
   const computeAmount = () => {
     if (!selectedPlan) return 0;
@@ -890,8 +896,8 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBackToLanding, initialM
         <div>
           <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-3">Durée de l'abonnement</p>
           <div className="grid grid-cols-3 gap-3">
-            {[{id:'1M',label:'1 Mois',disc:''},{id:'3M',label:'3 Mois',disc:'-10%'},{id:'1Y',label:'1 An',disc:'-20%'}].map(opt => (
-              <button key={opt.id} type="button" onClick={() => setRegData({...regData, period: opt.id})}
+            {[{ id: '1M', label: '1 Mois', disc: '' }, { id: '3M', label: '3 Mois', disc: '-10%' }, { id: '1Y', label: '1 An', disc: '-20%' }].map(opt => (
+              <button key={opt.id} type="button" onClick={() => setRegData({ ...regData, period: opt.id })}
                 className={`py-3 px-2 rounded-2xl border-2 text-center transition-all ${regData.period === opt.id ? 'border-indigo-600 bg-indigo-50' : 'border-slate-100 hover:border-slate-200'}`}>
                 <div className="text-[10px] font-black text-slate-800 uppercase">{opt.label}</div>
                 {opt.disc && <div className="text-[8px] font-bold text-emerald-600">{opt.disc}</div>}
@@ -904,7 +910,7 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBackToLanding, initialM
         <div>
           <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-3">Méthode de paiement</p>
           <div className="grid grid-cols-1 gap-3">
-            <button type="button" onClick={() => setRegData({...regData, paymentMethod: 'Wave'})}
+            <button type="button" onClick={() => setRegData({ ...regData, paymentMethod: 'Wave' })}
               className={`py-4 px-4 rounded-2xl border-2 font-black text-[10px] uppercase tracking-widest transition-all flex items-center justify-center gap-2 ${regData.paymentMethod === 'Wave' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-100 text-slate-500 hover:border-slate-200'}`}>
               <Smartphone size={16} /> Wave
             </button>
@@ -934,7 +940,7 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBackToLanding, initialM
                 <input
                   type="text"
                   value={regData.paymentReference}
-                  onChange={e => setRegData({...regData, paymentReference: e.target.value})}
+                  onChange={e => setRegData({ ...regData, paymentReference: e.target.value })}
                   className="w-full bg-slate-50 border border-slate-100 rounded-2xl pl-12 pr-6 py-4 text-sm font-bold outline-none focus:ring-4 focus:ring-blue-500/10"
                   placeholder="Collez ici la référence Wave (ex : W-XXXXXXXX)"
                 />
@@ -990,10 +996,10 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBackToLanding, initialM
         <ChevronLeft size={16} /> Accueil
       </button>
       <div className="absolute top-[-20%] left-[-10%] w-[60%] h-[60%] bg-indigo-600/10 rounded-full blur-[120px]"></div>
-      
+
       <div className={`w-full transition-all duration-700 ${mode === 'REGISTER' ? 'max-w-5xl' : 'max-w-md'}`}>
         <div className="text-center mb-6 md:mb-10">
-          
+
           <img src={logo} alt="GeStockPro" className="mx-auto mb-4 h-14" />
           <h1 className="text-2xl md:text-3xl font-black text-white uppercase tracking-tighter">
             {mode === 'REGISTER' ? 'Déploiement Instance SaaS' : mode === 'SUPERADMIN' ? 'Console Maître Kernel' : mode === 'MFA' ? 'Vérification de Sécurité' : 'Accès Privé GeStock'}
@@ -1037,19 +1043,18 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBackToLanding, initialM
                   </div>
                 </div>
               )}
-              
+
               {/* Indicateur de tentatives */}
               {loginAttempts > 0 && !blockedUntil && (
-                <div className={`p-3 rounded-2xl text-center text-xs font-bold ${
-                  loginAttempts === 1 ? 'bg-yellow-50 text-yellow-700 border border-yellow-200' :
-                  loginAttempts === 2 ? 'bg-orange-50 text-orange-700 border border-orange-200' :
-                  'bg-rose-50 text-rose-700 border border-rose-200'
-                }`}>
+                <div className={`p-3 rounded-2xl text-center text-xs font-bold ${loginAttempts === 1 ? 'bg-yellow-50 text-yellow-700 border border-yellow-200' :
+                    loginAttempts === 2 ? 'bg-orange-50 text-orange-700 border border-orange-200' :
+                      'bg-rose-50 text-rose-700 border border-rose-200'
+                  }`}>
                   ⚠️ {loginAttempts}/3 tentatives utilisées
                   {loginAttempts === 2 && ' - Dernière chance avant blocage'}
                 </div>
               )}
-              
+
               <div className="space-y-5">
                 <div className="relative"><Mail className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-300" size={18} /><input type="email" required value={loginEmail} onChange={e => setLoginEmail(e.target.value.toLowerCase())} disabled={!!(blockedUntil && timeRemaining > 0)} className="w-full bg-slate-50 border border-slate-100 rounded-2xl pl-12 pr-6 py-4 text-sm font-bold outline-none focus:ring-4 focus:ring-indigo-500/10 transition-all disabled:opacity-50 disabled:cursor-not-allowed" placeholder={mode === 'SUPERADMIN' ? 'MASTER_ID' : 'Email Opérateur'} /></div>
                 <div className="relative"><Lock className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-300" size={18} /><input type={showPassword ? 'text' : 'password'} required value={loginPassword} onChange={e => setLoginPassword(e.target.value)} disabled={!!(blockedUntil && timeRemaining > 0)} className="w-full bg-slate-50 border border-slate-100 rounded-2xl pl-12 pr-14 py-4 text-sm font-bold outline-none focus:ring-4 focus:ring-indigo-500/10 transition-all disabled:opacity-50 disabled:cursor-not-allowed" placeholder="ACCESS_KEY" /><button type="button" onClick={() => setShowPassword(!showPassword)} disabled={!!(blockedUntil && timeRemaining > 0)} className="absolute right-5 top-1/2 -translate-y-1/2 text-slate-300 hover:text-indigo-600 disabled:cursor-not-allowed">{showPassword ? <EyeOff size={18} /> : <Eye size={18} />}</button></div>
@@ -1058,32 +1063,32 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBackToLanding, initialM
             </form>
           ) : mode === 'MFA' ? (
             <form onSubmit={handleVerifyMFA} className="p-6 md:p-16 space-y-6 md:space-y-8 animate-in zoom-in-95">
-               <div className="text-center space-y-4">
-                  <div className="w-20 h-20 bg-indigo-50 text-indigo-600 rounded-3xl flex items-center justify-center mx-auto shadow-inner"><Smartphone size={40} className="animate-bounce" /></div>
-                  <h3 className="text-lg font-black uppercase text-slate-800">Double Authentification</h3>
-                  <p className="text-[10px] text-slate-400 font-bold uppercase leading-relaxed px-4">Un code de sécurité à 6 chiffres a été généré pour sécuriser votre accès.</p>
-               </div>
-               <div className="space-y-4">
-                  <input 
-                    type="text" required maxLength={6} value={mfaCode} onChange={e => setMfaCode(e.target.value.replace(/\D/g, ''))}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-2xl py-5 text-center text-2xl sm:text-3xl font-black tracking-[0.3em] sm:tracking-[0.5em] outline-none focus:ring-4 focus:ring-indigo-500/10"
-                    placeholder="000000"
-                  />
-                  <button type="submit" disabled={loading || mfaCode.length !== 6} className="w-full py-5 bg-indigo-600 text-white rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl hover:bg-slate-900 transition-all flex items-center justify-center gap-3">
-                    {loading ? <RefreshCw className="animate-spin" size={18} /> : <>VÉRIFIER L'IDENTITÉ <ArrowRight size={18} /></>}
-                  </button>
-               </div>
-               <button type="button" onClick={() => setMode('LOGIN')} className="w-full text-[10px] font-black text-slate-400 uppercase tracking-widest hover:text-indigo-600 transition-colors">Annuler la session</button>
+              <div className="text-center space-y-4">
+                <div className="w-20 h-20 bg-indigo-50 text-indigo-600 rounded-3xl flex items-center justify-center mx-auto shadow-inner"><Smartphone size={40} className="animate-bounce" /></div>
+                <h3 className="text-lg font-black uppercase text-slate-800">Double Authentification</h3>
+                <p className="text-[10px] text-slate-400 font-bold uppercase leading-relaxed px-4">Un code de sécurité à 6 chiffres a été généré pour sécuriser votre accès.</p>
+              </div>
+              <div className="space-y-4">
+                <input
+                  type="text" required maxLength={6} value={mfaCode} onChange={e => setMfaCode(e.target.value.replace(/\D/g, ''))}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-2xl py-5 text-center text-2xl sm:text-3xl font-black tracking-[0.3em] sm:tracking-[0.5em] outline-none focus:ring-4 focus:ring-indigo-500/10"
+                  placeholder="000000"
+                />
+                <button type="submit" disabled={loading || mfaCode.length !== 6} className="w-full py-5 bg-indigo-600 text-white rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl hover:bg-slate-900 transition-all flex items-center justify-center gap-3">
+                  {loading ? <RefreshCw className="animate-spin" size={18} /> : <>VÉRIFIER L'IDENTITÉ <ArrowRight size={18} /></>}
+                </button>
+              </div>
+              <button type="button" onClick={() => setMode('LOGIN')} className="w-full text-[10px] font-black text-slate-400 uppercase tracking-widest hover:text-indigo-600 transition-colors">Annuler la session</button>
             </form>
           ) : (
             <div className="flex flex-col lg:grid lg:grid-cols-12">
               {/* Barre de progression mobile (inscription) */}
               <div className="flex lg:hidden items-center justify-between px-5 py-3 bg-slate-900 text-white">
                 <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">
-                  {[{step:1,label:'Moteur'},{step:2,label:'Entreprise'},{step:3,label:'Admin'},{step:4,label:'Paiement'}].find(s=>s.step===regStep)?.label}
+                  {[{ step: 1, label: 'Moteur' }, { step: 2, label: 'Entreprise' }, { step: 3, label: 'Admin' }, { step: 4, label: 'Paiement' }].find(s => s.step === regStep)?.label}
                 </span>
                 <div className="flex items-center gap-1.5">
-                  {[1,2,3,4].map(s => (
+                  {[1, 2, 3, 4].map(s => (
                     <div key={s} className={`h-1.5 rounded-full transition-all duration-500 ${regStep === s ? 'w-6 bg-white' : regStep > s ? 'w-3 bg-emerald-400' : 'w-3 bg-slate-600'}`} />
                   ))}
                 </div>
@@ -1102,7 +1107,7 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBackToLanding, initialM
           )}
 
           <div className="px-5 md:px-10 py-5 md:py-8 bg-slate-50 border-t border-slate-100 flex flex-col sm:flex-row gap-3 items-center justify-center">
-           
+
             {mode === 'LOGIN' && (
               <button type="button" onClick={() => { setMode('REGISTER'); setRegStep(1); }} className="text-[11px] font-black text-indigo-600 hover:text-indigo-800 transition-colors uppercase tracking-widest flex items-center gap-3">
                 <Sparkles size={16} /> Créer un espace entreprise
