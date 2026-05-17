@@ -30,6 +30,7 @@ import contactRoutes, { adminRouter as contactAdminRoutes } from './contact.rout
 import supportRoutes from './support.routes.js';
 import supplierRoutes from './suppliers.routes.js';
 import deliveryRoutes from './deliveries.routes.js';
+import recurringRoutes from './recurring.routes.js';
 
 const router = Router();
 
@@ -80,6 +81,7 @@ router.use('/upload', tenantIsolation, uploadRoutes);
 router.use('/support', tenantIsolation, supportRoutes);
 router.use('/suppliers', tenantIsolation, supplierRoutes);
 router.use('/deliveries', tenantIsolation, deliveryRoutes);
+router.use('/recurring', tenantIsolation, recurringRoutes);
 
 // Subscription upgrade (tenant ADMIN → PENDING, validated by SuperAdmin)
 router.post('/subscription/upgrade', tenantIsolation, checkPermission(['ADMIN']), SubscriptionController.upgradePlan);
