@@ -2,6 +2,7 @@
 import { Sale, SaleItem, Payment, StockItem, ProductMovement, Customer, AuditLog, Service, Invoice, InvoiceItem } from '../models/index.js';
 import { InvoiceService } from '../services/InvoiceService.js';
 import { sequelize } from '../config/database.js';
+import { RecurringContractController } from './RecurringContractController.js';
 
 
 
@@ -233,6 +234,14 @@ export class SaleController {
         const newPaid = parseFloat(sale.amountPaid) + parseFloat(amount);
         const newStatus = newPaid >= parseFloat(sale.totalTtc) ? 'TERMINE' : 'EN_COURS';
         await sale.update({ amountPaid: newPaid, status: newStatus });
+        // Sync contrat récurrent
+        if (sale.recurringInstallmentId) {
+          if (newStatus === 'TERMINE') {
+            await RecurringContractController.syncInstallmentPaid(sale.recurringInstallmentId, req.user.tenantId);
+          } else {
+            await RecurringContractController.syncContractPartialPaid(sale.recurringInstallmentId, newPaid, req.user.tenantId);
+          }
+        }
       } else {
         // Chèque / virement → passer en BROUILLON si pas encore encaissé
         if (sale.status === 'EN_COURS' && parseFloat(sale.amountPaid) === 0) {
@@ -273,6 +282,13 @@ export class SaleController {
             const newPaid = parseFloat(sale.amountPaid) + parseFloat(payment.amount);
             const newSaleStatus = newPaid >= parseFloat(sale.totalTtc) ? 'TERMINE' : 'EN_COURS';
             await sale.update({ amountPaid: newPaid, status: newSaleStatus });
+            if (sale.recurringInstallmentId) {
+              if (newSaleStatus === 'TERMINE') {
+                await RecurringContractController.syncInstallmentPaid(sale.recurringInstallmentId, req.user.tenantId);
+              } else {
+                await RecurringContractController.syncContractPartialPaid(sale.recurringInstallmentId, newPaid, req.user.tenantId);
+              }
+            }
           }
           // Paiement rejeté/impayé alors qu'il était déjà PAID → décréditer
           if (['REJECTED', 'FAILED'].includes(status) && prevStatus === 'PAID') {

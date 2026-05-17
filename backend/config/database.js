@@ -388,6 +388,80 @@ export const connectDB = async () => {
       console.warn('⚠️ Note correction statuts paiements:', statErr.message);
     }
 
+    // Colonnes récurrents sur sales et recurring_installments
+    try {
+      await sequelize.query(`
+        ALTER TABLE IF EXISTS sales
+          ADD COLUMN IF NOT EXISTS recurring_installment_id UUID;
+        ALTER TABLE IF EXISTS recurring_installments
+          ADD COLUMN IF NOT EXISTS generated_sale_id UUID;
+      `, { type: QueryTypes.RAW });
+      console.log('✅ Colonnes recurring_installment_id / generated_sale_id vérifiées');
+    } catch (rcErr) {
+      console.warn('⚠️ Note colonnes recurring:', rcErr.message);
+    }
+
+    // Colonne service_items (JSON) pour les contrats récurrents multi-services
+    try {
+      await sequelize.query(`
+        ALTER TABLE IF EXISTS recurring_contracts
+          ADD COLUMN IF NOT EXISTS service_items JSONB DEFAULT NULL;
+      `, { type: QueryTypes.RAW });
+      console.log('✅ Colonne service_items vérifiée');
+    } catch (siErr) {
+      console.warn('⚠️ Note colonne service_items:', siErr.message);
+    }
+
+    // Tables contrats récurrents (facturation par échéances)
+    try {
+      await sequelize.query(`
+        CREATE TABLE IF NOT EXISTS recurring_contracts (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          tenant_id UUID NOT NULL,
+          customer_id UUID,
+          walkin_name VARCHAR(150),
+          walkin_phone VARCHAR(50),
+          service_id UUID,
+          title VARCHAR(255) NOT NULL,
+          description TEXT,
+          frequency VARCHAR(20) NOT NULL DEFAULT 'MENSUEL',
+          start_date DATE NOT NULL,
+          end_date DATE NOT NULL,
+          number_of_installments INTEGER NOT NULL,
+          installment_amount NUMERIC(15,2) NOT NULL,
+          total_amount NUMERIC(15,2) NOT NULL,
+          amount_paid NUMERIC(15,2) DEFAULT 0,
+          status VARCHAR(20) NOT NULL DEFAULT 'ACTIF',
+          notes TEXT,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        CREATE INDEX IF NOT EXISTS idx_recurring_contracts_tenant ON recurring_contracts(tenant_id);
+        CREATE INDEX IF NOT EXISTS idx_recurring_contracts_customer ON recurring_contracts(customer_id);
+
+        CREATE TABLE IF NOT EXISTS recurring_installments (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          tenant_id UUID NOT NULL,
+          contract_id UUID NOT NULL REFERENCES recurring_contracts(id) ON DELETE CASCADE,
+          installment_number INTEGER NOT NULL,
+          due_date DATE NOT NULL,
+          amount NUMERIC(15,2) NOT NULL,
+          status VARCHAR(20) NOT NULL DEFAULT 'EN_ATTENTE',
+          paid_at TIMESTAMPTZ,
+          payment_method VARCHAR(20),
+          payment_reference VARCHAR(100),
+          notes TEXT,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+        CREATE INDEX IF NOT EXISTS idx_recurring_installments_contract ON recurring_installments(contract_id);
+        CREATE INDEX IF NOT EXISTS idx_recurring_installments_tenant_due ON recurring_installments(tenant_id, due_date);
+      `, { type: QueryTypes.RAW });
+      console.log('✅ Tables contrats récurrents vérifiées');
+    } catch (recurringErr) {
+      console.warn('⚠️ Note tables recurring:', recurringErr.message);
+    }
+
     // 2. Connexion & Sync Registry IA (MySQL)
     await sequelize_db_template.authenticate();
     console.log('✅ Registry IA Connecté (MySQL)');
