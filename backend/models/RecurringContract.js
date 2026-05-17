@@ -12,6 +12,7 @@ RecurringContract.init({
   walkinPhone: { type: DataTypes.STRING(50), allowNull: true, field: 'walkin_phone' },
   serviceId: { type: DataTypes.UUID, allowNull: true, field: 'service_id' },
   serviceItems: { type: DataTypes.JSON, allowNull: true, field: 'service_items' },
+  paymentDay: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 5, field: 'payment_day' },
   title: { type: DataTypes.STRING(255), allowNull: false },
   description: { type: DataTypes.TEXT, allowNull: true },
   // Fréquence des échéances
