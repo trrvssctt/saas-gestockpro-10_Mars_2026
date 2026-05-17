@@ -69,6 +69,7 @@ const Layout: React.FC<LayoutProps> = ({
     { id: 'suppliers', label: 'Fournisseurs', icon: Truck },
     { id: 'deliveries', label: 'Livraisons', icon: Package },
     { id: 'sales', label: 'Ventes & Factures', icon: FileText },
+    { id: 'recurring', label: 'Contrats Récurrents', icon: Calendar },
     { id: 'recovery', label: 'Recouvrement', icon: TrendingDown },
     { id: 'payments', label: 'Trésorerie', icon: Wallet },
     { id: 'governance', label: 'Gouvernance IAM', icon: ShieldHalf },

@@ -622,12 +622,14 @@ const Sales = ({ currency, user, tenantSettings, plan }: { currency: string, use
                 const { payRate, delivRate, deliveredQty, totalQty } = getRates(sale);
                 const isAnnule = sale.status === 'ANNULE';
                 const isBrouillon = sale.status === 'BROUILLON';
+                const isRecurring = !!sale.recurringInstallmentId;
                 return (
-                  <tr key={sale.id} className={`hover:bg-slate-50/50 transition-all group ${isAnnule ? 'bg-rose-50/20 opacity-60' : isBrouillon ? 'bg-amber-50/30' : ''}`}>
+                  <tr key={sale.id} className={`hover:bg-slate-50/50 transition-all group ${isAnnule ? 'bg-rose-50/20 opacity-60' : isBrouillon ? 'bg-amber-50/30' : isRecurring ? 'bg-violet-50/30' : ''}`}>
                     <td className="px-3 md:px-8 py-3 md:py-5">
-                      <p className={`font-mono text-xs font-black ${isAnnule ? 'text-rose-400 line-through' : isBrouillon ? 'text-amber-600' : 'text-indigo-600'}`}>#{sale.reference}</p>
+                      <p className={`font-mono text-xs font-black ${isAnnule ? 'text-rose-400 line-through' : isBrouillon ? 'text-amber-600' : sale.recurringInstallmentId ? 'text-violet-600' : 'text-indigo-600'}`}>#{sale.reference}</p>
                       <p className="text-[9px] text-slate-400 font-bold mt-1">{new Date(sale.createdAt).toLocaleDateString()}</p>
                       {isBrouillon && <span className="inline-flex items-center gap-1 mt-1 px-2 py-0.5 bg-amber-100 text-amber-700 text-[7px] font-black rounded-full uppercase tracking-widest"><Clock size={8}/> Brouillon</span>}
+                      {sale.recurringInstallmentId && <span className="inline-flex items-center gap-1 mt-1 px-2 py-0.5 bg-violet-100 text-violet-700 text-[7px] font-black rounded-full uppercase tracking-widest"><Calendar size={8}/> Contrat Récurrent</span>}
                     </td>
                     <td className="px-3 md:px-8 py-3 md:py-5">
                       <div className="flex items-center gap-2">
@@ -876,6 +878,7 @@ const Sales = ({ currency, user, tenantSettings, plan }: { currency: string, use
                         <p className="text-[10px] text-indigo-400 font-bold uppercase tracking-widest">{new Date(selectedSaleDetails.createdAt).toLocaleString('fr-FR')}</p>
                         {selectedSaleDetails.status === 'ANNULE' && <span className="px-2 py-0.5 bg-rose-500 text-white text-[8px] font-black rounded uppercase">ANNULÉE</span>}
                         {selectedSaleDetails.status === 'BROUILLON' && <span className="px-2 py-0.5 bg-amber-400 text-white text-[8px] font-black rounded uppercase flex items-center gap-1"><Clock size={9}/> Brouillon · En attente d'encaissement</span>}
+                        {selectedSaleDetails.recurringInstallmentId && <span className="px-2 py-0.5 bg-violet-600 text-white text-[8px] font-black rounded uppercase flex items-center gap-1"><Calendar size={9}/> Contrat Récurrent</span>}
                       </div>
                     </div>
                  </div>
@@ -1035,7 +1038,7 @@ const Sales = ({ currency, user, tenantSettings, plan }: { currency: string, use
                     )}
 
                     <div className="space-y-3">
-                       {selectedSaleDetails.status !== 'ANNULE' && parseFloat(selectedSaleDetails.amountPaid) === 0 && !selectedSaleDetails.items.some((i:any) => (i.quantityDelivered || 0) > 0) && (
+                       {selectedSaleDetails.status !== 'ANNULE' && !selectedSaleDetails.recurringInstallmentId && parseFloat(selectedSaleDetails.amountPaid) === 0 && !selectedSaleDetails.items.some((i:any) => (i.quantityDelivered || 0) > 0) && (
                           <button onClick={() => handleEditSaleRequest(selectedSaleDetails)} className="w-full py-4 bg-amber-500 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-lg flex items-center justify-center gap-3 hover:bg-amber-600 transition-all"><Edit3 size={16}/> MODIFIER LES ARTICLES</button>
                        )}
                        
