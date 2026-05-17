@@ -80,6 +80,7 @@ const RecurringContracts: React.FC<RecurringContractsProps> = ({ currency, onNav
     title: '', description: '', customerId: '', walkinName: '', walkinPhone: '',
     serviceItems: [] as { serviceId: string; name: string; unitPrice: string; quantity: number }[],
     frequency: 'MENSUEL',
+    paymentDay: 5,
     startDate: new Date().toISOString().split('T')[0],
     endDate: '', numberOfInstallments: 1, installmentAmount: '', notes: ''
   };
@@ -107,13 +108,17 @@ const RecurringContracts: React.FC<RecurringContractsProps> = ({ currency, onNav
   const triggerGenerate = async () => {
     setGenerating(true);
     try {
+      // 1. Marquer EN_RETARD toutes les échéances dont la date est dépassée
+      await apiClient.post('/recurring/mark-overdue', {}).catch(() => {});
+      // 2. Générer les factures pour les échéances à venir
       const res = await apiClient.post('/recurring/generate-sales', {});
       if (res.generated > 0) {
         setGeneratedCount(res.generated);
         showToast(`${res.generated} facture(s) auto-générée(s) dans Ventes !`, 'success');
-        await fetchAll(true);
         setTimeout(() => setGeneratedCount(null), 5000);
       }
+      // Toujours rafraîchir pour refléter les nouveaux statuts EN_RETARD
+      await fetchAll(true);
     } catch {
       // silencieux
     } finally {
@@ -376,6 +381,7 @@ const RecurringContracts: React.FC<RecurringContractsProps> = ({ currency, onNav
       walkinPhone: contract.walkinPhone || contract.walkin_phone || '',
       serviceItems: existingItems,
       frequency: contract.frequency || 'MENSUEL',
+      paymentDay: contract.paymentDay || contract.payment_day || 5,
       startDate: contract.startDate || contract.start_date || '',
       endDate: contract.endDate || contract.end_date || '',
       numberOfInstallments: contract.numberOfInstallments || contract.number_of_installments || 1,
@@ -1151,25 +1157,61 @@ const RecurringContracts: React.FC<RecurringContractsProps> = ({ currency, onNav
                 )}
               </div>
 
-              {/* Fréquence */}
-              <div>
-                <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-3">Fréquence des échéances *</label>
-                <div className="grid grid-cols-3 gap-3">
-                  {Object.entries(FREQ_LABELS).map(([val, f]) => (
-                    <button
-                      key={val}
-                      onClick={() => setForm(ff => ({ ...ff, frequency: val }))}
-                      className={`py-4 px-3 rounded-xl border-2 transition-all ${
-                        form.frequency === val
-                          ? 'border-indigo-500 bg-indigo-50 text-indigo-700 shadow-sm'
-                          : 'border-slate-200 text-slate-600 hover:border-indigo-300'
-                      }`}
-                    >
-                      <p className="font-black text-sm">{f.short}</p>
-                      <p className="text-xs mt-0.5 font-medium opacity-75">{f.label}</p>
-                    </button>
-                  ))}
+              {/* Fréquence + Jour d'échéance */}
+              <div className="grid grid-cols-1 gap-4">
+                <div>
+                  <label className="block text-xs font-black text-slate-400 uppercase tracking-widest mb-3">Fréquence des échéances *</label>
+                  <div className="grid grid-cols-3 gap-3">
+                    {Object.entries(FREQ_LABELS).map(([val, f]) => (
+                      <button
+                        key={val}
+                        type="button"
+                        onClick={() => setForm(ff => ({ ...ff, frequency: val }))}
+                        className={`py-4 px-3 rounded-xl border-2 transition-all ${
+                          form.frequency === val
+                            ? 'border-indigo-500 bg-indigo-50 text-indigo-700 shadow-sm'
+                            : 'border-slate-200 text-slate-600 hover:border-indigo-300'
+                        }`}
+                      >
+                        <p className="font-black text-sm">{f.short}</p>
+                        <p className="text-xs mt-0.5 font-medium opacity-75">{f.label}</p>
+                      </button>
+                    ))}
+                  </div>
                 </div>
+
+                {/* Jour fixe d'échéance — masqué pour HEBDOMADAIRE */}
+                {form.frequency !== 'HEBDOMADAIRE' && (
+                  <div className="bg-indigo-50 border border-indigo-200 rounded-2xl p-4 flex items-center gap-4">
+                    <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center shrink-0">
+                      <Calendar size={18} className="text-white" />
+                    </div>
+                    <div className="flex-1">
+                      <p className="text-xs font-black text-indigo-700 mb-0.5">Jour fixe d'échéance</p>
+                      <p className="text-[10px] text-indigo-500">
+                        Chaque échéance tombera le <strong>{form.paymentDay}</strong> du mois.
+                        {form.startDate && new Date(form.startDate + 'T00:00:00').getDate() >= form.paymentDay
+                          ? ` (départ le ${form.startDate} → 1ʳᵉ échéance le mois suivant)`
+                          : form.startDate
+                            ? ` (départ le ${form.startDate} → 1ʳᵉ échéance ce mois-ci)`
+                            : ''}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => setForm(f => ({ ...f, paymentDay: Math.max(1, f.paymentDay - 1) }))}
+                        className="w-8 h-8 rounded-lg bg-white border border-indigo-200 text-indigo-700 font-black text-sm flex items-center justify-center hover:bg-indigo-100 transition-all"
+                      >−</button>
+                      <span className="w-10 text-center text-xl font-black text-indigo-700">{form.paymentDay}</span>
+                      <button
+                        type="button"
+                        onClick={() => setForm(f => ({ ...f, paymentDay: Math.min(28, f.paymentDay + 1) }))}
+                        className="w-8 h-8 rounded-lg bg-white border border-indigo-200 text-indigo-700 font-black text-sm flex items-center justify-center hover:bg-indigo-100 transition-all"
+                      >+</button>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* ── Calendrier — Contrôles poussés ── */}
@@ -1590,6 +1632,7 @@ const RecurringContracts: React.FC<RecurringContractsProps> = ({ currency, onNav
                         { label: 'Date de début', value: new Date(showDetail.startDate + 'T00:00:00').toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' }) },
                         { label: 'Date de fin', value: new Date(showDetail.endDate + 'T00:00:00').toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' }) },
                         { label: 'Fréquence', value: FREQ_LABELS[showDetail.frequency]?.label },
+                        ...(showDetail.frequency !== 'HEBDOMADAIRE' ? [{ label: 'Jour d\'échéance', value: `Le ${showDetail.paymentDay || 5} de chaque mois` }] : []),
                         { label: 'Nb. échéances', value: `${showDetail.numberOfInstallments} échéance(s)` },
                         { label: 'Créé le', value: new Date(showDetail.createdAt).toLocaleDateString('fr-FR') },
                       ].map(kv => (
