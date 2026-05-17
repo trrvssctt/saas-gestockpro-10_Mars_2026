@@ -46,6 +46,7 @@ import DashboardTour, { shouldShowTour } from './components/DashboardTour';
 import AIAnalysis from './components/AIAnalysis';
 import { StripeSuccessPage, StripeCancelPage, StripeErrorPage } from './components/StripeRedirect';
 import Support from './components/Support';
+import RecurringContracts from './components/RecurringContracts';
 import Info from './components/Info';
 import { MOCK_USERS, MOCK_TENANTS, SUBSCRIPTION_PLANS } from './constants';
 import { UserRole, AppSettings, User, Tenant, SubscriptionPlan } from './types';
@@ -662,6 +663,7 @@ const App: React.FC = () => {
       case 'services': return <Services currency={appSettings.currency} />;
       case 'recovery': return <Recovery currency={appSettings.currency} />;
       case 'payments': return <Payments currency={appSettings.currency} tenantSettings={appSettings} />;
+      case 'recurring': return <RecurringContracts currency={appSettings.currency} onNavigate={handleContextualNavigate} tenantSettings={appSettings} />;
       case 'my-leaves': return <LeaveManagement onNavigate={handleContextualNavigate} user={currentUser} />;
       case 'employee-pointage': {
         const roles = Array.isArray((currentUser as any).roles) ? (currentUser as any).roles : [currentUser.role];
