@@ -10,13 +10,14 @@ export class AdminController {
    */
   static async getGlobalDashboard(req, res) {
     try {
-      // ── Period params: ?year=2024 &month=3 &day=15 &week=12 &semester=1 ───
+      // ── Period params: ?year=2024 &month=3 &day=15 &week=12 &semester=1 &quarter=2 ───
       const now = new Date();
       const filterYear     = req.query.year     ? parseInt(req.query.year,     10) : null;
       const filterMonth    = req.query.month    ? parseInt(req.query.month,    10) : null;
       const filterDay      = req.query.day      ? parseInt(req.query.day,      10) : null;
       const filterWeek     = req.query.week     ? parseInt(req.query.week,     10) : null;
       const filterSemester = req.query.semester ? parseInt(req.query.semester, 10) : null;
+      const filterQuarter  = req.query.quarter  ? parseInt(req.query.quarter,  10) : null;
 
       // Build period boundaries
       let periodStart = null;
@@ -30,6 +31,10 @@ export class AdminController {
       } else if (filterYear && filterSemester) {
         periodStart = filterSemester === 1 ? new Date(filterYear, 0, 1) : new Date(filterYear, 6, 1);
         periodEnd   = filterSemester === 1 ? new Date(filterYear, 6, 1) : new Date(filterYear + 1, 0, 1);
+      } else if (filterYear && filterQuarter) {
+        const qStart = [0, 3, 6, 9][filterQuarter - 1];
+        periodStart = new Date(filterYear, qStart, 1);
+        periodEnd   = new Date(filterYear, qStart + 3, 1);
       } else if (filterYear) {
         periodStart = new Date(filterYear, 0, 1);
         periodEnd   = new Date(filterYear + 1, 0, 1);
@@ -64,25 +69,25 @@ export class AdminController {
       const totalSalesCount = await Sale.count({ where: salesWhere });
       const totalRevenue    = parseFloat(await Sale.sum('totalTtc', { where: salesWhere }) || 0);
 
-      // totalCollected = paiements encaissés dans la période
-      // Règle : tout paiement non-chèque est encaissé ; un chèque n'est encaissé qu'au statut PAID
-      const chequesPendingStatusList = ['PENDING', 'REGISTERED', 'DEPOSITED', 'PROCESSING'];
+      // totalCollected = paiements réellement encaissés dans la période
+      // Règle : espèces/mobile = toujours encaissé ; chèque et virement = seulement au statut PAID
+      const PENDING_METHODS = ['CHEQUE', 'TRANSFER'];
+      const PENDING_STATUSES = ['PENDING', 'REGISTERED', 'DEPOSITED', 'PROCESSING'];
       const encaishedWhere = {
         ...withPeriod({ saleId: { [Op.ne]: null } }),
         [Op.or]: [
-          { method: { [Op.ne]: 'CHEQUE' } },
-          { method: 'CHEQUE', status: 'PAID' }
+          { method: { [Op.notIn]: PENDING_METHODS } },
+          { method: { [Op.in]: PENDING_METHODS }, status: 'PAID' }
         ]
       };
       const totalCollected = parseFloat(await Payment.sum('amount', { where: encaishedWhere }) || 0);
 
-      // totalChequesPending = chèques reçus mais pas encore encaissés
-      const chequesPendingStatuses = ['PENDING', 'REGISTERED', 'DEPOSITED', 'PROCESSING'];
+      // totalChequesPending = chèques ET virements reçus mais pas encore confirmés
       const chequesPendingWhere = {
         ...(tenantWhere || {}),
         saleId: { [Op.ne]: null },
-        method: 'CHEQUE',
-        status: { [Op.in]: chequesPendingStatuses }
+        method: { [Op.in]: PENDING_METHODS },
+        status: { [Op.in]: PENDING_STATUSES }
       };
       const totalChequesPending = parseFloat(await Payment.sum('amount', { where: chequesPendingWhere }) || 0);
 
@@ -103,15 +108,19 @@ export class AdminController {
       const totalSubscriptionPending = parseFloat(await Payment.sum('amount', { where: subsPendingWhere }) || 0);
 
       // ── Créances : dettes non réglées à la fin de la période ────────────
-      // On charge TOUTES les ventes créées avant la fin de la période,
-      // et les paiements reçus avant la fin de la période pour calculer le solde réel.
+      // Seules les ventes EN_COURS et TERMINE sont des créances à recouvrer.
+      // BROUILLON = paiement (chèque/virement) soumis mais non confirmé → comptabilisé
+      // séparément dans totalChequesPending, pas dans les créances.
       const creancesSalesWhere = tenantWhere
-        ? { ...tenantWhere, status: { [Op.ne]: 'ANNULE' }, ...(periodEnd ? { createdAt: { [Op.lt]: periodEnd } } : {}) }
-        : { status: { [Op.ne]: 'ANNULE' }, ...(periodEnd ? { createdAt: { [Op.lt]: periodEnd } } : {}) };
+        ? { ...tenantWhere, status: { [Op.in]: ['EN_COURS', 'TERMINE'] }, ...(periodEnd ? { createdAt: { [Op.lt]: periodEnd } } : {}) }
+        : { status: { [Op.in]: ['EN_COURS', 'TERMINE'] }, ...(periodEnd ? { createdAt: { [Op.lt]: periodEnd } } : {}) };
 
       const creancesPayBase = {
         saleId: { [Op.ne]: null },
-        [Op.or]: [{ method: { [Op.ne]: 'CHEQUE' } }, { method: 'CHEQUE', status: 'PAID' }],
+        [Op.or]: [
+          { method: { [Op.notIn]: PENDING_METHODS } },
+          { method: { [Op.in]: PENDING_METHODS }, status: 'PAID' }
+        ],
         ...(periodEnd ? { createdAt: { [Op.lt]: periodEnd } } : {})
       };
       const creancesPayWhere = tenantWhere ? { ...tenantWhere, ...creancesPayBase } : creancesPayBase;
@@ -246,30 +255,32 @@ export class AdminController {
 
       const revenueStats = [];
       try {
-        const chequeOr = [{ method: { [Op.ne]: 'CHEQUE' } }, { method: 'CHEQUE', status: 'PAID' }];
+        // Chèque et virement : seulement comptés en encaissé au statut PAID
+        const confirmedPayOr = [
+          { method: { [Op.notIn]: PENDING_METHODS } },
+          { method: { [Op.in]: PENDING_METHODS }, status: 'PAID' }
+        ];
 
         if (granularity === 'hourly' && periodStart) {
-          // 24 tranches horaires
           for (let h = 0; h < 24; h++) {
             const start = new Date(periodStart.getFullYear(), periodStart.getMonth(), periodStart.getDate(), h);
             const end   = new Date(periodStart.getFullYear(), periodStart.getMonth(), periodStart.getDate(), h + 1);
             const sw = { createdAt: { [Op.gte]: start, [Op.lt]: end }, status: { [Op.ne]: 'ANNULE' }, ...(tenantWhere || {}) };
-            const pw = { createdAt: { [Op.gte]: start, [Op.lt]: end }, saleId: { [Op.ne]: null }, [Op.or]: chequeOr, ...(tenantWhere || {}) };
+            const pw = { createdAt: { [Op.gte]: start, [Op.lt]: end }, saleId: { [Op.ne]: null }, [Op.or]: confirmedPayOr, ...(tenantWhere || {}) };
             const total     = parseFloat((await Sale.sum('totalTtc', { where: sw })) || 0);
             const collected = parseFloat((await Payment.sum('amount',  { where: pw })) || 0);
-            revenueStats.push({ label: `${String(h).padStart(2, '0')}h`, total, collected, creances: 0 });
+            revenueStats.push({ label: `${String(h).padStart(2, '0')}h`, month: start.toISOString(), total, collected, creances: 0 });
           }
         } else if (granularity === 'daily' && periodStart && periodEnd) {
-          // Un point par jour
           const nbDays = Math.round((periodEnd.getTime() - periodStart.getTime()) / 86400000);
           for (let d = 0; d < nbDays; d++) {
             const start = new Date(periodStart.getTime() + d * 86400000);
             const end   = new Date(start.getTime() + 86400000);
             const sw = { createdAt: { [Op.gte]: start, [Op.lt]: end }, status: { [Op.ne]: 'ANNULE' }, ...(tenantWhere || {}) };
-            const pw = { createdAt: { [Op.gte]: start, [Op.lt]: end }, saleId: { [Op.ne]: null }, [Op.or]: chequeOr, ...(tenantWhere || {}) };
+            const pw = { createdAt: { [Op.gte]: start, [Op.lt]: end }, saleId: { [Op.ne]: null }, [Op.or]: confirmedPayOr, ...(tenantWhere || {}) };
             const total     = parseFloat((await Sale.sum('totalTtc', { where: sw })) || 0);
             const collected = parseFloat((await Payment.sum('amount',  { where: pw })) || 0);
-            revenueStats.push({ label: start.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' }), total, collected, creances: 0 });
+            revenueStats.push({ label: start.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' }), month: start.toISOString(), total, collected, creances: 0 });
           }
         } else {
           // Un point par mois
@@ -278,6 +289,9 @@ export class AdminController {
           if (filterYear && filterSemester) {
             monthStart = filterSemester === 1 ? 0 : 6;
             nbMonths   = 6;
+          } else if (filterYear && filterQuarter) {
+            monthStart = [0, 3, 6, 9][filterQuarter - 1];
+            nbMonths   = 3;
           } else if (filterYear) {
             monthStart = 0;
             nbMonths   = 12;
@@ -289,17 +303,17 @@ export class AdminController {
             const start = new Date(statsYear, monthStart + i, 1);
             const end   = new Date(start.getFullYear(), start.getMonth() + 1, 1);
             const sw = { createdAt: { [Op.gte]: start, [Op.lt]: end }, status: { [Op.ne]: 'ANNULE' }, ...(tenantWhere || {}) };
-            const pw = { createdAt: { [Op.gte]: start, [Op.lt]: end }, saleId: { [Op.ne]: null }, [Op.or]: chequeOr, ...(tenantWhere || {}) };
+            const pw = { createdAt: { [Op.gte]: start, [Op.lt]: end }, saleId: { [Op.ne]: null }, [Op.or]: confirmedPayOr, ...(tenantWhere || {}) };
             const total     = parseFloat((await Sale.sum('totalTtc', { where: sw })) || 0);
             const collected = parseFloat((await Payment.sum('amount',  { where: pw })) || 0);
             const creanceSalesUpTo = { createdAt: { [Op.lt]: end }, status: { [Op.ne]: 'ANNULE' }, ...(tenantWhere || {}) };
-            const creancePayUpTo   = { createdAt: { [Op.lt]: end }, saleId: { [Op.ne]: null }, [Op.or]: chequeOr, ...(tenantWhere || {}) };
+            const creancePayUpTo   = { createdAt: { [Op.lt]: end }, saleId: { [Op.ne]: null }, [Op.or]: confirmedPayOr, ...(tenantWhere || {}) };
             const [salesTot, payTot] = await Promise.all([
               Sale.sum('totalTtc', { where: creanceSalesUpTo }),
               Payment.sum('amount', { where: creancePayUpTo })
             ]);
             const creances = Math.max(0, parseFloat(salesTot || 0) - parseFloat(payTot || 0));
-            revenueStats.push({ label: start.toLocaleDateString('fr-FR', { month: 'short' }), total, collected, creances });
+            revenueStats.push({ label: start.toLocaleDateString('fr-FR', { month: 'short' }), month: start.toISOString(), total, collected, creances });
           }
         }
       } catch (e) { console.error('[REVENUE STATS ERROR]', e.message || e); }
