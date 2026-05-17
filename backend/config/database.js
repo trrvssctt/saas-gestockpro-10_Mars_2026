@@ -412,6 +412,17 @@ export const connectDB = async () => {
       console.warn('⚠️ Note colonne service_items:', siErr.message);
     }
 
+    // Colonne payment_day : jour fixe des échéances (ex: 5 = le 5 de chaque mois)
+    try {
+      await sequelize.query(`
+        ALTER TABLE IF EXISTS recurring_contracts
+          ADD COLUMN IF NOT EXISTS payment_day INTEGER NOT NULL DEFAULT 5;
+      `, { type: QueryTypes.RAW });
+      console.log('✅ Colonne payment_day vérifiée');
+    } catch (pdErr) {
+      console.warn('⚠️ Note colonne payment_day:', pdErr.message);
+    }
+
     // Tables contrats récurrents (facturation par échéances)
     try {
       await sequelize.query(`

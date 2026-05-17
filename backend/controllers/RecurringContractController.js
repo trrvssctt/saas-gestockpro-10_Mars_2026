@@ -4,51 +4,70 @@ import { sequelize } from '../config/database.js';
 import { Op } from 'sequelize';
 
 /**
- * Calcule la date de fin à partir de la fréquence si elle n'est pas fournie.
+ * Construit une date ISO YYYY-MM-DD sur un jour fixe, plafonné au dernier jour du mois.
  */
-function computeEndDate(startDate, numberOfInstallments, frequency) {
-  const end = new Date(startDate);
-  const n = parseInt(numberOfInstallments);
-  if (n <= 1) return new Date(startDate).toISOString().split('T')[0];
-  if (frequency === 'HEBDOMADAIRE') end.setDate(end.getDate() + 7 * (n - 1));
-  else if (frequency === 'TRIMESTRIEL') end.setMonth(end.getMonth() + 3 * (n - 1));
-  else end.setMonth(end.getMonth() + (n - 1)); // MENSUEL par défaut
-  return end.toISOString().split('T')[0];
+function fixedDayDate(year, month0based, day) {
+  const lastDay = new Date(year, month0based + 1, 0).getDate();
+  const actualDay = Math.min(day, lastDay);
+  return `${year}-${String(month0based + 1).padStart(2, '0')}-${String(actualDay).padStart(2, '0')}`;
 }
 
 /**
- * Génère les dates d'échéances.
- * Si endDate est absent, elles sont calculées selon la fréquence.
+ * Génère les dates d'échéances avec un JOUR FIXE par mois (paymentDay, défaut 5).
+ *
+ * Règle de la première échéance (MENSUEL / TRIMESTRIEL) :
+ *   - Si startDate.day < paymentDay  → première échéance dans le MÊME mois
+ *   - Si startDate.day >= paymentDay → première échéance le mois SUIVANT
+ * Exemple : début 17 mai, paymentDay 5 → juin 5, juillet 5, août 5…
+ * Exemple : début 3 mai,  paymentDay 5 → mai 5, juin 5, juillet 5…
+ *
+ * En HEBDOMADAIRE : +7 jours exacts à partir du startDate (pas de notion de jour fixe).
  */
-function generateDueDates(startDate, endDate, numberOfInstallments, frequency = 'MENSUEL') {
-  const start = new Date(startDate);
-  const dates = [];
+function generateDueDates(startDate, endDate, numberOfInstallments, frequency = 'MENSUEL', paymentDay = 5) {
+  const start = new Date(startDate + 'T00:00:00');
   const n = parseInt(numberOfInstallments);
+  const day = Math.max(1, Math.min(28, parseInt(paymentDay) || 5));
+  const dates = [];
 
-  if (n === 1) {
-    dates.push(start.toISOString().split('T')[0]);
-    return dates;
-  }
-
-  if (!endDate) {
+  if (frequency === 'HEBDOMADAIRE') {
     for (let i = 0; i < n; i++) {
       const d = new Date(start);
-      if (frequency === 'HEBDOMADAIRE') d.setDate(d.getDate() + 7 * i);
-      else if (frequency === 'TRIMESTRIEL') d.setMonth(d.getMonth() + 3 * i);
-      else d.setMonth(d.getMonth() + i);
+      d.setDate(d.getDate() + 7 * i);
       dates.push(d.toISOString().split('T')[0]);
     }
     return dates;
   }
 
-  const end = new Date(endDate);
-  const totalMs = end.getTime() - start.getTime();
-  const intervalMs = totalMs / (n - 1);
-  for (let i = 0; i < n; i++) {
-    const d = new Date(start.getTime() + intervalMs * i);
-    dates.push(d.toISOString().split('T')[0]);
+  const monthStep = frequency === 'TRIMESTRIEL' ? 3 : 1;
+
+  // Déterminer le mois de la première échéance
+  let firstYear = start.getFullYear();
+  let firstMonth = start.getMonth(); // 0-based
+  if (start.getDate() >= day) {
+    // Jour de début >= jour fixe → passer au cycle suivant
+    firstMonth += monthStep;
+    if (firstMonth > 11) {
+      firstYear += Math.floor(firstMonth / 12);
+      firstMonth = firstMonth % 12;
+    }
   }
+
+  for (let i = 0; i < n; i++) {
+    const baseMonth = firstMonth + monthStep * i;
+    const targetYear = firstYear + Math.floor(baseMonth / 12);
+    const targetMonth = ((baseMonth % 12) + 12) % 12;
+    dates.push(fixedDayDate(targetYear, targetMonth, day));
+  }
+
   return dates;
+}
+
+/**
+ * Calcule la date de fin en réutilisant generateDueDates.
+ */
+function computeEndDate(startDate, numberOfInstallments, frequency, paymentDay = 5) {
+  const dates = generateDueDates(startDate, null, numberOfInstallments, frequency, paymentDay);
+  return dates[dates.length - 1] || startDate;
 }
 
 export class RecurringContractController {
@@ -120,7 +139,7 @@ export class RecurringContractController {
       const {
         title, description, customerId, walkinName, walkinPhone,
         serviceId, serviceItems, frequency, startDate, endDate,
-        numberOfInstallments, installmentAmount, totalAmount, notes
+        numberOfInstallments, installmentAmount, totalAmount, notes, paymentDay
       } = req.body;
 
       if (!title || !startDate || !numberOfInstallments || !installmentAmount) {
@@ -129,7 +148,8 @@ export class RecurringContractController {
       }
 
       const freq = frequency || 'MENSUEL';
-      const resolvedEndDate = endDate || computeEndDate(startDate, numberOfInstallments, freq);
+      const pDay = Math.max(1, Math.min(28, parseInt(paymentDay) || 5));
+      const resolvedEndDate = endDate || computeEndDate(startDate, numberOfInstallments, freq, pDay);
 
       if (endDate && new Date(endDate) <= new Date(startDate)) {
         await transaction.rollback();
@@ -155,12 +175,13 @@ export class RecurringContractController {
         numberOfInstallments: parseInt(numberOfInstallments),
         installmentAmount: parseFloat(installmentAmount),
         totalAmount: computedTotal,
+        paymentDay: pDay,
         amountPaid: 0,
         status: 'ACTIF',
         notes: notes || null
       }, { transaction });
 
-      const dueDates = generateDueDates(startDate, resolvedEndDate, parseInt(numberOfInstallments), freq);
+      const dueDates = generateDueDates(startDate, resolvedEndDate, parseInt(numberOfInstallments), freq, pDay);
 
       const installments = dueDates.map((dueDate, index) => ({
         tenantId: req.user.tenantId,
@@ -323,17 +344,16 @@ export class RecurringContractController {
       const {
         title, description, customerId, walkinName, walkinPhone,
         serviceId, serviceItems, frequency, startDate, endDate,
-        numberOfInstallments, installmentAmount, totalAmount, notes
+        numberOfInstallments, installmentAmount, totalAmount, notes, paymentDay
       } = req.body;
 
       const n = parseInt(numberOfInstallments) || contract.numberOfInstallments;
       const amt = parseFloat(installmentAmount) || parseFloat(contract.installmentAmount);
       const sd = startDate || contract.startDate;
       const freq = frequency || contract.frequency;
-      // endDate explicitement null = effacer la date de fin (recalcul auto)
-      // endDate undefined = garder l'existante
+      const pDay = Math.max(1, Math.min(28, parseInt(paymentDay) || contract.paymentDay || 5));
       const ed = endDate !== undefined ? (endDate || null) : contract.endDate;
-      const resolvedEd = ed || computeEndDate(sd, n, freq);
+      const resolvedEd = ed || computeEndDate(sd, n, freq, pDay);
       const computed = totalAmount || amt * n;
       const items = Array.isArray(serviceItems) && serviceItems.length > 0 ? serviceItems : null;
       const primaryServiceId = items ? (items[0]?.serviceId || null) : (serviceId || null);
@@ -374,11 +394,12 @@ export class RecurringContractController {
         numberOfInstallments: n,
         installmentAmount: amt,
         totalAmount: computed,
+        paymentDay: pDay,
         amountPaid: 0,
         notes: notes !== undefined ? notes : contract.notes
       }, { transaction });
 
-      const dueDates = generateDueDates(sd, resolvedEd, n, freq);
+      const dueDates = generateDueDates(sd, resolvedEd, n, freq, pDay);
       for (let i = 0; i < dueDates.length; i++) {
         await RecurringInstallment.create({
           tenantId: req.user.tenantId,
