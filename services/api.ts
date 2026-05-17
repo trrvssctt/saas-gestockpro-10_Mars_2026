@@ -1,38 +1,9 @@
 
 import { authBridge } from './authBridge';
+import { BASE_URL as _BASE_URL, API_URL } from './config';
 
-// Configuration de l'URL du backend
-// En développement: forcer localhost:3000
-// En production: utiliser la variable d'environnement ou l'origin courant
-const buildTimeBackend = (import.meta as any).env?.VITE_BACKEND_URL;
-let rawBackend: string;
-
-if (buildTimeBackend) {
-  // Variable d'environnement explicite définie
-  rawBackend = buildTimeBackend;
-} else {
-  try {
-    const origin = (typeof window !== 'undefined' && window.location && window.location.origin) ? window.location.origin : '';
-    // En développement avec Vite (localhost:5173-5179), pointer vers le backend sur port 3000
-    if (origin && /localhost:517[3-9]/.test(origin)) {
-      rawBackend = 'http://localhost:3000';
-      //rawBackend = 'https://gestock.realtechprint.com';
-    } else if (origin && !/localhost|127\.0\.0\.1/.test(origin)) {
-      // Production: API co-localisée sous la même origine
-      rawBackend = origin;
-    } else {
-      // Fallback pour développement
-      rawBackend = 'http://localhost:3000';
-      //rawBackend = 'https://gestock.realtechprint.com';
-    }
-  } catch (e) {
-    rawBackend = 'http://localhost:3000';
-    //rawBackend = 'https://gestock.realtechprint.com';
-  }
-}
-
-const BACKEND_URL = rawBackend.endsWith('/api') ? rawBackend : `${rawBackend.replace(/\/+$/, '')}/api`;
-export const BASE_URL = rawBackend.replace(/\/+$/, '');
+const BACKEND_URL = API_URL;
+export const BASE_URL = _BASE_URL;
 
 
 

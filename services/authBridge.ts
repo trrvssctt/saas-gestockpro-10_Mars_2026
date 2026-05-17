@@ -1,4 +1,5 @@
 import { User, UserRole } from '../types';
+import { API_URL } from './config';
 
 const AUTH_STORAGE_KEY = 'gsp_session_vault';
 const SESSION_TOKEN_KEY = 'gsp_session_token';
@@ -122,14 +123,13 @@ export const authBridge = {
     }
 
     const sessionUser = { ...user, roles };
-    sessionStorage.setItem(
+    localStorage.setItem(
       AUTH_STORAGE_KEY,
       JSON.stringify({ user: sessionUser, token, sessionToken, timestamp: Date.now() })
     );
 
-    // Sauvegarder également le token de session séparément pour les requêtes API
     if (sessionToken) {
-      sessionStorage.setItem(SESSION_TOKEN_KEY, sessionToken);
+      localStorage.setItem(SESSION_TOKEN_KEY, sessionToken);
     }
     // Apply tenant UI preferences immediately so login shows correct look
     try {
@@ -161,7 +161,7 @@ export const authBridge = {
   },
 
   getSession: (): { user: User; token: string; sessionToken?: string } | null => {
-    const raw = sessionStorage.getItem(AUTH_STORAGE_KEY);
+    const raw = localStorage.getItem(AUTH_STORAGE_KEY);
     if (!raw) return null;
 
     try {
@@ -176,35 +176,43 @@ export const authBridge = {
     }
   },
 
-
-  fetchMe: async (token: string): Promise<User | null> => {
+  /**
+   * Retourne null si le token est explicitement rejeté (401/403).
+   * En cas d'erreur réseau, retourne le user en cache (évite une déconnexion injustifiée).
+   * Fusionne toujours les données fraîches sur le cache pour préserver les champs absents
+   * du payload JWT (ex: isActive) qui ne sont pas renvoyés par /auth/me.
+   */
+  fetchMe: async (token: string, cachedUser?: User): Promise<{ user: User | null; networkError: boolean }> => {
     try {
-      const response = await fetch('http://localhost:3000/api/auth/me', {
-      //const response = await fetch('https://gestock.realtechprint.com/api/auth/me', {
+      const response = await fetch(`${API_URL}/auth/me`, {
         headers: { Authorization: `Bearer ${token}` }
       });
-      if (!response.ok) return null;
-
-      const user = await response.json();
+      if (response.status === 401 || response.status === 403) {
+        return { user: null, networkError: false };
+      }
+      if (!response.ok) {
+        return { user: cachedUser ?? null, networkError: true };
+      }
+      const freshData = await response.json();
+      // Merge: les données fraîches prennent le dessus, mais les champs du cache
+      // absents de la réponse (comme isActive) sont conservés.
+      const merged = cachedUser ? { ...cachedUser, ...freshData } : freshData;
       return {
-        ...user,
-        roles: Array.isArray(user.roles) ? user.roles : [user.role]
+        user: { ...merged, roles: Array.isArray(merged.roles) ? merged.roles : [merged.role] },
+        networkError: false,
       };
     } catch {
-      return null;
+      return { user: cachedUser ?? null, networkError: true };
     }
   },
 
   clearSession: () => {
-    sessionStorage.removeItem(AUTH_STORAGE_KEY);
-    sessionStorage.removeItem(SESSION_TOKEN_KEY);
+    localStorage.removeItem(AUTH_STORAGE_KEY);
+    localStorage.removeItem(SESSION_TOKEN_KEY);
   },
 
-  /**
-   * Récupère le token de session actuel
-   */
   getSessionToken: (): string | null => {
-    return sessionStorage.getItem(SESSION_TOKEN_KEY);
+    return localStorage.getItem(SESSION_TOKEN_KEY);
   },
 
   /**
@@ -218,8 +226,7 @@ export const authBridge = {
     }
 
     try {
-      const response = await fetch('http://localhost:3000/api/auth/validate-session', {
-      //const response = await fetch('https://gestock.realtechprint.com/api/auth/validate-session', {
+      const response = await fetch(`${API_URL}/auth/validate-session`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -257,8 +264,7 @@ export const authBridge = {
     
     try {
       if (sessionToken) {
-        await fetch('http://localhost:3000/api/auth/logout', {
-        //await fetch('https://gestock.realtechprint.com/api/auth/logout', {
+        await fetch(`${API_URL}/auth/logout`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',

@@ -110,7 +110,12 @@ const App: React.FC = () => {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [isInitializing, setIsInitializing] = useState(true);
   const [showLanding, setShowLanding] = useState(true);
-  const [activeTab, setActiveTab] = useState('dashboard');
+  const [activeTab, setActiveTabState] = useState('dashboard');
+
+  const setActiveTab = (tab: string) => {
+    localStorage.setItem('gsp_active_tab', tab);
+    setActiveTabState(tab);
+  };
   // Permet de sortir des pages de redirection Stripe sans rechargement complet
   const [stripeHandled, setStripeHandled] = useState(false);
   const [navigationMetadata, setNavigationMetadata] = useState<any>(null);
@@ -203,7 +208,9 @@ const App: React.FC = () => {
     const initAuth = async () => {
       const session = authBridge.getSession();
       if (session) {
-        const freshUser = await authBridge.fetchMe(session.token);
+        const { user: fetchedUser, networkError } = await authBridge.fetchMe(session.token, session.user);
+        // Sur erreur réseau, utiliser les données en cache plutôt que de déconnecter
+        const freshUser = networkError ? session.user : fetchedUser;
         if (freshUser && freshUser.isActive) {
           // Ensure planId is present: resolve from all sources
           (freshUser as any).planId = resolvePlanId(freshUser);
@@ -228,8 +235,16 @@ const App: React.FC = () => {
 
           setCurrentUser(freshUser);
           setIsLoggedIn(true);
-          if (freshUser.role === UserRole.SUPER_ADMIN) setActiveTab('superadmin');
-        } else {
+          if (freshUser.role === UserRole.SUPER_ADMIN) {
+            setActiveTab('superadmin');
+          } else {
+            const savedTab = localStorage.getItem('gsp_active_tab');
+            if (savedTab && savedTab !== 'dashboard' && authBridge.canAccess(freshUser, savedTab)) {
+              setActiveTabState(savedTab); // setActiveTabState pour ne pas réécrire localStorage
+            }
+          }
+        } else if (!networkError) {
+          // Effacer la session seulement si le serveur a explicitement rejeté le token (401/403)
           authBridge.clearSession();
         }
       }
@@ -286,6 +301,7 @@ const App: React.FC = () => {
 
   const resetToLogin = () => {
     authBridge.clearSession();
+    localStorage.removeItem('gsp_active_tab');
     setIsLoggedIn(false);
     setCurrentUser(null);
     setShowRegSuccess(null);
@@ -295,6 +311,7 @@ const App: React.FC = () => {
     setNavigationMetadata(null);
     setShowLanding(true);
     setInitialLoginOptions(null);
+    setActiveTabState('dashboard');
   };
 
   const handleLogout = () => {
