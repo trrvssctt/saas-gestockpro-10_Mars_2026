@@ -127,7 +127,7 @@ const LeaveManagement: React.FC<LeaveManagementProps> = ({ onNavigate, user }) =
       // Si l'utilisateur a un employeeId, récupérer directement l'Employee
       if (user.employeeId) {
         console.log('✅ employeeId trouvé, récupération de l\'Employee...');
-        const employee = await employeeApi.get(user.employeeId);
+        const employee = await employeeApi.getById(user.employeeId);
         return employee;
       }
       
@@ -137,13 +137,13 @@ const LeaveManagement: React.FC<LeaveManagementProps> = ({ onNavigate, user }) =
       try {
         const session = authBridge.getSession();
         if (session?.token) {
-          const freshUser = await authBridge.fetchMe(session.token);
+          const { user: freshUser } = await authBridge.fetchMe(session.token, session.user);
           if (freshUser && (freshUser as any).employee) {
             console.log('✅ Données Employee récupérées après refresh');
             return (freshUser as any).employee;
           }
-          if (freshUser && freshUser.employeeId) {
-            const employee = await employeeApi.get(freshUser.employeeId);
+          if (freshUser && (freshUser as any).employeeId) {
+            const employee = await employeeApi.getById((freshUser as any).employeeId);
             return employee;
           }
         }

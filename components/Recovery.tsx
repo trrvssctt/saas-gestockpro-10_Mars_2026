@@ -65,34 +65,36 @@ const Recovery = ({ currency }: { currency: string }) => {
       const me = selectedMonth !== null ? selectedMonth : 11;
       const from = new Date(selectedYear, ms, 1);
       const to = new Date(selectedYear, me + 1, 0, 23, 59, 59);
-      sales = rawSales.filter(s => {
+      sales = rawSales.filter((s: any) => {
         const d = new Date(s.createdAt || s.created_at);
         return d >= from && d <= to;
       });
     }
     const debtMap: Record<string, any> = {};
     sales.forEach((sale: any) => {
-      if (sale.status === 'EN_COURS' || sale.status === 'TERMINE') {
-        const ttc = parseFloat(sale.totalTtc || sale.total_ttc || 0);
-        const paid = parseFloat(sale.amountPaid || sale.amount_paid || 0);
-        const due = Math.max(0, ttc - paid);
-        const customer = sale.customer;
-        const customerId = sale.customerId || sale.customer_id;
-        if (due > 0 && customer && customerId) {
-          if (!debtMap[customerId]) {
-            debtMap[customerId] = {
-              id: customerId,
-              companyName: customer.companyName || customer.name || '—',
-              email: customer.email || '',
-              phone: customer.phone || '',
-              outstandingBalance: 0,
-              salesCount: 0
-            };
-          }
-          debtMap[customerId].outstandingBalance += due;
-          debtMap[customerId].salesCount += 1;
-        }
+      // Créances = EN_COURS + TERMINE uniquement (BROUILLON = paiement en transit, pas une créance)
+      if (sale.status !== 'EN_COURS' && sale.status !== 'TERMINE') return;
+      const ttc = parseFloat(sale.totalTtc || sale.total_ttc || 0);
+      const paid = parseFloat(sale.amountPaid || sale.amount_paid || 0);
+      const due = Math.max(0, ttc - paid);
+      if (due <= 0) return;
+      const customer = sale.customer;
+      const customerId = sale.customerId || sale.customer_id;
+      // Regrouper par client enregistré ; sinon catégorie "Client de passage"
+      const key = customerId || 'PASSAGE';
+      if (!debtMap[key]) {
+        debtMap[key] = {
+          id: key,
+          companyName: customer?.companyName || customer?.name || sale.walkinName || 'Client de passage',
+          email: customer?.email || '',
+          phone: customer?.phone || sale.walkinPhone || '',
+          outstandingBalance: 0,
+          salesCount: 0,
+          isWalkin: !customerId
+        };
       }
+      debtMap[key].outstandingBalance += due;
+      debtMap[key].salesCount += 1;
     });
     return Object.values(debtMap);
   }, [rawSales, selectedYear, selectedMonth]);
@@ -127,26 +129,26 @@ const Recovery = ({ currency }: { currency: string }) => {
   }, [rawSales]);
 
   const totalPendingCheques = useMemo(() =>
-    pendingChequesByCustomer.reduce((s, c) => s + c.amount, 0),
+    pendingChequesByCustomer.reduce((s: number, c: any) => s + c.amount, 0),
     [pendingChequesByCustomer]
   );
 
   // ── Stats ────────────────────────────────────────────────────────────────
   const stats = useMemo(() => {
-    const total = debtors.reduce((s, d) => s + (d.outstandingBalance || 0), 0);
-    const withEmail = debtors.filter(d => d.email).length;
-    const max = debtors.reduce((m, d) => Math.max(m, d.outstandingBalance), 0);
+    const total = debtors.reduce((s: number, d: any) => s + (d.outstandingBalance || 0), 0);
+    const withEmail = debtors.filter((d: any) => d.email).length;
+    const max = debtors.reduce((m: number, d: any) => Math.max(m, d.outstandingBalance), 0);
     return { total, count: debtors.length, average: debtors.length > 0 ? total / debtors.length : 0, withEmail, max };
   }, [debtors]);
 
   // ── Filtrage + tri ───────────────────────────────────────────────────────
   const processed = useMemo(() => {
-    let list = debtors.filter(d =>
+    let list = debtors.filter((d: any) =>
       (d.companyName || '').toLowerCase().includes(search.toLowerCase()) ||
       (d.email || '').toLowerCase().includes(search.toLowerCase()) ||
       (d.phone || '').includes(search)
     );
-    list.sort((a, b) => {
+    list.sort((a: any, b: any) => {
       if (sortKey === 'amount') return sortDir === 'desc' ? b.outstandingBalance - a.outstandingBalance : a.outstandingBalance - b.outstandingBalance;
       return sortDir === 'desc'
         ? (b.companyName || '').localeCompare(a.companyName || '')

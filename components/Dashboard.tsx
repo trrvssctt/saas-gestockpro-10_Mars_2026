@@ -13,7 +13,8 @@ import {
   ShieldAlert, ArrowRight, Bell, ChevronRight,
   ArrowDownCircle, ArrowUpCircle, DollarSign,
   BarChart2, PieChart as PieIcon, Star,
-  Calendar, Briefcase, Building2, FileText, MapPin
+  Calendar, Briefcase, Building2, FileText, MapPin,
+  Pause, FileClock
 } from 'lucide-react';
 import {
   Area, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -43,35 +44,41 @@ const getCustomerName = (c: any): string => {
   return String(c);
 };
 
-const StatCard = ({ title, value, subValue, icon: Icon, color, trend, onClick }: any) => (
-  <div
-    onClick={onClick}
-    className={`bg-white p-5 rounded-3xl border border-slate-100 shadow-sm group hover:shadow-xl transition-all flex flex-col justify-between overflow-hidden relative ${onClick ? 'cursor-pointer' : ''}`}
-  >
-    <div className="absolute -right-3 -top-3 p-6 opacity-5 group-hover:scale-110 transition-transform"><Icon size={64}/></div>
-    <div className="flex justify-between items-start mb-4">
-      <div className="flex-1 min-w-0 pr-2">
-        <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest truncate">{title}</p>
-        <h3 className="text-xl md:text-2xl font-black text-slate-900 tracking-tighter mt-1 truncate">{value}</h3>
+const StatCard = ({ title, value, subValue, icon: Icon, color, trend, onClick }: any) => {
+  const iconColorClass = (color || 'bg-slate-400').replace('bg-', 'text-');
+  return (
+    <div
+      onClick={onClick}
+      className={`bg-white p-5 rounded-2xl border border-slate-100 shadow-sm hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200 flex flex-col gap-4 ${onClick ? 'cursor-pointer group' : ''}`}
+    >
+      <div className="flex items-center justify-between">
+        <div className={`p-2.5 rounded-xl ${color || 'bg-slate-100'} bg-opacity-10 flex-shrink-0`}>
+          <Icon size={17} className={iconColorClass}/>
+        </div>
+        {trend && (
+          <span className={`text-[9px] font-bold flex items-center gap-0.5 px-2 py-0.5 rounded-full ${trend === 'up' ? 'text-emerald-600 bg-emerald-50' : 'text-rose-500 bg-rose-50'}`}>
+            {trend === 'up' ? <TrendingUp size={9}/> : <TrendingDown size={9}/>}
+            {trend === 'up' ? 'Hausse' : 'Baisse'}
+          </span>
+        )}
       </div>
-      <div className={`p-3 rounded-2xl ${color || ''} bg-opacity-10 ${(color || '').replace('bg-', 'text-')} shadow-inner flex-shrink-0`}><Icon size={20}/></div>
+      <div className="min-w-0">
+        <p className="text-[9px] font-semibold text-slate-400 uppercase tracking-widest mb-1 truncate">{title}</p>
+        <h3 className="text-xl font-black text-slate-900 tracking-tight truncate">{value}</h3>
+        {subValue && (
+          <p className="text-[9px] text-slate-400 font-medium mt-1.5 truncate">{subValue}</p>
+        )}
+      </div>
     </div>
-    {subValue && (
-      <p className="text-[9px] font-bold text-slate-500 uppercase tracking-tight flex items-center gap-1">
-        {trend === 'up' && <TrendingUp size={10} className="text-emerald-500"/>}
-        {trend === 'down' && <TrendingDown size={10} className="text-rose-500"/>}
-        <span className={trend === 'up' ? 'text-emerald-600' : trend === 'down' ? 'text-rose-500' : 'text-slate-400'}>{subValue}</span>
-      </p>
-    )}
-  </div>
-);
+  );
+};
 
 const SectionHeader = ({ icon: Icon, title, badge, color = 'text-indigo-600' }: any) => (
-  <div className="flex items-center justify-between mb-5">
-    <h3 className={`text-sm font-black uppercase tracking-tight flex items-center gap-2 ${color}`}>
-      <Icon size={18}/> {title}
+  <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-100">
+    <h3 className={`text-xs font-black uppercase tracking-widest flex items-center gap-2 ${color}`}>
+      <Icon size={14}/> {title}
     </h3>
-    {badge && <span className="text-[8px] font-black text-slate-400 bg-slate-50 px-2 py-1 rounded-full uppercase border border-slate-100">{badge}</span>}
+    {badge && <span className="text-[8px] font-semibold text-slate-400 bg-slate-50 px-2.5 py-1 rounded-full uppercase tracking-wide border border-slate-100">{badge}</span>}
   </div>
 );
 
@@ -96,6 +103,19 @@ const timeAgo = (date: string) => {
   if (hrs < 24) return `${hrs}h`;
   return `${Math.floor(hrs / 24)}j`;
 };
+
+const SkeletonCard = () => (
+  <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm flex flex-col gap-4 animate-pulse">
+    <div className="flex items-center justify-between">
+      <div className="w-10 h-10 bg-slate-100 rounded-xl"/>
+    </div>
+    <div>
+      <div className="h-2 w-16 bg-slate-100 rounded mb-2"/>
+      <div className="h-6 w-28 bg-slate-100 rounded"/>
+      <div className="h-2 w-20 bg-slate-100 rounded mt-2"/>
+    </div>
+  </div>
+);
 
 const MONTH_LABELS = ['Jan','Fév','Mar','Avr','Mai','Jun','Jul','Aoû','Sep','Oct','Nov','Déc'];
 
@@ -139,8 +159,20 @@ const Dashboard: React.FC<{
   const [latestPayments, setLatestPayments] = useState<any[]>([]);
   const [revenueStats, setRevenueStats] = useState<any[]>([]);
   const [pendingValidations, setPendingValidations] = useState<any[]>([]);
+  const [recurringContracts, setRecurringContracts] = useState<any[]>([]);
 
   const userRoles = user.roles || [user.role];
+  const isAdmin = userRoles.includes(UserRole.ADMIN) || userRoles.includes(UserRole.SUPER_ADMIN);
+
+  // Construit les query params pour le endpoint admin selon le filtre temporel actif
+  const adminFilterQuery = useMemo(() => {
+    if (!isAdmin || filterState.mode === 'all') return '';
+    const p: string[] = [`year=${filterState.year}`];
+    if (filterState.mode === 'month') p.push(`month=${filterState.month + 1}`);
+    if (filterState.mode === 'day') { p.push(`month=${filterState.month + 1}`); p.push(`day=${filterState.day}`); }
+    if (filterState.mode === 'quarter') p.push(`quarter=${filterState.quarter}`);
+    return '?' + p.join('&');
+  }, [isAdmin, filterState]);
 
   useEffect(() => {
     const handleSessionExpired = () => {
@@ -161,8 +193,8 @@ const Dashboard: React.FC<{
     const fetchDashboardData = async () => {
       setLoading(true);
       try {
-        if (userRoles.includes(UserRole.ADMIN) || userRoles.includes(UserRole.SUPER_ADMIN)) {
-          const res = await apiClient.get('/admin/dashboard');
+        if (isAdmin) {
+          const res = await apiClient.get(`/admin/dashboard${adminFilterQuery}`);
           const payload = res.data || res;
           setSales((payload.recentSales || []).concat([]));
           setCustomers(payload.latestCustomers || []);
@@ -211,6 +243,14 @@ const Dashboard: React.FC<{
             }
           }
         }
+        // Fetch recurring contracts silently (all roles)
+        try {
+          const recRes = await apiClient.get('/recurring');
+          const recData = recRes?.data ?? recRes;
+          setRecurringContracts(Array.isArray(recData) ? recData : []);
+        } catch {
+          // Silencieux — pas critique pour le dashboard
+        }
       } catch (err) {
         console.error("Dashboard data fetch error", err);
       } finally {
@@ -218,7 +258,7 @@ const Dashboard: React.FC<{
       }
     };
     fetchDashboardData();
-  }, [userRoles]);
+  }, [isAdmin, adminFilterQuery]); // adminFilterQuery change → re-fetch admin stats avec le bon filtre
 
   // --- ESSAI GRATUIT : jours restants ---
   const trialDaysLeft = useMemo(() => authBridge.getTrialDaysRemaining(user), [user]);
@@ -252,36 +292,16 @@ const Dashboard: React.FC<{
 
   // --- SALES STATS ---
   const salesStats = useMemo(() => {
-    const s = adminStats;
-
-    // ADMIN PATH: use pre-computed server stats
-    if (s) {
-      const totalChequesPending = s.totalChequesPending || 0;
-      // If year filter + monthly revenue data → compute year totals from revenueStats
-      if (selectedYear && revenueStats.length > 0) {
-        const filtered = revenueStats.filter(r => {
-          const d = new Date(r.month);
-          return d.getFullYear() === selectedYear &&
-            (selectedMonth === null || d.getMonth() === selectedMonth);
-        });
-        const totalRevenue = filtered.reduce((sum, r) => sum + (r.total || 0), 0);
-        const totalCollected = filtered.reduce((sum, r) => sum + (r.collected || 0), 0);
-        // Créances: use all-time outstanding (server doesn't give per-year unpaid)
-        const totalUnpaid = s.totalUnpaid ?? Math.max(0, (s.totalRevenue || 0) - (s.totalCollected || 0));
-        const overdueCount = s.overdueCount || s.latePayments || 0;
-        const recoveryData = [
-          { name: 'Encaissé', value: totalCollected, color: '#10b981' },
-          { name: 'À Recouvrer', value: Math.max(0, totalUnpaid), color: '#f43f5e' }
-        ];
-        return { totalRevenue, totalCollected, totalChequesPending, totalUnpaid, overdueCount, totalSalesCount: s.totalSalesCount || sales.length, avgBasket: totalRevenue > 0 && s.totalSalesCount ? totalRevenue / s.totalSalesCount : 0, recoveryData, monthRevenue: 0 };
-      }
-      // Default admin stats (no year filter or no revenueStats)
+    // ── ADMIN PATH : stats pré-calculées par le backend (re-fetchées avec les params de filtre) ──
+    if (adminStats) {
+      const s = adminStats;
       const totalRevenue = s.totalRevenue || 0;
       const totalCollected = s.totalCollected || 0;
-      const totalUnpaid = s.totalUnpaid ?? (totalRevenue - totalCollected);
+      const totalUnpaid = s.totalUnpaid ?? Math.max(0, totalRevenue - totalCollected);
       const overdueCount = s.overdueCount || s.latePayments || 0;
-      const totalSalesCount = s.totalSalesCount || sales.length;
+      const totalSalesCount = s.totalSalesCount || 0;
       const avgBasket = totalSalesCount > 0 ? totalRevenue / totalSalesCount : 0;
+      const totalChequesPending = s.totalChequesPending || 0;
       const recoveryData = [
         { name: 'Encaissé', value: totalCollected, color: '#10b981' },
         { name: 'À Recouvrer', value: Math.max(0, totalUnpaid), color: '#f43f5e' }
@@ -289,45 +309,9 @@ const Dashboard: React.FC<{
       return { totalRevenue, totalCollected, totalChequesPending, totalUnpaid, overdueCount, totalSalesCount, avgBasket, recoveryData, monthRevenue: 0 };
     }
 
-    // ADMIN PATH: also handle quarter filter via revenueStats
-    if (s) {
-      const totalChequesPending = s.totalChequesPending || 0;
-      if (selectedYear && revenueStats.length > 0) {
-        const qMonthsFilter = selectedQuarter ? QTR_MONTHS[selectedQuarter - 1] : null;
-        const filtered = revenueStats.filter(r => {
-          const d = new Date(r.month);
-          if (d.getFullYear() !== selectedYear) return false;
-          if (selectedMonth !== null) return d.getMonth() === selectedMonth;
-          if (qMonthsFilter) return (qMonthsFilter as readonly number[]).includes(d.getMonth());
-          return true;
-        });
-        const totalRevenue = filtered.reduce((sum, r) => sum + (r.total || 0), 0);
-        const totalCollected = filtered.reduce((sum, r) => sum + (r.collected || 0), 0);
-        const totalUnpaid = s.totalUnpaid ?? Math.max(0, (s.totalRevenue || 0) - (s.totalCollected || 0));
-        const overdueCount = s.overdueCount || s.latePayments || 0;
-        const recoveryData = [
-          { name: 'Encaissé', value: totalCollected, color: '#10b981' },
-          { name: 'À Recouvrer', value: Math.max(0, totalUnpaid), color: '#f43f5e' }
-        ];
-        return { totalRevenue, totalCollected, totalChequesPending, totalUnpaid, overdueCount, totalSalesCount: s.totalSalesCount || sales.length, avgBasket: totalRevenue > 0 && s.totalSalesCount ? totalRevenue / s.totalSalesCount : 0, recoveryData, monthRevenue: 0 };
-      }
-      const totalRevenue = s.totalRevenue || 0;
-      const totalCollected = s.totalCollected || 0;
-      const totalUnpaid = s.totalUnpaid ?? (totalRevenue - totalCollected);
-      const overdueCount = s.overdueCount || s.latePayments || 0;
-      const totalSalesCount = s.totalSalesCount || sales.length;
-      const avgBasket = totalSalesCount > 0 ? totalRevenue / totalSalesCount : 0;
-      const recoveryData = [
-        { name: 'Encaissé', value: totalCollected, color: '#10b981' },
-        { name: 'À Recouvrer', value: Math.max(0, totalUnpaid), color: '#f43f5e' }
-      ];
-      return { totalRevenue, totalCollected, totalChequesPending, totalUnpaid, overdueCount, totalSalesCount, avgBasket, recoveryData, monthRevenue: 0 };
-    }
+    // ── NON-ADMIN PATH : calcul client-side depuis le tableau sales complet ──
+    const validSales = sales.filter((s: any) => s.status !== 'ANNULE');
 
-    // NON-ADMIN PATH: client-side computation from full sales array
-    const validSales = sales.filter(s => s.status !== 'ANNULE');
-
-    // Helper: does a date match the selected period?
     const inPeriod = (dateStr: string) => {
       if (!selectedYear) return true;
       const d = new Date(dateStr);
@@ -340,29 +324,35 @@ const Dashboard: React.FC<{
       return true;
     };
 
-    const periodSales = selectedYear ? validSales.filter(s => inPeriod(s.createdAt)) : validSales;
-    const totalRevenue = periodSales.reduce((sum, s) => sum + parseFloat(s.totalTtc || 0), 0);
+    const periodSales = selectedYear ? validSales.filter((s: any) => inPeriod(s.createdAt)) : validSales;
+    const totalRevenue = periodSales.reduce((sum: number, s: any) => sum + parseFloat(s.totalTtc || 0), 0);
 
-    const CHEQUE_PENDING_STATUSES = ['PENDING', 'REGISTERED', 'DEPOSITED', 'PROCESSING'];
+    // Chèque et virement ne sont encaissés qu'au statut PAID
+    const PENDING_PAYMENT_METHODS = ['CHEQUE', 'TRANSFER'];
+    const PENDING_STATUSES = ['PENDING', 'REGISTERED', 'DEPOSITED', 'PROCESSING'];
 
     let totalCollected: number;
     if (selectedYear) {
       totalCollected = validSales
-        .flatMap(s => (s.payments || []).filter((p: any) =>
-          inPeriod(p.createdAt) && !(p.method === 'CHEQUE' && CHEQUE_PENDING_STATUSES.includes(p.status))
+        .flatMap((s: any) => (s.payments || []).filter((p: any) =>
+          inPeriod(p.createdAt) &&
+          !(PENDING_PAYMENT_METHODS.includes(p.method) && PENDING_STATUSES.includes(p.status))
         ))
-        .reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
+        .reduce((sum: number, p: any) => sum + parseFloat(p.amount || 0), 0);
     } else {
-      totalCollected = validSales.reduce((sum, s) => sum + parseFloat(s.amountPaid || 0), 0);
+      totalCollected = validSales.reduce((sum: number, s: any) => sum + parseFloat(s.amountPaid || 0), 0);
     }
 
     const totalChequesPending = validSales
       .flatMap((s: any) => (s.payments || []))
-      .filter((p: any) => p.method === 'CHEQUE' && CHEQUE_PENDING_STATUSES.includes(p.status))
+      .filter((p: any) => PENDING_PAYMENT_METHODS.includes(p.method) && PENDING_STATUSES.includes(p.status))
       .reduce((sum: number, p: any) => sum + parseFloat(p.amount || 0), 0);
 
     let totalUnpaid: number;
     let overdueCount: number;
+    // Créances = EN_COURS + TERMINE seulement. BROUILLON = paiement soumis non confirmé,
+    // comptabilisé séparément dans totalChequesPending (carte "Paiements en Transit").
+    const creanceSales = validSales.filter((s: any) => s.status === 'EN_COURS' || s.status === 'TERMINE');
     if (selectedYear) {
       const endOfPeriod = selectedDay !== null && selectedMonth !== null
         ? new Date(selectedYear, selectedMonth, selectedDay, 23, 59, 59)
@@ -371,13 +361,14 @@ const Dashboard: React.FC<{
         : selectedQuarter !== null
         ? new Date(selectedYear, QTR_MONTHS[selectedQuarter - 1][2] + 1, 0, 23, 59, 59)
         : new Date(selectedYear, 12, 0, 23, 59, 59);
-      const historicalSales = validSales.filter(s => new Date(s.createdAt) <= endOfPeriod);
-      totalUnpaid = historicalSales.reduce((sum, s) =>
+      const historicalCreances = creanceSales.filter((s: any) => new Date(s.createdAt) <= endOfPeriod);
+      totalUnpaid = historicalCreances.reduce((sum: number, s: any) =>
         sum + Math.max(0, parseFloat(s.totalTtc || 0) - parseFloat(s.amountPaid || 0)), 0);
-      overdueCount = historicalSales.filter(s => s.status === 'EN_COURS').length;
+      overdueCount = historicalCreances.filter((s: any) => s.status === 'EN_COURS').length;
     } else {
-      totalUnpaid = totalRevenue - totalCollected;
-      overdueCount = validSales.filter(s => s.status === 'EN_COURS').length;
+      totalUnpaid = creanceSales.reduce((sum: number, s: any) =>
+        sum + Math.max(0, parseFloat(s.totalTtc || 0) - parseFloat(s.amountPaid || 0)), 0);
+      overdueCount = creanceSales.filter((s: any) => s.status === 'EN_COURS').length;
     }
 
     const now = new Date();
@@ -527,8 +518,14 @@ const Dashboard: React.FC<{
       }));
     }
 
-    // All-time: last 6 months
+    // All-time: last 6 months — pré-initialisé pour que le graphique ait toujours 6 barres
+    const nowDate = new Date();
     const map: Record<string, { total: number; collected: number }> = {};
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(nowDate.getFullYear(), nowDate.getMonth() - i, 1);
+      const key = `${MONTH_LABELS[d.getMonth()]} ${d.getFullYear()}`;
+      map[key] = { total: 0, collected: 0 };
+    }
     validSales.forEach((s: any) => {
       const d = new Date(s.createdAt);
       const key = `${MONTH_LABELS[d.getMonth()]} ${d.getFullYear()}`;
@@ -816,7 +813,7 @@ const Dashboard: React.FC<{
     const TrendIcon = forecast ? (trendIcons[forecast.trend] ?? TrendingUp) : TrendingUp;
 
     return (
-      <div className="rounded-3xl overflow-hidden border border-indigo-900/30 shadow-2xl bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900">
+      <div className="rounded-2xl overflow-hidden border border-indigo-900/30 shadow-2xl bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900">
 
         {/* ── En-tête ── */}
         <div className="px-6 py-5 flex items-center justify-between border-b border-white/5">
@@ -862,7 +859,7 @@ const Dashboard: React.FC<{
 
         {!forecast && !forecastLoading && !forecastError && (
           <div className="py-16 text-center">
-            <div className="w-16 h-16 rounded-3xl bg-indigo-600/20 border border-indigo-500/20 flex items-center justify-center mx-auto mb-4">
+            <div className="w-16 h-16 rounded-2xl bg-indigo-600/20 border border-indigo-500/20 flex items-center justify-center mx-auto mb-4">
               <Sparkles size={28} className="text-indigo-300 animate-pulse" />
             </div>
             <p className="text-[11px] font-black text-white/60 uppercase tracking-widest">
@@ -1036,7 +1033,7 @@ const Dashboard: React.FC<{
 
         {/* BANNIÈRE ESSAI GRATUIT 14 JOURS */}
         {trialDaysLeft !== null && (
-          <div className={`p-5 md:p-7 rounded-3xl border-2 flex flex-col md:flex-row items-center justify-between gap-4 shadow-xl ${trialDaysLeft <= 3 ? 'bg-rose-50 border-rose-300' : trialDaysLeft <= 7 ? 'bg-amber-50 border-amber-300' : 'bg-indigo-50 border-indigo-200'}`}>
+          <div className={`p-5 md:p-7 rounded-2xl border-2 flex flex-col md:flex-row items-center justify-between gap-4 shadow-xl ${trialDaysLeft <= 3 ? 'bg-rose-50 border-rose-300' : trialDaysLeft <= 7 ? 'bg-amber-50 border-amber-300' : 'bg-indigo-50 border-indigo-200'}`}>
             <div className="flex items-center gap-4">
               <div className={`w-12 h-12 rounded-2xl flex items-center justify-center shadow ${trialDaysLeft <= 3 ? 'bg-rose-600' : trialDaysLeft <= 7 ? 'bg-amber-500' : 'bg-indigo-600'} text-white`}>
                 <Timer size={24} />
@@ -1061,7 +1058,7 @@ const Dashboard: React.FC<{
 
         {/* ALERTE ABONNEMENT */}
         {subAlert && subAlert.isCritical && (
-          <div className={`p-5 md:p-7 rounded-3xl border-2 flex flex-col md:flex-row items-center justify-between gap-4 shadow-xl ${subAlert.isExpired ? 'bg-rose-50 border-rose-200' : 'bg-amber-50 border-amber-200'}`}>
+          <div className={`p-5 md:p-7 rounded-2xl border-2 flex flex-col md:flex-row items-center justify-between gap-4 shadow-xl ${subAlert.isExpired ? 'bg-rose-50 border-rose-200' : 'bg-amber-50 border-amber-200'}`}>
             <div className="flex items-center gap-4">
               <div className={`w-12 h-12 rounded-2xl flex items-center justify-center shadow ${subAlert.isExpired ? 'bg-rose-600 text-white' : 'bg-amber-500 text-white'}`}>
                 <ShieldAlert size={24} />
@@ -1100,49 +1097,61 @@ const Dashboard: React.FC<{
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
 
           {/* Tendance CA 6 mois */}
-          <div id="tour-chart" className="lg:col-span-8 bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
-            <SectionHeader icon={BarChart2} title={chartTitle} badge={isCurrentPeriod(filterState) ? 'Live' : 'Historique'} color="text-indigo-600"/>
-            <div className="h-64">
-              <ResponsiveContainer width="100%" height="100%">
-                <ComposedChart data={revenueChartData.length > 0 ? revenueChartData : sales.filter((s: any) => s.status !== 'ANNULE').slice(-10).map((s: any) => ({
-                  label: new Date(s.createdAt).toLocaleDateString('fr-FR', { day:'2-digit', month:'short' }),
-                  total: parseFloat(s.totalTtc),
-                  collected: parseFloat(s.amountPaid || 0)
-                }))}>
-                  <defs>
-                    <linearGradient id="gradRevenue" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#6366f1" stopOpacity={0.15}/>
-                      <stop offset="95%" stopColor="#6366f1" stopOpacity={0}/>
-                    </linearGradient>
-                    <linearGradient id="gradCollected" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#10b981" stopOpacity={0.15}/>
-                      <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9"/>
-                  <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#94a3b8', fontWeight: 700 }}/>
-                  <YAxis hide/>
-                  <Tooltip
-                    contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)', fontSize: 11 }}
-                    formatter={(v: any, name: string) => [`${Number(v).toLocaleString('fr-FR')} ${currency.split(' ')[0]}`, name === 'total' ? 'CA Facturé' : 'Encaissé']}
-                  />
-                  <Legend wrapperStyle={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase' }}
-                    formatter={(val: string) => val === 'total' ? 'CA Facturé' : 'Encaissé'} />
-                  <Area type="monotone" dataKey="total" stroke="#6366f1" strokeWidth={3} fill="url(#gradRevenue)"/>
-                  <Area type="monotone" dataKey="collected" stroke="#10b981" strokeWidth={2} strokeDasharray="4 2" fill="url(#gradCollected)"/>
-                </ComposedChart>
-              </ResponsiveContainer>
+          <div id="tour-chart" className="lg:col-span-8 bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
+            <div className="flex items-center justify-between mb-5 pb-3 border-b border-slate-100">
+              <h3 className="text-sm font-black uppercase tracking-tight flex items-center gap-2 text-indigo-600">
+                <BarChart2 size={16}/> {chartTitle}
+              </h3>
+              <div className="flex items-center gap-3">
+                <div className="flex items-center gap-3 text-[9px] font-semibold text-slate-400">
+                  <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 bg-indigo-500 inline-block rounded-full"/><span>CA Facturé</span></span>
+                  <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 bg-emerald-500 inline-block rounded-full border-dashed"/><span>Encaissé</span></span>
+                </div>
+                <span className="text-[8px] font-black text-slate-400 bg-slate-50 px-2.5 py-1 rounded-full uppercase border border-slate-100 shadow-sm">{isCurrentPeriod(filterState) ? 'Live' : 'Historique'}</span>
+              </div>
             </div>
+            {revenueChartData.every(d => d.total === 0 && d.collected === 0) ? (
+              <div className="h-64 flex flex-col items-center justify-center gap-3 text-slate-300">
+                <BarChart2 size={36} strokeWidth={1}/>
+                <p className="text-[10px] font-black uppercase tracking-widest">Aucune donnée pour cette période</p>
+              </div>
+            ) : (
+              <div className="h-64">
+                <ResponsiveContainer width="100%" height="100%">
+                  <ComposedChart data={revenueChartData} margin={{ top: 4, right: 4, left: 4, bottom: 4 }}>
+                    <defs>
+                      <linearGradient id="gradRevenue" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#6366f1" stopOpacity={0.18}/>
+                        <stop offset="95%" stopColor="#6366f1" stopOpacity={0}/>
+                      </linearGradient>
+                      <linearGradient id="gradCollected" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#10b981" stopOpacity={0.18}/>
+                        <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9"/>
+                    <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#94a3b8', fontWeight: 600 }}/>
+                    <YAxis hide/>
+                    <Tooltip
+                      contentStyle={{ borderRadius: '14px', border: 'none', boxShadow: '0 10px 25px rgba(0,0,0,0.1)', fontSize: 11, padding: '10px 14px' }}
+                      formatter={(v: any, name: string) => [`${Number(v).toLocaleString('fr-FR')} ${currency.split(' ')[0]}`, name === 'total' ? 'CA Facturé' : 'Encaissé']}
+                    />
+                    <Area type="monotone" dataKey="total" stroke="#6366f1" strokeWidth={2.5} fill="url(#gradRevenue)" dot={false}/>
+                    <Area type="monotone" dataKey="collected" stroke="#10b981" strokeWidth={2} strokeDasharray="5 3" fill="url(#gradCollected)" dot={false}/>
+                  </ComposedChart>
+                </ResponsiveContainer>
+              </div>
+            )}
           </div>
 
           {/* Recouvrement Donut */}
-          <div className="lg:col-span-4 bg-white p-6 rounded-3xl border border-slate-100 shadow-sm flex flex-col">
+          <div className="lg:col-span-4 bg-white p-6 rounded-2xl border border-slate-100 shadow-sm flex flex-col">
             <SectionHeader icon={Scale} title="Recouvrement" color="text-emerald-600"/>
-            <div className="flex-1 flex flex-col items-center justify-center">
-              <div className="h-44 w-full">
+            <div className="flex-1 flex flex-col items-center justify-center gap-4">
+              <div className="relative h-40 w-full">
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
-                    <Pie data={salesStats.recoveryData} dataKey="value" innerRadius={45} outerRadius={70} paddingAngle={3} startAngle={90} endAngle={-270}>
+                    <Pie data={salesStats.recoveryData} dataKey="value" innerRadius={48} outerRadius={68} paddingAngle={3} startAngle={90} endAngle={-270}>
                       {salesStats.recoveryData.map((entry: any, i: number) => (
                         <Cell key={i} fill={entry.color}/>
                       ))}
@@ -1150,13 +1159,17 @@ const Dashboard: React.FC<{
                     <Tooltip formatter={(v: any) => `${Number(v).toLocaleString('fr-FR')} ${currency.split(' ')[0]}`}/>
                   </PieChart>
                 </ResponsiveContainer>
+                <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                  <p className="text-xl font-black text-slate-900">{collectionRate}%</p>
+                  <p className="text-[8px] font-semibold text-slate-400 uppercase tracking-widest">Encaissé</p>
+                </div>
               </div>
-              <div className="w-full grid grid-cols-2 gap-3 mt-2">
+              <div className="w-full grid grid-cols-2 gap-2">
                 {salesStats.recoveryData.map((d: any) => (
-                  <div key={d.name} className="text-center">
-                    <div className="w-2 h-2 rounded-full mx-auto mb-1" style={{ background: d.color }}/>
-                    <p className="text-[8px] font-black text-slate-400 uppercase">{d.name}</p>
-                    <p className="text-xs font-black text-slate-800">{fmtShort(d.value)}</p>
+                  <div key={d.name} className="flex flex-col items-center p-3 rounded-xl" style={{ background: d.color + '12' }}>
+                    <div className="w-2 h-2 rounded-full mb-1.5" style={{ background: d.color }}/>
+                    <p className="text-[8px] font-semibold uppercase tracking-wider" style={{ color: d.color }}>{d.name}</p>
+                    <p className="text-sm font-black text-slate-800 mt-0.5">{fmtShort(d.value)}</p>
                   </div>
                 ))}
               </div>
@@ -1168,7 +1181,7 @@ const Dashboard: React.FC<{
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
 
           {/* Top Débiteurs */}
-          <div className="lg:col-span-5 bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
+          <div className="lg:col-span-5 bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
             <SectionHeader icon={AlertCircle} title="Top Créances Clients" badge={`${topDebtors.length} clients`} color="text-rose-600"/>
             {topDebtors.length === 0 && (
               <div className="py-10 text-center">
@@ -1203,7 +1216,7 @@ const Dashboard: React.FC<{
           </div>
 
           {/* Flux d'Activité */}
-          <div className="lg:col-span-7 bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
+          <div className="lg:col-span-7 bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
             <SectionHeader icon={Activity} title="Flux d'Activité Récent" badge="Temps réel" color="text-indigo-600"/>
             {activityFeed.length === 0 ? (
               <div className="py-10 text-center text-slate-300 text-[10px] font-black uppercase">Aucune activité récente</div>
@@ -1221,7 +1234,7 @@ const Dashboard: React.FC<{
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
 
           {/* Alertes Stock */}
-          <div className="lg:col-span-5 bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
+          <div className="lg:col-span-5 bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
             <SectionHeader icon={AlertTriangle} title="Alertes Stock" badge={`${stockStats.out + stockStats.low} items`} color="text-amber-600"/>
             {stockStats.out === 0 && stockStats.low === 0 ? (
               <div className="py-8 text-center">
@@ -1258,7 +1271,7 @@ const Dashboard: React.FC<{
           </div>
 
           {/* Leaderboard Performance */}
-          <div className="lg:col-span-7 bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
+          <div className="lg:col-span-7 bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
             <SectionHeader icon={Trophy} title="Classement Équipe" badge="Période totale" color="text-amber-600"/>
             <div className="space-y-3">
               {staffPerformance.slice(0, 5).map((staff: any, idx: number) => (
@@ -1294,11 +1307,113 @@ const Dashboard: React.FC<{
           </div>
         </div>
 
+        {/* ── CONTRATS RÉCURRENTS ── */}
+        {recurringContracts.length > 0 && (() => {
+          const actifs = recurringContracts.filter(c => c.status === 'ACTIF');
+          const enPause = recurringContracts.filter(c => c.status === 'EN_PAUSE');
+          const totalEncaisse = recurringContracts.reduce((s, c) => s + (Number(c.amountPaid) || 0), 0);
+          const totalRestant = actifs.reduce((s, c) => s + Math.max(0, (Number(c.totalAmount) || 0) - (Number(c.amountPaid) || 0)), 0);
+          const allLateInstallments = recurringContracts.flatMap(c =>
+            (c.installments || []).filter((i: any) => i.status === 'EN_RETARD').map((i: any) => ({ ...i, _contract: c }))
+          );
+          // Top 3 contracts with most late installments
+          const contractsWithLate = recurringContracts
+            .map(c => ({
+              ...c,
+              lateCount: (c.installments || []).filter((i: any) => i.status === 'EN_RETARD').length,
+              restant: Math.max(0, (Number(c.totalAmount) || 0) - (Number(c.amountPaid) || 0)),
+              customerName: c.customer?.companyName || c.customer?.name || c.customerName || '—',
+            }))
+            .filter(c => c.lateCount > 0)
+            .sort((a, b) => b.lateCount - a.lateCount)
+            .slice(0, 3);
+
+          return (
+            <div className="bg-white rounded-2xl border border-violet-100 shadow-md overflow-hidden">
+              {/* En-tête section */}
+              <div className="px-6 py-5 bg-gradient-to-r from-violet-50 via-indigo-50 to-slate-50 border-b border-violet-100 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-2xl bg-violet-600 flex items-center justify-center shadow-sm">
+                    <FileClock size={16} className="text-white"/>
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-black uppercase tracking-tight text-violet-800">Contrats Récurrents</h3>
+                    <p className="text-[8px] font-bold text-violet-400 uppercase tracking-widest mt-0.5">{recurringContracts.length} contrat{recurringContracts.length > 1 ? 's' : ''} au total</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => onNavigate?.('recurring')}
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-violet-600 hover:bg-violet-700 text-white text-[9px] font-black uppercase tracking-widest transition-all shadow-sm hover:shadow-md"
+                >
+                  Voir tous <ChevronRight size={11}/>
+                </button>
+              </div>
+
+              <div className="p-6 space-y-6">
+                {/* KPIs */}
+                <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                  <div className="bg-emerald-50 border border-emerald-100 rounded-2xl p-4 text-center">
+                    <p className="text-[8px] font-black text-emerald-500 uppercase tracking-widest mb-1">Actifs</p>
+                    <p className="text-2xl font-black text-emerald-700 tracking-tighter">{actifs.length}</p>
+                  </div>
+                  <div className="bg-amber-50 border border-amber-100 rounded-2xl p-4 text-center">
+                    <div className="flex items-center justify-center gap-1 mb-1">
+                      <Pause size={8} className="text-amber-500"/>
+                      <p className="text-[8px] font-black text-amber-500 uppercase tracking-widest">En pause</p>
+                    </div>
+                    <p className="text-2xl font-black text-amber-700 tracking-tighter">{enPause.length}</p>
+                  </div>
+                  <div className="bg-rose-50 border border-rose-100 rounded-2xl p-4 text-center">
+                    <p className="text-[8px] font-black text-rose-500 uppercase tracking-widest mb-1">Échéances en retard</p>
+                    <p className="text-2xl font-black text-rose-700 tracking-tighter">{allLateInstallments.length}</p>
+                  </div>
+                  <div className="bg-indigo-50 border border-indigo-100 rounded-2xl p-4 text-center col-span-1">
+                    <p className="text-[8px] font-black text-indigo-500 uppercase tracking-widest mb-1">Encaissé</p>
+                    <p className="text-lg font-black text-indigo-700 tracking-tighter truncate">{fmtShort(totalEncaisse)}</p>
+                    <p className="text-[7px] text-indigo-400 font-bold">{currency.split(' ')[0]}</p>
+                  </div>
+                  <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 text-center col-span-1">
+                    <p className="text-[8px] font-black text-slate-500 uppercase tracking-widest mb-1">Restant dû</p>
+                    <p className="text-lg font-black text-slate-700 tracking-tighter truncate">{fmtShort(totalRestant)}</p>
+                    <p className="text-[7px] text-slate-400 font-bold">{currency.split(' ')[0]}</p>
+                  </div>
+                </div>
+
+                {/* Top contrats en retard */}
+                {contractsWithLate.length > 0 && (
+                  <div>
+                    <p className="text-[8px] font-black text-rose-500 uppercase tracking-widest mb-3 flex items-center gap-1.5">
+                      <AlertTriangle size={10}/> Contrats avec le plus d'échéances en retard
+                    </p>
+                    <div className="space-y-2">
+                      {contractsWithLate.map((c: any, i: number) => (
+                        <div key={c.id || i} className="flex items-center gap-3 p-3 bg-rose-50 border border-rose-100 rounded-2xl hover:bg-rose-100/60 transition-all">
+                          <div className="w-8 h-8 rounded-xl bg-rose-200 text-rose-700 flex items-center justify-center font-black text-[10px] flex-shrink-0">
+                            {String(c.customerName).charAt(0).toUpperCase()}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-[10px] font-black text-slate-800 truncate">{c.customerName}</p>
+                            <p className="text-[8px] text-slate-500 font-semibold truncate">{c.title || c.description || 'Contrat récurrent'}</p>
+                          </div>
+                          <div className="text-right flex-shrink-0">
+                            <p className="text-[9px] font-black text-rose-600">{c.lateCount} en retard</p>
+                            <p className="text-[8px] text-slate-400 font-bold">{fmtShort(c.restant)} {currency.split(' ')[0]} dû</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })()}
+
         {/* ── ROW 5 : VENTES RÉCENTES + PAIEMENTS RÉCENTS ── */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
 
           {/* Dernières Ventes */}
-          <div className="lg:col-span-7 bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
+          <div className="lg:col-span-7 bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
             <SectionHeader icon={ShoppingBag} title="Dernières Ventes" badge={`30 derniers jours`} color="text-indigo-600"/>
             <div className="overflow-x-auto">
               <table className="w-full">
@@ -1340,7 +1455,7 @@ const Dashboard: React.FC<{
           </div>
 
           {/* Paiements Récents */}
-          <div className="lg:col-span-5 bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
+          <div className="lg:col-span-5 bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
             <SectionHeader icon={Receipt} title="Encaissements Récents" color="text-emerald-600"/>
             <div className="space-y-2">
               {latestPayments.slice(0, 8).map((p: any, i: number) => (
@@ -1429,7 +1544,7 @@ const Dashboard: React.FC<{
         <StatCard title="Factures en retard" value={salesStats.overdueCount} subValue="Actions requises" icon={Clock} color="bg-amber-500"/>
       </div>
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
+        <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
           <SectionHeader icon={Scale} title="Encaissements vs Impayés" color="text-indigo-600"/>
           <div className="h-52 flex items-center justify-center">
             <ResponsiveContainer width="100%" height="100%">
@@ -1443,7 +1558,7 @@ const Dashboard: React.FC<{
             </ResponsiveContainer>
           </div>
         </div>
-        <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
+        <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
           <SectionHeader icon={ShoppingBag} title="Dernières Ventes" color="text-indigo-600"/>
           <div className="space-y-2 overflow-y-auto max-h-52">
             {sales.slice(0, 8).map((s: any) => (
@@ -1481,7 +1596,7 @@ const Dashboard: React.FC<{
         <StatCard title="Catégories" value={categories.length} subValue={`${subcategories.length} sous-catégories`} icon={Boxes} color="bg-slate-800"/>
       </div>
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
+        <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
           <SectionHeader icon={AlertTriangle} title="Alertes Stock" color="text-amber-600"/>
           {stockAlerts.ruptures.length === 0 && stockAlerts.low.length === 0 ? (
             <div className="py-10 text-center"><CheckCircle2 size={28} className="text-emerald-400 mx-auto mb-2"/><p className="text-[10px] font-black text-slate-400 uppercase">Stock optimal</p></div>
@@ -1504,7 +1619,7 @@ const Dashboard: React.FC<{
             </div>
           )}
         </div>
-        <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
+        <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
           <SectionHeader icon={History} title="Mouvements Récents" badge={`${movements.length}`} color="text-indigo-600"/>
           <div className="space-y-2 overflow-y-auto max-h-60">
             {movements.slice(0, 10).map((m: any, i: number) => (
@@ -1539,7 +1654,7 @@ const Dashboard: React.FC<{
     return (
       <div className="space-y-6 animate-in fade-in duration-700">
         {/* Bannière Performance */}
-        <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-emerald-500 via-teal-600 to-cyan-700 p-6 md:p-8 text-white shadow-xl">
+        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-emerald-500 via-teal-600 to-cyan-700 p-6 md:p-8 text-white shadow-xl">
           <div className="absolute -right-10 -top-10 w-56 h-56 bg-white/5 rounded-full pointer-events-none"/>
           <div className="absolute -left-6 bottom-0 w-28 h-28 bg-white/5 rounded-full pointer-events-none"/>
           <div className="relative flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
@@ -1568,7 +1683,7 @@ const Dashboard: React.FC<{
 
         {/* Progression */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div className="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm col-span-1 md:col-span-2">
+          <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm col-span-1 md:col-span-2">
             <SectionHeader icon={ShoppingBag} title="Mes Dernières Ventes" color="text-indigo-600"/>
             <div className="overflow-x-auto">
               <table className="w-full">
@@ -1604,7 +1719,7 @@ const Dashboard: React.FC<{
 
           {/* Mini stats */}
           <div className="flex flex-col gap-4">
-            <div className="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm flex-1">
+            <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm flex-1">
               <SectionHeader icon={CheckCircle2} title="Résumé" color="text-emerald-600"/>
               <div className="space-y-3">
                 <div className="flex items-center justify-between p-3 bg-emerald-50 rounded-xl">
@@ -1631,7 +1746,7 @@ const Dashboard: React.FC<{
               </div>
             </div>
             <button onClick={() => onNavigate?.('customers')}
-              className="bg-gradient-to-br from-sky-500 to-blue-600 text-white p-5 rounded-3xl shadow-md hover:shadow-xl hover:scale-[1.02] transition-all text-left">
+              className="bg-gradient-to-br from-sky-500 to-blue-600 text-white p-5 rounded-2xl shadow-md hover:shadow-xl hover:scale-[1.02] transition-all text-left">
               <Users size={20} className="mb-2 opacity-90"/>
               <p className="text-[11px] font-black uppercase tracking-tight">{customers.length} Clients</p>
               <p className="text-[9px] text-white/70 font-bold mt-1">Gérer le portefeuille</p>
@@ -1648,7 +1763,7 @@ const Dashboard: React.FC<{
   const renderHRManagerDashboard = () => (
     <div className="space-y-6 animate-in fade-in duration-700">
       {/* Bannière RH */}
-      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-rose-500 via-pink-600 to-purple-700 p-6 md:p-8 text-white shadow-xl">
+      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-rose-500 via-pink-600 to-purple-700 p-6 md:p-8 text-white shadow-xl">
         <div className="absolute -right-10 -top-10 w-56 h-56 bg-white/5 rounded-full pointer-events-none"/>
         <div className="absolute -left-6 bottom-0 w-32 h-32 bg-white/5 rounded-full pointer-events-none"/>
         <div className="relative flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
@@ -1705,7 +1820,7 @@ const Dashboard: React.FC<{
     return (
       <div className="space-y-6 animate-in fade-in duration-700">
         {/* Bannière Mon Espace */}
-        <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-indigo-600 via-violet-600 to-purple-700 p-6 md:p-8 text-white shadow-xl">
+        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-indigo-600 via-violet-600 to-purple-700 p-6 md:p-8 text-white shadow-xl">
           <div className="absolute -right-10 -top-10 w-56 h-56 bg-white/5 rounded-full pointer-events-none"/>
           <div className="absolute -left-6 bottom-0 w-28 h-28 bg-white/5 rounded-full pointer-events-none"/>
           <div className="relative">
@@ -1767,9 +1882,18 @@ const Dashboard: React.FC<{
   const activeDashboard = () => {
     if (loading) {
       return (
-        <div className="flex flex-col items-center justify-center py-40 gap-4">
-          <RefreshCw className="animate-spin text-indigo-600" size={40}/>
-          <p className="text-[10px] font-black uppercase text-slate-400 tracking-[0.3em]">Chargement du Centre de Commandement...</p>
+        <div className="space-y-6">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            {[...Array(8)].map((_, i) => <SkeletonCard key={i}/>)}
+          </div>
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            <div className="lg:col-span-8 bg-slate-100 rounded-2xl h-72 animate-pulse"/>
+            <div className="lg:col-span-4 bg-slate-100 rounded-2xl h-72 animate-pulse"/>
+          </div>
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            <div className="lg:col-span-5 bg-slate-100 rounded-2xl h-52 animate-pulse"/>
+            <div className="lg:col-span-7 bg-slate-100 rounded-2xl h-52 animate-pulse"/>
+          </div>
         </div>
       );
     }
@@ -1806,15 +1930,19 @@ const Dashboard: React.FC<{
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex flex-col md:flex-row justify-between md:items-center gap-4">
+      <div className="flex flex-col md:flex-row justify-between md:items-end gap-5 pb-2 border-b border-slate-100">
         <div>
-          <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1">
+          <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1.5 flex items-center gap-1.5">
+            <Calendar size={10} className="text-slate-300"/>
             {now.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
           </p>
-          <h2 className="text-3xl md:text-4xl font-black text-slate-900 tracking-tighter uppercase">
-            {greeting}, <span className="text-indigo-600">{user.name}</span>
+          <h2 className="text-3xl md:text-4xl font-black tracking-tighter uppercase">
+            {greeting},&nbsp;
+            <span className="bg-gradient-to-r from-indigo-600 via-violet-600 to-purple-600 bg-clip-text text-transparent">
+              {user.name}
+            </span>
           </h2>
-          <div className="flex flex-wrap gap-2 mt-2">
+          <div className="flex flex-wrap gap-2 mt-2.5">
             {userRoles.map(r => (
               <span key={r} className={`text-[9px] font-black uppercase tracking-widest px-3 py-1 rounded-full shadow-sm ${roleColors[r] || 'bg-slate-200 text-slate-700'}`}>
                 {roleLabels[r] || r.replace(/_/g, ' ')}
@@ -1822,7 +1950,7 @@ const Dashboard: React.FC<{
             ))}
           </div>
         </div>
-        <div className="flex items-center gap-3 px-4 py-2.5 bg-emerald-50 text-emerald-600 rounded-full border border-emerald-100 text-[9px] font-black uppercase tracking-widest self-start md:self-auto">
+        <div className="flex items-center gap-3 px-4 py-2.5 bg-emerald-50 text-emerald-700 rounded-full border border-emerald-200 text-[9px] font-black uppercase tracking-widest self-start md:self-auto shadow-sm">
           <ShieldCheck size={12}/> Connexion Sécurisée • Kernel v3.2.1
         </div>
       </div>
@@ -1832,7 +1960,7 @@ const Dashboard: React.FC<{
 
       {/* BANNIÈRE ESSAI GRATUIT — visible pour tous les rôles non-admin aussi */}
       {trialDaysLeft !== null && !userRoles.includes(UserRole.ADMIN) && !userRoles.includes(UserRole.SUPER_ADMIN) && (
-        <div className={`p-5 rounded-3xl border-2 flex flex-col sm:flex-row items-center justify-between gap-4 shadow-md ${trialDaysLeft <= 3 ? 'bg-rose-50 border-rose-300' : trialDaysLeft <= 7 ? 'bg-amber-50 border-amber-300' : 'bg-indigo-50 border-indigo-200'}`}>
+        <div className={`p-5 rounded-2xl border-2 flex flex-col sm:flex-row items-center justify-between gap-4 shadow-md ${trialDaysLeft <= 3 ? 'bg-rose-50 border-rose-300' : trialDaysLeft <= 7 ? 'bg-amber-50 border-amber-300' : 'bg-indigo-50 border-indigo-200'}`}>
           <div className="flex items-center gap-4">
             <div className={`w-10 h-10 rounded-2xl flex items-center justify-center shadow text-white ${trialDaysLeft <= 3 ? 'bg-rose-600' : trialDaysLeft <= 7 ? 'bg-amber-500' : 'bg-indigo-600'}`}>
               <Timer size={20} />
