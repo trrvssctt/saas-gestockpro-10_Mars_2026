@@ -33,10 +33,12 @@ export class AuthService {
         id: user.id,
         tenantId: user.tenantId,
         roles: userRoles,
-        role: userRoles[0], // Compatibilité descendante
+        role: userRoles[0],
         name: user.name,
-        employeeId: user.employeeId, // ✅ Ajouter le employeeId dans le JWT
-        planId: user.planId || undefined   // Inclus pour que /me retourne le plan
+        email: user.email,
+        employeeId: user.employeeId,
+        planId: user.planId || undefined,
+        isActive: user.isActive === undefined ? true : Boolean(user.isActive)
       },
       JWT_SECRET,
       { expiresIn: '24h' }
