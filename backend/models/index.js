@@ -50,6 +50,8 @@ import { Supplier } from './Supplier.js';
 import { Delivery } from './Delivery.js';
 import { DeliveryItem } from './DeliveryItem.js';
 import { RegistrationIntent } from './RegistrationIntent.js';
+import { RecurringContract } from './RecurringContract.js';
+import { RecurringInstallment } from './RecurringInstallment.js';
 
 /**
  * ARCHITECTURE KERNEL V3.2.3
@@ -237,6 +239,18 @@ DeliveryItem.belongsTo(Delivery, { foreignKey: 'delivery_id' });
 DeliveryItem.belongsTo(StockItem, { foreignKey: 'stock_item_id', as: 'stock_item' });
 StockItem.hasMany(DeliveryItem, { foreignKey: 'stock_item_id', as: 'deliveryItems' });
 
+// --- RELATIONS CONTRATS RÉCURRENTS ---
+Tenant.hasMany(RecurringContract, { foreignKey: 'tenant_id' });
+RecurringContract.belongsTo(Tenant, { foreignKey: 'tenant_id' });
+RecurringContract.belongsTo(Customer, { foreignKey: 'customer_id', as: 'customer' });
+Customer.hasMany(RecurringContract, { foreignKey: 'customer_id' });
+RecurringContract.belongsTo(Service, { foreignKey: 'service_id', as: 'service' });
+Service.hasMany(RecurringContract, { foreignKey: 'service_id' });
+RecurringContract.hasMany(RecurringInstallment, { foreignKey: 'contract_id', as: 'installments' });
+RecurringInstallment.belongsTo(RecurringContract, { foreignKey: 'contract_id', as: 'contract' });
+RecurringInstallment.belongsTo(Tenant, { foreignKey: 'tenant_id' });
+RecurringInstallment.belongsTo(Sale, { foreignKey: 'generated_sale_id', as: 'generatedSale' });
+
 // Ventes & Facturation
 Sale.belongsTo(Customer, { foreignKey: 'customer_id' });
 Customer.hasMany(Sale, { foreignKey: 'customer_id' });
@@ -270,5 +284,6 @@ export {
   Advance, Prime, Session, SupportTicket, Announcement, HRRule,
   Notification, NotificationRead, OvertimeRequest,
   Supplier, Delivery, DeliveryItem,
-  RegistrationIntent
+  RegistrationIntent,
+  RecurringContract, RecurringInstallment
 };

@@ -18,8 +18,10 @@ Sale.init({
   totalTtc: { type: DataTypes.NUMERIC(15, 2), defaultValue: 0, field: 'total_ttc' },
   taxAmount: { type: DataTypes.NUMERIC(15, 2), defaultValue: 0, field: 'tax_amount' },
   amountPaid: { type: DataTypes.NUMERIC(15, 2), defaultValue: 0, field: 'amount_paid' },
-  saleDate: { type: DataTypes.DATE, defaultValue: DataTypes.NOW, field: 'sale_date' }
-}, { 
+  saleDate: { type: DataTypes.DATE, defaultValue: DataTypes.NOW, field: 'sale_date' },
+  // Lien vers l'échéance de contrat récurrent qui a généré cette vente
+  recurringInstallmentId: { type: DataTypes.UUID, allowNull: true, field: 'recurring_installment_id' }
+}, {
   sequelize, 
   modelName: 'sale',
   tableName: 'sales',
