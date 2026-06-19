@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { User, UserRole } from '../types';
 import { apiClient } from '../services/api';
+import { useToast } from './ToastProvider';
 
 const SecurityPanel = () => {
   const [users, setUsers] = useState<User[]>([]);
@@ -51,6 +52,7 @@ const SecurityPanel = () => {
   };
 
   useEffect(() => { fetchSecurityData(); }, []);
+  const showToast = useToast();
 
   const generateStrongPassword = () => {
     const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()_+~`|}{[]:;?><,./-=";
@@ -81,7 +83,7 @@ const SecurityPanel = () => {
       setResetAccessModal(null);
       setGeneratedPassword('');
       setShowGenPass(false);
-      alert("Nouveaux accès scellés avec succès.");
+      showToast("Nouveaux accès scellés avec succès.", 'success');
     } catch (err: any) {
       console.error("Reset Password Error:", err);
       setErrorMessage(err.message || "Erreur critique lors de la réinitialisation.");
@@ -95,7 +97,7 @@ const SecurityPanel = () => {
       const res = await apiClient.post(`/auth/users/${user.id}/toggle-mfa`, {});
       setUsers(users.map(u => u.id === user.id ? { ...u, mfaEnabled: res.mfaEnabled } : u));
     } catch {
-      alert("Échec du basculement MFA.");
+      showToast("Échec du basculement MFA.", 'error');
     }
   };
 
@@ -103,7 +105,7 @@ const SecurityPanel = () => {
     try {
       const updated = await apiClient.put(`/auth/users/${user.id}`, { isActive: !user.isActive });
       setUsers(users.map(u => u.id === updated.id ? updated : u));
-    } catch { alert("Action IAM impossible."); }
+    } catch { showToast("Action IAM impossible.", 'error'); }
   };
 
   const handleSync = async () => {

@@ -1,12 +1,14 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   ArrowLeft, CheckCircle2, Loader2, Printer, Download,
   Search, Package, RefreshCw, FileText, Plus,
   AlertTriangle, ArrowRight, ShieldCheck, History,
-  X, Info, Database, Zap
+  X, Info, Database, Zap, Trash2
 } from 'lucide-react';
 import { apiClient } from '../services/api';
 import InventoryAuditReport from './InventoryAuditReport';
+import { useToast } from './ToastProvider';
+import { buildExportHandlers, exportToImage, ExportColumn } from '../services/exportUtils';
 
 interface Props {
   campaign: any;
@@ -24,12 +26,50 @@ const InventoryCampaignAudit: React.FC<Props> = ({ campaign, settings, onBack, o
   const [isValidating, setIsValidating] = useState(false);
   const [showValidationModal, setShowValidationModal] = useState(false);
   const [shouldSyncStock, setShouldSyncStock] = useState(true);
+  const [dirtyCounts, setDirtyCounts] = useState<Record<string, string>>({});
+  const [isAutoSaving, setIsAutoSaving] = useState(false);
+  const saveIntervalRef = useRef<number | null>(null);
+  const [isActing, setIsActing] = useState(false);
+  const [showSuspendModal, setShowSuspendModal] = useState(false);
+  const [showCancelModal, setShowCancelModal] = useState(false);
+  const [showExportMenu, setShowExportMenu] = useState(false);
+  const showToast = useToast();
+
+  // Colonnes pour export CSV/Excel/PDF du rapport d'audit
+  const auditExportColumns: ExportColumn[] = [
+    { key: 'stock_item', label: 'Article', format: (_v, row) => row.stock_item?.name || '' },
+    { key: 'stock_item', label: 'SKU', format: (_v, row) => row.stock_item?.sku || '' },
+    { key: 'systemQty', label: 'Qté Système', format: (v) => Number(v || 0) },
+    { key: 'countedQty', label: 'Qté Comptée', format: (v) => Number(v || 0) },
+    { key: 'countedQty', label: 'Écart', format: (_v, row) => Number(row.countedQty || 0) - Number(row.systemQty || 0) },
+    {
+      key: 'countedQty', label: 'Constat',
+      format: (_v, row) => {
+        const diff = Math.abs((Number(row.countedQty || 0) - Number(row.systemQty || 0)));
+        const pct = Number(row.systemQty) > 0 ? (diff / Number(row.systemQty)) * 100 : 0;
+        if (Number(row.countedQty) === Number(row.systemQty)) return 'Normal';
+        if (pct <= 5) return 'Cohérent';
+        return 'Incohérent';
+      }
+    },
+  ];
 
   const fetchItems = async () => {
     setLoading(true);
     try {
       const data = await apiClient.get(`/stock/campaigns/${campaign.id}`);
-      setItems(data.items || []);
+      // restore any locally saved counted quantities so user can resume where they left off
+      const lsKey = `inventory_campaign_${campaign.id}_counts`;
+      let saved: Record<string, string> = {};
+      try { saved = JSON.parse(localStorage.getItem(lsKey) || '{}'); } catch (e) { saved = {}; }
+      const items = (data.items || []).map((i: any) => ({
+        ...i,
+        // for a new draft campaign we want inputs empty; otherwise use server value; prefer locally saved value if present
+        countedQty: saved[i.id] !== undefined ? saved[i.id] : (campaign.status === 'DRAFT' ? '' : (i.countedQty ?? 0))
+      }));
+      setItems(items);
+      // initialize dirty map from saved local values so subsequent edits merge rather than overwrite
+      setDirtyCounts(saved || {});
     } catch (e) {
       console.error("Fetch Campaign Items error");
     } finally {
@@ -41,29 +81,90 @@ const InventoryCampaignAudit: React.FC<Props> = ({ campaign, settings, onBack, o
     fetchItems();
   }, [campaign.id]);
 
-  const handleUpdateQty = async (itemId: string, val: string) => {
-    const qty = parseInt(val) || 0;
-    setItems(prev => prev.map(i => i.id === itemId ? { ...i, countedQty: qty } : i));
-    
-    setIsSaving(itemId);
+  // periodic autosave interval
+  useEffect(() => {
+    if (saveIntervalRef.current) window.clearInterval(saveIntervalRef.current);
+    saveIntervalRef.current = window.setInterval(() => {
+      batchSave();
+    }, 10000);
+    const onUnload = () => { batchSave(); };
+    window.addEventListener('beforeunload', onUnload);
+    const onVisibility = () => { if (document.visibilityState === 'hidden') batchSave(); };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      if (saveIntervalRef.current) window.clearInterval(saveIntervalRef.current);
+      window.removeEventListener('beforeunload', onUnload);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [campaign.id]);
+
+  // Update local state and mark item as dirty; actual server sync is batched
+  const persistToLocal = (map: Record<string, string>) => {
+    const lsKey = `inventory_campaign_${campaign.id}_counts`;
+    try { localStorage.setItem(lsKey, JSON.stringify(map)); } catch (e) { /* ignore */ }
+  };
+
+  const handleUpdateQty = (itemId: string, val: string) => {
+    // keep the raw string so empty value is preserved for UI
+    setItems(prev => prev.map(i => i.id === itemId ? { ...i, countedQty: val } : i));
+    setDirtyCounts(prev => {
+      const next = { ...prev, [itemId]: val };
+      persistToLocal(next);
+      return next;
+    });
+  };
+
+  // Batch-save dirty items to server in chunks
+  const batchSave = async () => {
+    const entries = Object.entries(dirtyCounts);
+    if (entries.length === 0) return;
+    setIsAutoSaving(true);
+    const chunkSize = 50;
     try {
-      await apiClient.put(`/stock/campaigns/${campaign.id}/items/${itemId}`, { countedQty: qty });
-    } catch (e) {
-      console.error("Autosave error");
+      for (let i = 0; i < entries.length; i += chunkSize) {
+        const chunk = entries.slice(i, i + chunkSize);
+        await Promise.all(chunk.map(async ([itemId, val]) => {
+          const parsed = parseInt(String(val));
+          const body: any = { countedQty: Number.isNaN(parsed) ? null : parsed };
+          try {
+            await apiClient.put(`/stock/campaigns/${campaign.id}/items/${itemId}`, body);
+            // on success, remove from dirty map
+            setDirtyCounts(prev => {
+              const copy = { ...prev };
+              delete copy[itemId];
+              persistToLocal(copy);
+              return copy;
+            });
+          } catch (e) {
+            console.error('Batch save error', e);
+          }
+        }));
+      }
     } finally {
-      setIsSaving(null);
+      setIsAutoSaving(false);
     }
   };
 
   const finalizeClosure = async () => {
+    // double-check that all fields are filled before finalizing
+    const stillMissing = items.some(i => {
+      const v = i.countedQty;
+      return v === '' || v === null || v === undefined || Number.isNaN(parseInt(String(v)));
+    });
+    if (stillMissing) { showToast('Impossible de clôturer : toutes les quantités ne sont pas remplies.', 'error'); return; }
+
     setIsValidating(true);
     try {
+      await batchSave();
       await apiClient.post(`/stock/campaigns/${campaign.id}/validate`, { syncStock: shouldSyncStock });
       campaign.status = 'VALIDATED';
+      // clear local saved counts on successful validation
+      try { localStorage.removeItem(`inventory_campaign_${campaign.id}_counts`); } catch (e) { /* ignore */ }
       setShowValidationModal(false);
       setShowReport(true);
     } catch (e: any) {
-      alert(e.message || "Erreur lors de la clôture.");
+      showToast(e.message || "Erreur lors de la clôture.", 'error');
     } finally {
       setIsValidating(false);
     }
@@ -75,6 +176,14 @@ const InventoryCampaignAudit: React.FC<Props> = ({ campaign, settings, onBack, o
   );
 
   const isLocked = campaign.status === 'VALIDATED';
+
+  // Ensure all lines have a counted quantity (non-empty and numeric) before allowing closure
+  const allCounted = items.length > 0 && items.every(i => {
+    const v = i.countedQty;
+    if (v === '' || v === null || v === undefined) return false;
+    const n = parseInt(String(v));
+    return !Number.isNaN(n);
+  });
 
   if (showReport || isLocked) {
     return (
@@ -96,44 +205,66 @@ const InventoryCampaignAudit: React.FC<Props> = ({ campaign, settings, onBack, o
               >
                 <Plus size={18} /> NOUVELLE CAMPAGNE
               </button>
-              <div className="flex items-center justify-end gap-3">
-                <button onClick={async () => {
-                  try {
-                    if (!(window as any).html2canvas) {
-                      await new Promise<void>((resolve, reject) => {
-                        const s = document.createElement('script');
-                        s.src = 'https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js';
-                        s.async = true;
-                        s.onload = () => resolve();
-                        s.onerror = () => reject(new Error('Chargement html2canvas échoué'));
-                        document.head.appendChild(s);
+              {/* MENU EXPORT RAPPORT AUDIT */}
+              <div className="relative">
+                <button
+                  onClick={() => setShowExportMenu(!showExportMenu)}
+                  className="px-6 py-4 bg-white border border-slate-200 text-slate-900 rounded-2xl font-black text-xs uppercase tracking-widest flex items-center gap-3 shadow-sm hover:bg-slate-50"
+                >
+                  <Download size={18}/> Exporter
+                </button>
+                {showExportMenu && (
+                  <div className="absolute right-0 top-full mt-2 bg-white border border-slate-100 rounded-2xl shadow-2xl z-50 w-52 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200">
+                    {(() => {
+                      const fname = `audit-${(campaign?.name || campaign?.id || 'rapport').replace(/\s+/g, '-').toLowerCase()}`;
+                      const exportInfo = buildExportHandlers({
+                        data: items,
+                        columns: auditExportColumns,
+                        options: {
+                          filename: fname,
+                          sheetName: 'Audit',
+                          title: `Rapport d'Audit — ${campaign?.name || ''}`,
+                          companyInfo: {
+                            name: settings?.name,
+                            address: settings?.address,
+                            phone: settings?.phone,
+                            email: settings?.email,
+                          }
+                        },
+                        tableElementId: 'document-render',
+                        showToast,
                       });
-                    }
-
-                    const html2canvas = (window as any).html2canvas;
-                    if (!html2canvas) throw new Error('html2canvas non disponible');
-
-                    const node = document.getElementById('document-render');
-                    if (!node) throw new Error('Aperçu introuvable');
-
-                    const canvas = await html2canvas(node as HTMLElement, { scale: 2, useCORS: true, backgroundColor: '#ffffff' });
-                    canvas.toBlob((blob: Blob | null) => {
-                      if (!blob) { alert('Impossible de générer l\'image'); return; }
-                      const url = window.URL.createObjectURL(blob);
-                      const a = document.createElement('a');
-                      a.href = url;
-                      const filename = `${(campaign?.name || campaign?.id)}.png`;
-                      a.download = filename;
-                      document.body.appendChild(a);
-                      a.click();
-                      a.remove();
-                      window.URL.revokeObjectURL(url);
-                    }, 'image/png', 0.95);
-                  } catch (err: any) {
-                    console.error('Capture/download error', err);
-                    alert(err?.message || 'Erreur lors de la génération de l\'image');
-                  }
-                }} className="px-8 py-4 bg-white border border-slate-200 text-slate-900 rounded-2xl font-black text-xs uppercase tracking-widest flex items-center gap-3 shadow-sm hover:bg-slate-50"><Download size={18}/> Télécharger</button>
+                      const menuItems = [
+                        { label: 'CSV (.csv)', action: exportInfo.csv, icon: '📄' },
+                        { label: 'Excel (.xlsx)', action: exportInfo.excel, icon: '📊' },
+                        { label: 'PDF (impression)', action: exportInfo.pdf, icon: '🖨️' },
+                        {
+                          label: 'Image PNG',
+                          action: () => exportToImage('document-render', fname, 'png')
+                            .then(() => showToast('Export PNG réussi', 'success'))
+                            .catch((e: any) => showToast(e.message || 'Erreur image', 'error')),
+                          icon: '🖼️'
+                        },
+                        {
+                          label: 'Image JPG',
+                          action: () => exportToImage('document-render', fname, 'jpg')
+                            .then(() => showToast('Export JPG réussi', 'success'))
+                            .catch((e: any) => showToast(e.message || 'Erreur image', 'error')),
+                          icon: '📷'
+                        },
+                      ];
+                      return menuItems.map(({ label, action, icon }) => (
+                        <button
+                          key={label}
+                          onClick={() => { action(); setShowExportMenu(false); }}
+                          className="w-full flex items-center gap-3 px-5 py-3 text-[10px] font-black uppercase tracking-widest text-slate-600 hover:bg-indigo-50 hover:text-indigo-700 transition-all"
+                        >
+                          <span>{icon}</span> {label}
+                        </button>
+                      ));
+                    })()}
+                  </div>
+                )}
               </div>
           </div>
         </div>
@@ -157,12 +288,140 @@ const InventoryCampaignAudit: React.FC<Props> = ({ campaign, settings, onBack, o
             </p>
           </div>
         </div>
-        <button 
-          onClick={() => setShowValidationModal(true)}
-          className="bg-indigo-600 text-white px-10 py-5 rounded-[1.5rem] font-black hover:bg-slate-900 transition-all shadow-xl flex items-center gap-3 text-xs uppercase tracking-widest active:scale-95"
-        >
-          <CheckCircle2 size={18} /> CLÔTURER L'AUDIT
-        </button>
+        <div className="flex items-center gap-3">
+          {campaign.status === 'DRAFT' && (
+            <>
+              <button
+                onClick={() => setShowSuspendModal(true)}
+                className="px-6 py-3 bg-white border border-slate-100 text-slate-700 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-slate-50"
+              >
+                {isActing ? <Loader2 className="animate-spin"/> : <RefreshCw size={16} />} SUSPENDRE
+              </button>
+              <button
+                onClick={() => setShowCancelModal(true)}
+                className="px-6 py-3 bg-white border border-rose-100 text-rose-600 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-rose-600 hover:text-white"
+              >
+                {isActing ? <Loader2 className="animate-spin"/> : <Trash2 size={16} />} ANNULER
+              </button>
+            </>
+          )}
+
+          {campaign.status === 'SUSPENDED' && (
+            <>
+              <button
+                onClick={async () => {
+                  setIsActing(true);
+                  try {
+                    await apiClient.post(`/stock/campaigns/${campaign.id}/resume`);
+                    showToast('Campagne relancée.', 'success');
+                    campaign.status = 'DRAFT';
+                    fetchItems();
+                  } catch (err: any) {
+                    showToast(err?.message || 'Impossible de relancer la campagne.', 'error');
+                  } finally { setIsActing(false); }
+                }}
+                className="px-6 py-3 bg-white border border-indigo-100 text-indigo-700 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-indigo-600 hover:text-white"
+              >
+                {isActing ? <Loader2 className="animate-spin"/> : <ArrowRight size={16} />} RELANCER
+              </button>
+              <button
+                onClick={() => setShowCancelModal(true)}
+                className="px-6 py-3 bg-white border border-rose-100 text-rose-600 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-rose-600 hover:text-white"
+              >
+                {isActing ? <Loader2 className="animate-spin"/> : <Trash2 size={16} />} ANNULER
+              </button>
+            </>
+          )}
+
+          {/* Suspend/Cancel modals */}
+          {showSuspendModal && (
+            <div className="fixed inset-0 z-[1150] flex items-center justify-center p-6 bg-slate-950/80 backdrop-blur-md">
+              <div className="bg-white w-full max-w-lg rounded-[2.5rem] shadow-2xl overflow-hidden">
+                <div className="px-8 py-6 bg-amber-50 border-b border-amber-100 flex items-start gap-4">
+                  <div className="w-12 h-12 rounded-xl bg-amber-100 flex items-center justify-center text-amber-600"><RefreshCw size={24} /></div>
+                  <div>
+                    <h3 className="text-lg font-black uppercase">Suspendre la campagne</h3>
+                    <p className="text-sm text-slate-500 mt-1">Mettez la campagne en pause pour reprendre la saisie ultérieurement.</p>
+                  </div>
+                </div>
+                <div className="p-8 space-y-6">
+                  <div className="p-4 bg-slate-50 border border-slate-100 rounded-2xl">
+                    <p className="text-[12px] font-bold text-slate-700">Confirmez la suspension de :</p>
+                    <p className="mt-2 text-sm font-black text-slate-900 uppercase tracking-tight">{campaign.name}</p>
+                    <p className="text-xs text-slate-400 mt-1 font-mono">ID: {campaign.id?.slice(0,8)}</p>
+                  </div>
+                  <div className="flex gap-4">
+                    <button onClick={() => setShowSuspendModal(false)} className="flex-1 py-4 rounded-2xl border border-slate-200 text-slate-500 font-black uppercase text-xs">Annuler</button>
+                    <button onClick={async () => {
+                      setIsActing(true);
+                      try {
+                        await apiClient.post(`/stock/campaigns/${campaign.id}/suspend`);
+                        showToast('Campagne suspendue.', 'success');
+                        setShowSuspendModal(false);
+                        onBack();
+                      } catch (err: any) {
+                        showToast(err?.message || 'Impossible de suspendre la campagne.', 'error');
+                      } finally { setIsActing(false); }
+                    }} className={`flex-1 py-4 rounded-2xl font-black text-xs uppercase bg-amber-600 text-white hover:bg-amber-700`}>{isActing ? <Loader2 className="animate-spin"/> : 'Suspendre la campagne'}</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {showCancelModal && (
+            <div className="fixed inset-0 z-[1150] flex items-center justify-center p-6 bg-slate-950/90 backdrop-blur-md">
+              <div className="bg-white w-full max-w-lg rounded-[2.5rem] shadow-2xl overflow-hidden">
+                <div className="px-8 py-6 bg-rose-50 border-b border-rose-100 flex items-start gap-4">
+                  <div className="w-12 h-12 rounded-xl bg-rose-100 flex items-center justify-center text-rose-600"><Trash2 size={24} /></div>
+                  <div>
+                    <h3 className="text-lg font-black uppercase">Annuler la campagne</h3>
+                    <p className="text-sm text-slate-500 mt-1">Cette action est irréversible et supprimera l'état actif de la campagne.</p>
+                  </div>
+                </div>
+                <div className="p-8 space-y-6">
+                  <div className="p-4 bg-slate-50 border border-slate-100 rounded-2xl">
+                    <p className="text-[12px] font-bold text-slate-700">Confirmez l'annulation de :</p>
+                    <p className="mt-2 text-sm font-black text-slate-900 uppercase tracking-tight">{campaign.name}</p>
+                    <p className="text-xs text-slate-400 mt-1 font-mono">ID: {campaign.id?.slice(0,8)}</p>
+                  </div>
+                  <div className="flex gap-4">
+                    <button onClick={() => setShowCancelModal(false)} className="flex-1 py-4 rounded-2xl border border-slate-200 text-slate-500 font-black uppercase text-xs">Retour</button>
+                    <button onClick={async () => {
+                      setIsActing(true);
+                      try {
+                        await apiClient.post(`/stock/campaigns/${campaign.id}/cancel`);
+                        showToast('Campagne annulée.', 'success');
+                        setShowCancelModal(false);
+                        onBack();
+                      } catch (err: any) {
+                        showToast(err?.message || 'Impossible d\'annuler la campagne.', 'error');
+                      } finally { setIsActing(false); }
+                    }} className={`flex-1 py-4 rounded-2xl font-black text-xs uppercase bg-rose-600 text-white hover:bg-rose-700`}>{isActing ? <Loader2 className="animate-spin"/> : 'Annuler définitivement'}</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {campaign.status === 'CANCELLED' && (
+            <div className="px-6 py-3 text-rose-600 font-black uppercase text-xs">Campagne annulée — aucune action possible</div>
+          )}
+
+          <button
+            onClick={() => {
+              if (!allCounted) {
+                alert('Veuillez saisir toutes les quantités avant de clôturer l\'audit.');
+                return;
+              }
+              setShowValidationModal(true);
+            }}
+              disabled={!allCounted || campaign.status !== 'DRAFT'}
+              className={`px-10 py-5 rounded-[1.5rem] font-black transition-all shadow-xl flex items-center gap-3 text-xs uppercase tracking-widest active:scale-95 ${allCounted && campaign.status === 'DRAFT' ? 'bg-indigo-600 text-white hover:bg-slate-900' : 'bg-slate-200 text-slate-400 cursor-not-allowed'}`}
+          >
+            <CheckCircle2 size={18} /> CLÔTURER L'AUDIT
+          </button>
+        </div>
       </div>
 
       <div className="bg-white p-4 rounded-[2.5rem] border border-slate-100 shadow-sm flex items-center gap-4">
@@ -177,7 +436,7 @@ const InventoryCampaignAudit: React.FC<Props> = ({ campaign, settings, onBack, o
           />
         </div>
         <div className="flex items-center gap-2 px-6 py-4 bg-emerald-50 text-emerald-600 rounded-2xl border border-emerald-100 text-[10px] font-black uppercase">
-          <RefreshCw size={14} className="animate-spin" /> SAUVEGARDE AUTO
+          <RefreshCw size={14} className={isAutoSaving ? 'animate-spin' : ''} /> SAUVEGARDE AUTO
         </div>
       </div>
 

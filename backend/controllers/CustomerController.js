@@ -1,4 +1,4 @@
-import { Customer, Invoice, AuditLog, Sale } from '../models/index.js';
+import { Customer, AuditLog, Sale } from '../models/index.js';
 import crypto from 'crypto';
 import { sequelize } from '../config/database.js';
 import { Op } from 'sequelize';
@@ -140,17 +140,40 @@ export class CustomerController {
       const { id } = req.params;
       const tenantId = req.user.tenantId;
 
-      // 1. Vérification des ventes liées
-      const saleCount = await Sale.count({ where: { customerId: id, tenantId } });
-      if (saleCount > 0) {
-        return res.status(403).json({ 
-          error: 'UpdateLocked', 
-          message: 'Modification impossible : ce client est rattaché à des ventes actives dans le registre.' 
-        });
-      }
-
       const customer = await Customer.findOne({ where: { id, tenantId, status: 'actif' } });
       if (!customer) return res.status(404).json({ error: 'NotFound', message: 'Client introuvable.' });
+
+      // Vérifier que l'email/téléphone ne sont pas déjà utilisés par un AUTRE client actif
+      const { email, phone } = req.body;
+      const orConditions = [
+        ...(email ? [{ email }] : []),
+        ...(phone ? [{ phone }] : []),
+      ];
+
+      if (orConditions.length) {
+        const conflict = await Customer.findOne({
+          where: {
+            tenantId,
+            id: { [Op.ne]: id },           // exclure le client en cours de modification
+            status: { [Op.ne]: 'supprimer' }, // exclure les clients supprimés
+            [Op.or]: orConditions
+          }
+        });
+
+        if (conflict) {
+          const usedEmail = email && conflict.email === email;
+          const usedPhone = phone && conflict.phone === phone;
+          const field = usedEmail && usedPhone
+            ? 'cet email et ce numéro de téléphone sont déjà utilisés'
+            : usedEmail
+            ? 'cet email est déjà utilisé'
+            : 'ce numéro de téléphone est déjà utilisé';
+          return res.status(400).json({
+            error: 'UpdateError',
+            message: `Modification impossible : ${field} par un autre client.`
+          });
+        }
+      }
 
       await customer.update(req.body);
       return res.status(200).json(customer);

@@ -1,6 +1,6 @@
 
 import { FinanceService } from '../services/FinanceService.js';
-import { Invoice, InvoiceItem, StockItem } from '../models/index.js';
+import { Invoice, InvoiceItem } from '../models/index.js';
 
 export class FinanceController {
   /**

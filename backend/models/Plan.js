@@ -8,6 +8,7 @@ Plan.init({
   id: { type: DataTypes.STRING, primaryKey: true }, 
   name: { type: DataTypes.STRING, allowNull: false },
   priceMonthly: { type: DataTypes.FLOAT, allowNull: false, field: 'price_monthly' },
+  priceThreeMonths: { type: DataTypes.FLOAT, allowNull: true, field: 'price_three_months' },
   priceYearly: { type: DataTypes.FLOAT, allowNull: false, field: 'price_yearly' },
   trialDays: { type: DataTypes.INTEGER, defaultValue: 14, field: 'trial_days' },
   maxUsers: { type: DataTypes.INTEGER, defaultValue: 1, field: 'max_users' },

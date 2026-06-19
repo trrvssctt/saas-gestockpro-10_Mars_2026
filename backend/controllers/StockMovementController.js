@@ -1,5 +1,5 @@
 
-import { ProductMovement, StockItem, Tenant, User } from '../models/index.js';
+import { ProductMovement, StockItem } from '../models/index.js';
 import { sequelize } from '../config/database.js';
 import { Op, fn, col } from 'sequelize';
 

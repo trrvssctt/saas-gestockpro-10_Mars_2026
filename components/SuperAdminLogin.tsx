@@ -1,8 +1,8 @@
 
 import React, { useState } from 'react';
-import { 
-  ShieldCheck, Lock, Mail, ArrowRight, RefreshCw, 
-  Terminal, ShieldAlert, X, Eye, EyeOff, Zap, Fingerprint
+import {
+  ShieldCheck, Lock, ArrowRight, RefreshCw,
+  ShieldAlert, Eye, EyeOff, Fingerprint, Terminal, Zap
 } from 'lucide-react';
 import { User, UserRole } from '../types';
 import { authBridge } from '../services/authBridge';
@@ -25,19 +25,18 @@ const SuperAdminLogin: React.FC<Props> = ({ onLoginSuccess }) => {
     setError(null);
 
     try {
-      // Rappel : identifiants par défaut = master@gestock.pro / admin123
       const data = await apiClient.post('/auth/superadmin/login', {
         email: email.trim().toLowerCase(),
         password: password.trim()
       });
-      
-      const user = { 
-        ...data.user, 
-        role: UserRole.SUPER_ADMIN, 
-        roles: [UserRole.SUPER_ADMIN], 
-        tenantId: 'SYSTEM' 
+
+      const user = {
+        ...data.user,
+        role: UserRole.SUPER_ADMIN,
+        roles: [UserRole.SUPER_ADMIN],
+        tenantId: 'SYSTEM'
       };
-      
+
       authBridge.saveSession(user, data.token);
       onLoginSuccess(user);
     } catch (err: any) {
@@ -49,79 +48,116 @@ const SuperAdminLogin: React.FC<Props> = ({ onLoginSuccess }) => {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 flex items-center justify-center p-6 font-mono selection:bg-rose-500 selection:text-white">
-      {/* Background Matrix-like effect */}
-      <div className="absolute inset-0 overflow-hidden pointer-events-none opacity-20">
-         <div className="absolute top-0 left-0 w-full h-full bg-[radial-gradient(circle_at_50%_50%,#1e1b4b,transparent_70%)]"></div>
-         <div className="grid grid-cols-12 gap-4 h-full w-full opacity-10">
-            {[...Array(48)].map((_, i) => (
-              <div key={i} className="h-full border-r border-slate-800"></div>
-            ))}
-         </div>
+    <div className="min-h-screen bg-zinc-950 flex items-center justify-center p-6 relative overflow-hidden">
+      {/* Animated background */}
+      <div className="absolute inset-0 pointer-events-none">
+        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[600px] h-[600px] bg-indigo-600/5 rounded-full blur-3xl" />
+        <div className="absolute bottom-0 left-0 w-[400px] h-[400px] bg-rose-600/5 rounded-full blur-3xl" />
+        <div className="absolute top-1/2 right-0 w-[400px] h-[400px] bg-violet-600/5 rounded-full blur-3xl" />
+        {/* Grid lines */}
+        <div className="absolute inset-0 opacity-[0.03]"
+          style={{ backgroundImage: 'linear-gradient(#ffffff 1px, transparent 1px), linear-gradient(90deg, #ffffff 1px, transparent 1px)', backgroundSize: '64px 64px' }} />
       </div>
 
-      <div className="max-w-md w-full relative z-10">
-        <div className="text-center mb-12 animate-in fade-in slide-in-from-top-4 duration-1000">
-           <div className="w-24 h-24 bg-rose-500/10 border-2 border-rose-500/30 rounded-[2.5rem] flex items-center justify-center mx-auto mb-8 shadow-[0_0_50px_rgba(244,63,94,0.1)] relative group">
-              <Fingerprint size={48} className="text-rose-500 group-hover:scale-110 transition-transform" />
-              <div className="absolute inset-0 bg-rose-500/20 blur-2xl rounded-full animate-pulse"></div>
-           </div>
-           <h2 className="text-sm font-black text-rose-500 tracking-[0.5em] uppercase mb-2">Restricted Area</h2>
-           <h1 className="text-4xl font-black text-white tracking-tighter uppercase leading-none">Kernel Master</h1>
+      <div className="relative z-10 w-full max-w-md">
+        {/* Header */}
+        <div className="text-center mb-10">
+          <div className="relative inline-flex mb-8">
+            <div className="w-24 h-24 bg-gradient-to-br from-rose-500/20 to-indigo-600/20 border border-rose-500/20 rounded-[2rem] flex items-center justify-center shadow-2xl">
+              <Fingerprint size={44} className="text-rose-400" />
+            </div>
+            <div className="absolute -top-1 -right-1 w-6 h-6 bg-indigo-500 rounded-full flex items-center justify-center shadow-lg">
+              <ShieldCheck size={12} className="text-white" />
+            </div>
+          </div>
+          <div className="space-y-1">
+            <p className="text-[10px] font-black text-rose-500 tracking-[0.5em] uppercase">Zone restreinte</p>
+            <h1 className="text-4xl font-black text-white tracking-tight">Kernel Master</h1>
+            <p className="text-sm text-zinc-500 mt-2">Espace d'administration SuperAdmin</p>
+          </div>
         </div>
 
-        <div className="bg-slate-900 border-t-4 border-rose-500 rounded-[3rem] p-12 shadow-2xl relative overflow-hidden">
-           {error && (
-             <div className="mb-8 p-5 bg-rose-500/10 border border-rose-500/30 rounded-2xl flex items-center gap-4 text-rose-500 text-xs font-bold uppercase animate-in shake">
-               <ShieldAlert size={18} />
-               {error}
-             </div>
-           )}
+        {/* Card */}
+        <div className="bg-zinc-900/80 backdrop-blur-xl border border-zinc-700/50 rounded-3xl p-8 shadow-2xl">
+          {/* Error */}
+          {error && (
+            <div className="mb-6 p-4 bg-rose-500/10 border border-rose-500/25 rounded-2xl flex items-start gap-3 text-rose-400 text-xs font-bold animate-in fade-in duration-300">
+              <ShieldAlert size={16} className="shrink-0 mt-0.5" />
+              <span>{error}</span>
+            </div>
+          )}
 
-           <form onSubmit={handleLogin} className="space-y-6">
-              <div className="space-y-4">
-                 <div className="relative group">
-                    <Terminal className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-500 group-focus-within:text-rose-500 transition-colors" size={18} />
-                    <input 
-                      type="email" 
-                      required 
-                      value={email}
-                      onChange={e => setEmail(e.target.value.toLowerCase())}
-                      className="w-full bg-slate-950 border border-slate-800 rounded-2xl pl-14 pr-6 py-5 text-sm font-bold text-white outline-none focus:ring-2 focus:ring-rose-500/30 transition-all" 
-                      placeholder="MASTER_ID" 
-                    />
-                 </div>
-                 <div className="relative group">
-                    <Lock className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-500 group-focus-within:text-rose-500 transition-colors" size={18} />
-                    <input 
-                      type={showPassword ? 'text' : 'password'} 
-                      required 
-                      value={password}
-                      onChange={e => setPassword(e.target.value)}
-                      className="w-full bg-slate-950 border border-slate-800 rounded-2xl pl-14 pr-14 py-5 text-sm font-bold text-white outline-none focus:ring-2 focus:ring-rose-500/30 transition-all" 
-                      placeholder="ACCESS_KEY" 
-                    />
-                    <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-5 top-1/2 -translate-y-1/2 text-slate-600 hover:text-rose-500">
-                      {showPassword ? <EyeOff size={18}/> : <Eye size={18}/>}
-                    </button>
-                 </div>
+          <form onSubmit={handleLogin} className="space-y-5">
+            {/* Email */}
+            <div className="space-y-1.5">
+              <label className="text-[10px] font-black text-zinc-400 uppercase tracking-[0.2em]">Identifiant</label>
+              <div className="relative group">
+                <Terminal className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-600 group-focus-within:text-rose-400 transition-colors" size={16} />
+                <input
+                  type="email"
+                  required
+                  value={email}
+                  onChange={e => setEmail(e.target.value.toLowerCase())}
+                  className="w-full bg-zinc-950/50 border border-zinc-700/50 focus:border-rose-500/50 rounded-xl pl-12 pr-4 py-4 text-sm font-medium text-white outline-none focus:ring-2 focus:ring-rose-500/20 transition-all placeholder:text-zinc-600"
+                  placeholder="admin@kernel.sys"
+                />
               </div>
+            </div>
 
-              <button 
-                type="submit" 
-                disabled={loading}
-                className="w-full py-6 bg-rose-500 text-white rounded-2xl font-black text-xs uppercase tracking-[0.3em] shadow-xl hover:bg-rose-600 active:scale-[0.98] transition-all flex items-center justify-center gap-4"
-              >
-                {loading ? <RefreshCw className="animate-spin" size={20} /> : <>AUTHENTICATE <ArrowRight size={18}/></>}
-              </button>
-           </form>
+            {/* Password */}
+            <div className="space-y-1.5">
+              <label className="text-[10px] font-black text-zinc-400 uppercase tracking-[0.2em]">Clé d'accès</label>
+              <div className="relative group">
+                <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-600 group-focus-within:text-rose-400 transition-colors" size={16} />
+                <input
+                  type={showPassword ? 'text' : 'password'}
+                  required
+                  value={password}
+                  onChange={e => setPassword(e.target.value)}
+                  className="w-full bg-zinc-950/50 border border-zinc-700/50 focus:border-rose-500/50 rounded-xl pl-12 pr-12 py-4 text-sm font-medium text-white outline-none focus:ring-2 focus:ring-rose-500/20 transition-all placeholder:text-zinc-600"
+                  placeholder="••••••••••••"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-4 top-1/2 -translate-y-1/2 text-zinc-600 hover:text-zinc-400 transition-colors"
+                >
+                  {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
+            </div>
+
+            {/* Submit */}
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full py-4 bg-gradient-to-r from-rose-500 to-rose-600 text-white rounded-xl font-black text-xs uppercase tracking-[0.25em] shadow-lg shadow-rose-500/20 hover:from-rose-400 hover:to-rose-500 active:scale-[0.98] transition-all flex items-center justify-center gap-3 disabled:opacity-60 disabled:cursor-not-allowed mt-2"
+            >
+              {loading ? (
+                <>
+                  <RefreshCw className="animate-spin" size={16} />
+                  Authentification...
+                </>
+              ) : (
+                <>
+                  <Zap size={16} />
+                  Accéder au Kernel
+                  <ArrowRight size={16} />
+                </>
+              )}
+            </button>
+          </form>
         </div>
 
-        <div className="mt-12 text-center">
-           <p className="text-[10px] font-black text-slate-600 uppercase tracking-widest leading-loose">
-             Authorized Personnel Only.<br/>
-             Every access attempt is logged with IP & Geolocation signature.
-           </p>
+        {/* Footer */}
+        <div className="mt-8 text-center space-y-2">
+          <div className="flex items-center justify-center gap-2 text-[9px] font-black text-zinc-700 uppercase tracking-widest">
+            <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+            Système opérationnel
+          </div>
+          <p className="text-[9px] text-zinc-700 uppercase tracking-widest">
+            Chaque tentative d'accès est enregistrée avec signature IP.
+          </p>
         </div>
       </div>
     </div>

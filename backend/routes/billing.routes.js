@@ -25,9 +25,39 @@ router.get('/my-subscription', checkRole(['ADMIN']), SubscriptionController.getM
 router.post('/upgrade', checkRole(['ADMIN']), SubscriptionController.upgradePlan);
 
 /**
+ * @route POST /api/billing/pay
+ * @desc  Enregistre un paiement d'abonnement (pending) pour validation admin
+ */
+router.post('/pay', checkRole(['ADMIN']), SubscriptionController.recordPayment);
+
+/**
+ * @route POST /api/billing/stripe/checkout
+ * @desc  Crée une Stripe Checkout Session et retourne l'URL de redirection
+ */
+router.post('/stripe/checkout', checkRole(['ADMIN']), SubscriptionController.stripeCheckout);
+
+/**
+ * @route GET /api/billing/stripe/session/:sessionId
+ * @desc  Vérifie le statut d'une session Stripe Checkout (page de succès)
+ */
+router.get('/stripe/session/:sessionId', checkRole(['ADMIN']), SubscriptionController.getStripeSession);
+
+/**
  * @route GET /api/billing/invoice/:paymentId
  * @desc  Génère/Télécharge la facture d'un paiement d'abonnement
  */
 router.get('/invoice/:paymentId', checkRole(['ADMIN']), SubscriptionController.downloadSubscriptionInvoice);
+
+/**
+ * @route POST /api/billing/wave/checkout
+ * @desc  Crée une Wave Checkout Session et retourne l'URL de paiement Wave
+ */
+router.post('/wave/checkout', checkRole(['ADMIN']), SubscriptionController.waveCheckout);
+
+/**
+ * @route GET /api/billing/wave/session/:clientReference
+ * @desc  Vérifie le statut d'une session Wave (page de succès)
+ */
+router.get('/wave/session/:clientReference', checkRole(['ADMIN']), SubscriptionController.getWaveSession);
 
 export default router;

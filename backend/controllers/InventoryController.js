@@ -1,14 +1,20 @@
 
-import { StockItem, ProductMovement, AuditLog, User, SaleItem } from '../models/index.js';
+import { StockItem, ProductMovement, SaleItem } from '../models/index.js';
 import { sequelize } from '../config/database.js';
 import { NotificationService } from '../services/NotificationService.js';
 
 async function checkActiveInventory(tenantId) {
-  const [active] = await sequelize.query(
-    'SELECT name FROM inventory_campaigns WHERE tenant_id = :tenantId AND status = \'DRAFT\' LIMIT 1',
-    { replacements: { tenantId }, type: sequelize.QueryTypes.SELECT }
-  );
-  if (active) throw new Error(`Action bloquée : Un inventaire physique ("${active.name}") est actuellement en cours.`);
+  try {
+    const [active] = await sequelize.query(
+      'SELECT name FROM inventory_campaigns WHERE tenant_id = :tenantId AND status = \'DRAFT\' LIMIT 1',
+      { replacements: { tenantId }, type: sequelize.QueryTypes.SELECT }
+    );
+    if (active) throw new Error(`Action bloquée : Un inventaire physique ("${active.name}") est actuellement en cours.`);
+  } catch (err) {
+    // Ne re-lancer que l'erreur métier (campagne active détectée)
+    if (err.message && err.message.startsWith('Action bloquée')) throw err;
+    // Toute autre erreur DB (table inexistante, connexion, etc.) : on laisse passer
+  }
 }
 
 // Génère un SKU court et tente de garantir l'unicité par tenant
@@ -31,7 +37,7 @@ export class InventoryController {
       const items = await StockItem.findAll({ 
         where: { 
           tenantId: req.user.tenantId,
-          status: 'actif'
+          status: ['actif', 'desactive']
         },
         order: [['name', 'ASC']]
       });
@@ -83,17 +89,27 @@ export class InventoryController {
     try {
       await checkActiveInventory(req.user.tenantId);
       const tenantId = req.user.tenantId;
-      const { name, quantity, unitPrice, minThreshold, subcategoryId, location, imageUrl } = req.body;
+      const { name, quantity, unitPrice, purchasePrice, minThreshold, subcategoryId, location, imageUrl } = req.body;
+
+      // Vérification d'unicité : même nom dans la même sous-catégorie
+      const existing = await StockItem.findOne({
+        where: { tenantId, subcategoryId, name, status: 'actif' }
+      });
+      if (existing) {
+        return res.status(400).json({ error: 'CreateError', message: `Un produit nommé "${name}" existe déjà dans cette sous-catégorie.` });
+      }
+
       const sku = await generateUniqueSKU(tenantId, name);
-      const item = await StockItem.create({ 
+      const item = await StockItem.create({
         sku,
-        name, 
-        tenantId, 
-        subcategoryId, 
-        unitPrice: unitPrice || 0, 
-        currentLevel: quantity || 0, 
-        quantity: quantity || 0, 
-        minThreshold: minThreshold || 5, 
+        name,
+        tenantId,
+        subcategoryId,
+        purchasePrice: purchasePrice || 0,
+        unitPrice: unitPrice || 0,
+        currentLevel: quantity || 0,
+        quantity: quantity || 0,
+        minThreshold: minThreshold || 5,
         location,
         imageUrl,
         status: 'actif'
@@ -119,7 +135,7 @@ export class InventoryController {
         });
       }
 
-      const item = await StockItem.findOne({ where: { id, tenantId, status: 'actif' } });
+      const item = await StockItem.findOne({ where: { id, tenantId } });
       if (!item) return res.status(404).json({ error: 'NotFound', message: 'Produit introuvable.' });
       
       // Prevent SKU changes from client side - always keep SKU immutable via API

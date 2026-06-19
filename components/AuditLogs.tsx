@@ -82,7 +82,7 @@ const AuditLogs = ({ tenantSettings }: { tenantSettings?: any }) => {
     <div className="space-y-8 animate-in fade-in duration-700 pb-20">
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 print:hidden">
         <div>
-          <h2 className="text-3xl font-black text-slate-900 tracking-tighter uppercase flex items-center gap-3">
+          <h2 className="text-xl md:text-3xl font-black text-slate-900 tracking-tighter uppercase flex items-center gap-3">
             <Terminal className="text-indigo-600" size={32} />
             Registre d'Audit Immuable
           </h2>
@@ -108,9 +108,9 @@ const AuditLogs = ({ tenantSettings }: { tenantSettings?: any }) => {
            <button onClick={fetchLogs} className="p-4 bg-white border border-slate-200 text-slate-400 hover:text-indigo-600 rounded-2xl transition-all shadow-sm">
               <RefreshCw size={20} className={loading ? 'animate-spin' : ''} />
            </button>
-           <button 
+           <button
              onClick={() => setShowExportModal(true)}
-             className="bg-slate-900 text-white px-8 py-4 rounded-2xl font-black hover:bg-indigo-600 transition-all shadow-xl flex items-center gap-3 text-xs uppercase tracking-widest shadow-slate-200"
+             className="bg-slate-900 text-white px-4 md:px-8 py-4 rounded-2xl font-black hover:bg-indigo-600 transition-all shadow-xl flex items-center gap-3 text-xs uppercase tracking-widest shadow-slate-200"
            >
              <Download size={18} /> EXPORTER LE REGISTRE
            </button>
@@ -118,15 +118,15 @@ const AuditLogs = ({ tenantSettings }: { tenantSettings?: any }) => {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 print:hidden">
-         <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm relative overflow-hidden group">
+         <div className="bg-white p-4 md:p-8 rounded-[2.5rem] border border-slate-100 shadow-sm relative overflow-hidden group">
             <div className="absolute -right-4 -bottom-4 opacity-5 group-hover:scale-110 transition-transform"><Activity size={80}/></div>
             <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Transactions Tracées</p>
-            <h3 className="text-2xl font-black text-slate-900 tracking-tight">{logs.length} Actions</h3>
+            <h3 className="text-xl md:text-2xl font-black text-slate-900 tracking-tight">{logs.length} Actions</h3>
             <p className="text-[9px] text-emerald-600 font-bold uppercase mt-2 flex items-center gap-1"><CloudCheck size={12}/> Réplication Cloud Active</p>
          </div>
-         <div className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm">
+         <div className="bg-white p-4 md:p-8 rounded-[2.5rem] border border-slate-100 shadow-sm">
             <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Anomalies d'Intégrité</p>
-            <h3 className="text-2xl font-black text-rose-600">0 Détectée</h3>
+            <h3 className="text-xl md:text-2xl font-black text-rose-600">0 Détectée</h3>
             <p className="text-[9px] text-slate-400 font-bold uppercase mt-2 flex items-center gap-1"><History size={12} /> Dernier Scan : Temps Réel</p>
          </div>
          <div className="bg-indigo-900 p-8 rounded-[2.5rem] relative overflow-hidden group border border-indigo-800 shadow-2xl">

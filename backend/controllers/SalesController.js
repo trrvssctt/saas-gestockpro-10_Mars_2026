@@ -2,7 +2,7 @@
 import { Sale, SaleItem, Payment, StockItem, ProductMovement, Customer, AuditLog, Service, Invoice, InvoiceItem } from '../models/index.js';
 import { InvoiceService } from '../services/InvoiceService.js';
 import { sequelize } from '../config/database.js';
-import { Op } from 'sequelize';
+import { RecurringContractController } from './RecurringContractController.js';
 
 
 
@@ -43,18 +43,41 @@ export class SaleController {
 
   static async create(req, res) {
     try {
-      const { customerId, items, amountPaid, paymentMethod } = req.body;
+      const { customerId, walkinName, walkinPhone, items, amountPaid, paymentMethod, paymentReference, paymentProofImage, chequeNumber, bankName, chequeDate, chequeOrder } = req.body;
       const result = await InvoiceService.validateAndGenerate(req.user.tenantId, customerId, items, req.user.id, req.user.name);
-      
+
+      // Sauvegarder les infos du client de passage sur la vente
+      if (!customerId && (walkinName || walkinPhone)) {
+        await result.sale.update({ walkinName: walkinName || null, walkinPhone: walkinPhone || null });
+      }
+
+      const isCheque = paymentMethod === 'CHEQUE';
+      const isTransfer = paymentMethod === 'TRANSFER';
+      // Chèque et virement : paiement en attente d'encaissement
+      const isPendingMethod = isCheque || isTransfer;
+
       if (amountPaid > 0) {
         await Payment.create({
           tenantId: req.user.tenantId,
           saleId: result.sale.id,
           amount: amountPaid,
           method: paymentMethod || 'CASH',
-          reference: 'ACOMPTE_INITIAL'
+          reference: paymentReference || (isPendingMethod ? null : 'ACOMPTE_INITIAL'),
+          proofImage: paymentProofImage || null,
+          chequeNumber: chequeNumber || null,
+          bankName: bankName || null,
+          chequeDate: chequeDate || null,
+          chequeOrder: chequeOrder || null,
+          // Chèque et virement : PENDING jusqu'à confirmation d'encaissement
+          status: isPendingMethod ? 'PENDING' : 'PAID'
         });
-        await result.sale.update({ amountPaid: amountPaid });
+        if (!isPendingMethod) {
+          // Méthodes immédiates (espèces, mobile money) → créditer directement
+          await result.sale.update({ amountPaid });
+        } else {
+          // Chèque / virement → la vente passe en BROUILLON en attendant l'encaissement
+          await result.sale.update({ status: 'BROUILLON' });
+        }
       }
       return res.status(201).json(result);
     } catch (error) {
@@ -183,24 +206,107 @@ export class SaleController {
   static async addPayment(req, res) {
     try {
       const { id } = req.params;
-      const { amount, method, reference } = req.body;
+      const { amount, method, reference, proofImage, chequeNumber, bankName, chequeDate, chequeOrder } = req.body;
       const sale = await Sale.findByPk(id);
       if (!sale) return res.status(404).json({ error: 'Sale not found' });
+
+      const isCheque = method === 'CHEQUE';
+      const isTransfer = method === 'TRANSFER';
+      const isPendingMethod = isCheque || isTransfer;
 
       await Payment.create({
         tenantId: req.user.tenantId,
         saleId: id,
         amount,
         method,
-        reference
+        reference: reference || null,
+        proofImage: proofImage || null,
+        chequeNumber: chequeNumber || null,
+        bankName: bankName || null,
+        chequeDate: chequeDate || null,
+        chequeOrder: chequeOrder || null,
+        // Chèque et virement commencent en PENDING, les autres sont directement PAID
+        status: isPendingMethod ? 'PENDING' : 'PAID'
       });
 
-      const newPaid = parseFloat(sale.amountPaid) + parseFloat(amount);
-      const newStatus = newPaid >= parseFloat(sale.totalTtc) ? 'TERMINE' : 'EN_COURS';
-      
-      await sale.update({ amountPaid: newPaid, status: newStatus });
+      if (!isPendingMethod) {
+        // Méthodes immédiates → créditer et mettre à jour le statut de la vente
+        const newPaid = parseFloat(sale.amountPaid) + parseFloat(amount);
+        const newStatus = newPaid >= parseFloat(sale.totalTtc) ? 'TERMINE' : 'EN_COURS';
+        await sale.update({ amountPaid: newPaid, status: newStatus });
+        // Sync contrat récurrent
+        if (sale.recurringInstallmentId) {
+          if (newStatus === 'TERMINE') {
+            await RecurringContractController.syncInstallmentPaid(sale.recurringInstallmentId, req.user.tenantId);
+          } else {
+            await RecurringContractController.syncContractPartialPaid(sale.recurringInstallmentId, newPaid, req.user.tenantId);
+          }
+        }
+      } else {
+        // Chèque / virement → passer en BROUILLON si pas encore encaissé
+        if (sale.status === 'EN_COURS' && parseFloat(sale.amountPaid) === 0) {
+          await sale.update({ status: 'BROUILLON' });
+        }
+      }
 
       return res.status(200).json({ message: 'Paiement enregistré.' });
+    } catch (error) {
+      return res.status(500).json({ error: error.message });
+    }
+  }
+
+  static async updatePaymentStatus(req, res) {
+    try {
+      const { paymentId } = req.params;
+      const { status } = req.body;
+
+      const VALID_STATUSES = ['PENDING', 'REGISTERED', 'DEPOSITED', 'PROCESSING', 'PAID', 'REJECTED', 'FAILED'];
+      if (!VALID_STATUSES.includes(status)) {
+        return res.status(400).json({ error: 'Statut invalide' });
+      }
+
+      const payment = await Payment.findByPk(paymentId);
+      if (!payment) return res.status(404).json({ error: 'Paiement introuvable' });
+      if (!['CHEQUE', 'TRANSFER'].includes(payment.method)) {
+        return res.status(400).json({ error: 'Seuls les paiements par chèque ou virement peuvent être mis à jour via ce endpoint' });
+      }
+
+      const prevStatus = payment.status;
+      await payment.update({ status });
+
+      if (payment.saleId) {
+        const sale = await Sale.findByPk(payment.saleId);
+        if (sale) {
+          // Paiement confirmé encaissé (PAID) → créditer la trésorerie
+          if (status === 'PAID' && prevStatus !== 'PAID') {
+            const newPaid = parseFloat(sale.amountPaid) + parseFloat(payment.amount);
+            const newSaleStatus = newPaid >= parseFloat(sale.totalTtc) ? 'TERMINE' : 'EN_COURS';
+            await sale.update({ amountPaid: newPaid, status: newSaleStatus });
+            if (sale.recurringInstallmentId) {
+              if (newSaleStatus === 'TERMINE') {
+                await RecurringContractController.syncInstallmentPaid(sale.recurringInstallmentId, req.user.tenantId);
+              } else {
+                await RecurringContractController.syncContractPartialPaid(sale.recurringInstallmentId, newPaid, req.user.tenantId);
+              }
+            }
+          }
+          // Paiement rejeté/impayé alors qu'il était déjà PAID → décréditer
+          if (['REJECTED', 'FAILED'].includes(status) && prevStatus === 'PAID') {
+            const newPaid = Math.max(0, parseFloat(sale.amountPaid) - parseFloat(payment.amount));
+            const newSaleStatus = newPaid >= parseFloat(sale.totalTtc) ? 'TERMINE' : 'EN_COURS';
+            await sale.update({ amountPaid: newPaid, status: newSaleStatus });
+          }
+          // Paiement rejeté depuis PENDING → la vente repasse EN_COURS si plus de PENDING
+          if (['REJECTED', 'FAILED'].includes(status) && prevStatus === 'PENDING') {
+            const pendingCount = await Payment.count({ where: { saleId: sale.id, status: 'PENDING' } });
+            if (pendingCount === 0 && sale.status === 'BROUILLON') {
+              await sale.update({ status: 'EN_COURS' });
+            }
+          }
+        }
+      }
+
+      return res.status(200).json({ message: 'Statut mis à jour.' });
     } catch (error) {
       return res.status(500).json({ error: error.message });
     }

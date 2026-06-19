@@ -18,8 +18,40 @@ import { SaleItem } from './SaleItem.js';
 import { Payment } from './Payment.js';
 import { Administrator } from './Administrator.js';
 import { Service } from './Service.js';
+import { ContactMessage } from './ContactMessage.js';
 import { Message } from './Message.js';
 import { PromptTemplate } from './PromptTemplate.js';
+import { Employee } from './Employee.js';
+import { Department } from './Department.js';
+import { Contract } from './Contract.js';
+import { Payroll } from './Payroll.js';
+import { PayrollSettings } from './PayrollSettings.js';
+import { PayrollItem } from './PayrollItem.js';
+import { Attendance } from './Attendance.js';
+import { Leave } from './Leave.js';
+import { EmployeeDocument } from './EmployeeDocument.js';
+import { JobOffer } from './JobOffer.js';
+import { Candidate } from './Candidate.js';
+import { Training } from './Training.js';
+import { TrainingParticipant } from './TrainingParticipant.js';
+import { PerformanceReview } from './PerformanceReview.js';
+import { CompanyDeclarationSettings } from './CompanyDeclarationSettings.js';
+import { Declaration } from './Declaration.js';
+import { Advance } from './Advance.js';
+import { Prime } from './Prime.js';
+import { Session } from './Session.js';
+import { SupportTicket } from './SupportTicket.js';
+import { OvertimeRequest } from './OvertimeRequest.js';
+import { Announcement } from './Announcement.js';
+import { HRRule } from './HRRule.js';
+import { Notification } from './Notification.js';
+import { NotificationRead } from './NotificationRead.js';
+import { Supplier } from './Supplier.js';
+import { Delivery } from './Delivery.js';
+import { DeliveryItem } from './DeliveryItem.js';
+import { RegistrationIntent } from './RegistrationIntent.js';
+import { RecurringContract } from './RecurringContract.js';
+import { RecurringInstallment } from './RecurringInstallment.js';
 
 /**
  * ARCHITECTURE KERNEL V3.2.3
@@ -44,6 +76,22 @@ Tenant.hasMany(Customer, { foreignKey: 'tenant_id' });
 Tenant.hasMany(Sale, { foreignKey: 'tenant_id' });
 Tenant.hasMany(Payment, { foreignKey: 'tenant_id' });
 Tenant.hasMany(Service, { foreignKey: 'tenant_id' });
+Tenant.hasMany(Employee, { foreignKey: 'tenant_id' });
+Tenant.hasMany(Department, { foreignKey: 'tenant_id' });
+Tenant.hasMany(Contract, { foreignKey: 'tenant_id' });
+Tenant.hasMany(Payroll, { foreignKey: 'tenant_id' });
+Tenant.hasMany(Attendance, { foreignKey: 'tenant_id' });
+Tenant.hasMany(Leave, { foreignKey: 'tenant_id' });
+Tenant.hasMany(EmployeeDocument, { foreignKey: 'tenant_id' });
+Tenant.hasMany(JobOffer, { foreignKey: 'tenant_id' });
+Tenant.hasMany(Candidate, { foreignKey: 'tenant_id' });
+Tenant.hasMany(Training, { foreignKey: 'tenant_id' });
+Tenant.hasMany(TrainingParticipant, { foreignKey: 'tenant_id' });
+Tenant.hasMany(PerformanceReview, { foreignKey: 'tenant_id' });
+Tenant.hasMany(Advance, { foreignKey: 'tenant_id' });
+Tenant.hasMany(Prime, { foreignKey: 'tenant_id' });
+Tenant.hasOne(PayrollSettings, { foreignKey: 'tenant_id' });
+Tenant.hasMany(Session, { foreignKey: 'tenant_id' });
 
 User.belongsTo(Tenant, { foreignKey: 'tenant_id' });
 StockItem.belongsTo(Tenant, { foreignKey: 'tenant_id' });
@@ -51,6 +99,157 @@ Customer.belongsTo(Tenant, { foreignKey: 'tenant_id' });
 Sale.belongsTo(Tenant, { foreignKey: 'tenant_id' });
 Payment.belongsTo(Tenant, { foreignKey: 'tenant_id' });
 Service.belongsTo(Tenant, { foreignKey: 'tenant_id' });
+
+// --- HR RELATIONS ---
+// Employee relations
+Employee.belongsTo(Tenant, { foreignKey: 'tenant_id' });
+Employee.belongsTo(Department, { foreignKey: 'department_id', as: 'departmentInfo' });
+Employee.belongsTo(Employee, { foreignKey: 'manager_id', as: 'manager' });
+Employee.hasMany(Employee, { foreignKey: 'manager_id', as: 'subordinates' });
+Employee.hasMany(Contract, { foreignKey: 'employee_id', as: 'contracts' });
+Employee.hasMany(Payroll, { foreignKey: 'employee_id', as: 'payrolls' });
+Employee.hasMany(Attendance, { foreignKey: 'employee_id', as: 'attendances' });
+Employee.hasMany(Leave, { foreignKey: 'employee_id', as: 'leaves' });
+Employee.hasMany(EmployeeDocument, { foreignKey: 'employee_id', as: 'documents' });
+Employee.hasMany(TrainingParticipant, { foreignKey: 'employee_id', as: 'trainings' });
+Employee.hasMany(PerformanceReview, { foreignKey: 'employee_id', as: 'reviews' });
+Employee.hasMany(PerformanceReview, { foreignKey: 'reviewer_id', as: 'conductedReviews' });
+Employee.hasMany(Advance, { foreignKey: 'employee_id', as: 'advances' });
+Employee.hasMany(Prime, { foreignKey: 'employee_id', as: 'primes' });
+Employee.hasOne(User, { foreignKey: 'employee_id', as: 'userAccount' });
+
+// User-Employee relation (for ENTERPRISE plan)
+User.belongsTo(Employee, { foreignKey: 'employee_id', as: 'employeeProfile' });
+
+// User-Session relations
+User.hasMany(Session, { foreignKey: 'user_id', as: 'sessions' });
+Session.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
+Session.belongsTo(Tenant, { foreignKey: 'tenant_id' });
+
+// Department relations  
+Department.belongsTo(Tenant, { foreignKey: 'tenant_id' });
+Department.belongsTo(Employee, { foreignKey: 'manager_id', as: 'manager' });
+Department.hasMany(Employee, { foreignKey: 'department_id', as: 'employees' });
+
+// Contract relations
+Contract.belongsTo(Tenant, { foreignKey: 'tenant_id' });
+Contract.belongsTo(Employee, { foreignKey: 'employee_id', as: 'employee' });
+
+// Payroll relations
+Payroll.belongsTo(Tenant, { foreignKey: 'tenant_id' });
+Payroll.belongsTo(Employee, { foreignKey: 'employee_id', as: 'employee' });
+
+// PayrollSettings relations
+PayrollSettings.belongsTo(Tenant, { foreignKey: 'tenant_id' });
+
+// PayrollItem relations
+PayrollItem.belongsTo(Tenant, { foreignKey: 'tenant_id' });
+
+// CompanyDeclarationSettings relations
+CompanyDeclarationSettings.belongsTo(Tenant, { foreignKey: 'tenant_id' });
+Tenant.hasOne(CompanyDeclarationSettings, { foreignKey: 'tenant_id', as: 'declarationSettings' });
+
+// Declaration relations
+Declaration.belongsTo(Tenant, { foreignKey: 'tenant_id' });
+Declaration.belongsTo(User, { foreignKey: 'created_by', as: 'creator' });
+Declaration.belongsTo(User, { foreignKey: 'submitted_by', as: 'submitter' });
+Declaration.belongsTo(User, { foreignKey: 'last_modified_by', as: 'modifier' });
+Tenant.hasMany(Declaration, { foreignKey: 'tenant_id', as: 'declarations' });
+
+// Attendance relations
+Attendance.belongsTo(Tenant, { foreignKey: 'tenant_id' });
+Attendance.belongsTo(Employee, { foreignKey: 'employee_id', as: 'employee' });
+
+// OvertimeRequest relations
+OvertimeRequest.belongsTo(Tenant, { foreignKey: 'tenant_id' });
+OvertimeRequest.belongsTo(Employee, { foreignKey: 'employee_id', as: 'employee' });
+OvertimeRequest.belongsTo(Employee, { foreignKey: 'reviewed_by', as: 'reviewer' });
+Employee.hasMany(OvertimeRequest, { foreignKey: 'employee_id', as: 'overtimeRequests' });
+Tenant.hasMany(OvertimeRequest, { foreignKey: 'tenant_id' });
+
+// Leave relations
+Leave.belongsTo(Tenant, { foreignKey: 'tenant_id' });
+Leave.belongsTo(Employee, { foreignKey: 'employee_id', as: 'employee' });
+Leave.belongsTo(Employee, { foreignKey: 'approved_by', as: 'approver' });
+
+// Employee Document relations
+EmployeeDocument.belongsTo(Tenant, { foreignKey: 'tenant_id' });
+EmployeeDocument.belongsTo(Employee, { foreignKey: 'employee_id', as: 'employee' });
+EmployeeDocument.belongsTo(Employee, { foreignKey: 'uploaded_by', as: 'uploader' });
+
+// Job Offer relations
+JobOffer.belongsTo(Tenant, { foreignKey: 'tenant_id' });
+JobOffer.belongsTo(Employee, { foreignKey: 'created_by', as: 'creator' });
+JobOffer.hasMany(Candidate, { foreignKey: 'job_offer_id', as: 'candidates' });
+
+// Candidate relations
+Candidate.belongsTo(Tenant, { foreignKey: 'tenant_id' });
+Candidate.belongsTo(JobOffer, { foreignKey: 'job_offer_id', as: 'jobOffer' });
+
+// Training relations
+Training.belongsTo(Tenant, { foreignKey: 'tenant_id' });
+Training.belongsTo(Employee, { foreignKey: 'created_by', as: 'creator' });
+Training.hasMany(TrainingParticipant, { foreignKey: 'training_id', as: 'participants' });
+
+// Training Participant relations
+TrainingParticipant.belongsTo(Tenant, { foreignKey: 'tenant_id' });
+TrainingParticipant.belongsTo(Training, { foreignKey: 'training_id', as: 'training' });
+TrainingParticipant.belongsTo(Employee, { foreignKey: 'employee_id', as: 'employee' });
+
+// Performance Review relations
+PerformanceReview.belongsTo(Tenant, { foreignKey: 'tenant_id' });
+PerformanceReview.belongsTo(Employee, { foreignKey: 'employee_id', as: 'employee' });
+PerformanceReview.belongsTo(Employee, { foreignKey: 'reviewer_id', as: 'reviewer' });
+
+// HRRule relations
+HRRule.belongsTo(Tenant, { foreignKey: 'tenant_id' });
+Tenant.hasMany(HRRule, { foreignKey: 'tenant_id', as: 'hrRules' });
+
+// Notification relations
+Notification.belongsTo(Tenant, { foreignKey: 'tenant_id' });
+Tenant.hasMany(Notification, { foreignKey: 'tenant_id', as: 'notifications' });
+Notification.belongsTo(User, { foreignKey: 'created_by', as: 'sender' });
+Notification.belongsTo(User, { foreignKey: 'target_user_id', as: 'targetUser' });
+NotificationRead.belongsTo(Notification, { foreignKey: 'notification_id' });
+NotificationRead.belongsTo(User, { foreignKey: 'user_id' });
+Notification.hasMany(NotificationRead, { foreignKey: 'notification_id', as: 'reads' });
+
+// Avances et Primes
+Advance.belongsTo(Tenant, { foreignKey: 'tenant_id' });
+Advance.belongsTo(Employee, { foreignKey: 'employee_id', as: 'employee' });
+Advance.belongsTo(User, { foreignKey: 'approved_by', as: 'approver' });
+
+Prime.belongsTo(Tenant, { foreignKey: 'tenant_id' });
+Prime.belongsTo(Employee, { foreignKey: 'employee_id', as: 'employee' });
+Prime.belongsTo(User, { foreignKey: 'approved_by', as: 'approver' });
+
+// --- RELATIONS FOURNISSEURS & LIVRAISONS ---
+Tenant.hasMany(Supplier, { foreignKey: 'tenant_id' });
+Supplier.belongsTo(Tenant, { foreignKey: 'tenant_id' });
+
+Tenant.hasMany(Delivery, { foreignKey: 'tenant_id' });
+Delivery.belongsTo(Tenant, { foreignKey: 'tenant_id' });
+
+Supplier.hasMany(Delivery, { foreignKey: 'supplier_id', as: 'deliveries' });
+Delivery.belongsTo(Supplier, { foreignKey: 'supplier_id', as: 'supplier' });
+
+Delivery.hasMany(DeliveryItem, { foreignKey: 'delivery_id', as: 'items' });
+DeliveryItem.belongsTo(Delivery, { foreignKey: 'delivery_id' });
+
+DeliveryItem.belongsTo(StockItem, { foreignKey: 'stock_item_id', as: 'stock_item' });
+StockItem.hasMany(DeliveryItem, { foreignKey: 'stock_item_id', as: 'deliveryItems' });
+
+// --- RELATIONS CONTRATS RÉCURRENTS ---
+Tenant.hasMany(RecurringContract, { foreignKey: 'tenant_id' });
+RecurringContract.belongsTo(Tenant, { foreignKey: 'tenant_id' });
+RecurringContract.belongsTo(Customer, { foreignKey: 'customer_id', as: 'customer' });
+Customer.hasMany(RecurringContract, { foreignKey: 'customer_id' });
+RecurringContract.belongsTo(Service, { foreignKey: 'service_id', as: 'service' });
+Service.hasMany(RecurringContract, { foreignKey: 'service_id' });
+RecurringContract.hasMany(RecurringInstallment, { foreignKey: 'contract_id', as: 'installments' });
+RecurringInstallment.belongsTo(RecurringContract, { foreignKey: 'contract_id', as: 'contract' });
+RecurringInstallment.belongsTo(Tenant, { foreignKey: 'tenant_id' });
+RecurringInstallment.belongsTo(Sale, { foreignKey: 'generated_sale_id', as: 'generatedSale' });
 
 // Ventes & Facturation
 Sale.belongsTo(Customer, { foreignKey: 'customer_id' });
@@ -73,10 +272,18 @@ Subcategory.belongsTo(Category, { foreignKey: 'category_id' });
 Subcategory.hasMany(StockItem, { foreignKey: 'subcategory_id' });
 StockItem.belongsTo(Subcategory, { foreignKey: 'subcategory_id' });
 
-export { 
-  Tenant, User, StockItem, ProductMovement, 
-  Customer, Invoice, InvoiceItem, Subscription, 
+export {
+  Tenant, User, StockItem, ProductMovement,
+  Customer, Invoice, InvoiceItem, Subscription,
   Plan, AuditLog, Backup, Document, Category, Subcategory,
-  Sale, SaleItem, Payment, Administrator, Service,
-  Message, PromptTemplate
+  Sale, SaleItem, Payment, Administrator, Service, ContactMessage,
+  Message, PromptTemplate,
+  Employee, Department, Contract, Payroll, PayrollSettings, PayrollItem, Attendance,
+  Leave, EmployeeDocument, JobOffer, Candidate, Training,
+  TrainingParticipant, PerformanceReview, CompanyDeclarationSettings, Declaration,
+  Advance, Prime, Session, SupportTicket, Announcement, HRRule,
+  Notification, NotificationRead, OvertimeRequest,
+  Supplier, Delivery, DeliveryItem,
+  RegistrationIntent,
+  RecurringContract, RecurringInstallment
 };

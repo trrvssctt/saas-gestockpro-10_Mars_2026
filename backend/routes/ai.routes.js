@@ -29,4 +29,28 @@ router.get('/insights', checkPermission(['ADMIN', 'STOCK_MANAGER']), AIControlle
  */
 router.post('/forecast-sync', checkPermission(['ADMIN']), AIController.updateForecasts);
 
+/**
+ * Proxy endpoint to call external AI webhook from server (avoids CORS)
+ */
+router.post('/bridge', AIController.bridgeWebhook);
+
+/**
+ * @route POST /api/ai/export-pdf
+ * @desc  Convertit un HTML document en PDF téléchargeable via Puppeteer
+ */
+router.post('/export-pdf', checkPermission(['ADMIN', 'SALES', 'ACCOUNTANT', 'STOCK_MANAGER']), AIController.exportPdf);
+
+/**
+ * @route POST /api/ai/export-zip
+ * @desc  Reçoit un tableau de documents HTML et retourne un ZIP téléchargeable
+ */
+router.post('/export-zip', checkPermission(['ADMIN', 'SALES', 'ACCOUNTANT', 'STOCK_MANAGER']), AIController.exportZip);
+
+/**
+ * @route GET /api/ai/payments
+ * @desc  Liste des virements (TRANSFER) et chèques (CHEQUE) du tenant
+ *        Query params : status (PENDING|PAID|ALL), method (TRANSFER|CHEQUE|ALL), limit, page
+ */
+router.get('/payments', checkPermission(['ADMIN', 'ACCOUNTANT', 'SALES']), AIController.getTransfersAndCheques);
+
 export default router;
