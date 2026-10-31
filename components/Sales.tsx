@@ -12,6 +12,7 @@ import {
   ChevronDown
 } from 'lucide-react';
 import { apiClient } from '../services/api';
+import { deliveryState, saleCustomerLabel } from '../utils/displayHelpers.js';
 import { authBridge } from '../services/authBridge';
 import { User, StockItem, Customer, SubscriptionPlan } from '../types';
 import YearMonthPicker from './YearMonthPicker';
@@ -111,7 +112,7 @@ const Sales = ({ currency, user, tenantSettings, plan }: { currency: string, use
   const exportColumns: ExportColumn[] = [
     { key: 'reference', label: 'Référence' },
     { key: 'createdAt', label: 'Date', format: (v) => v ? new Date(v).toLocaleDateString('fr-FR') : '' },
-    { key: 'customer', label: 'Client', format: (_v, row) => row.customer?.companyName || row.customer || 'N/A' },
+    { key: 'customer', label: 'Client', format: (_v, row) => saleCustomerLabel(row) },
     { key: 'totalHt', label: 'Montant HT', format: (v) => Number(v || 0).toLocaleString('fr-FR') },
     { key: 'totalTtc', label: 'Montant TTC', format: (v) => Number(v || 0).toLocaleString('fr-FR') },
     { key: 'amountPaid', label: 'Encaissé', format: (v) => Number(v || 0).toLocaleString('fr-FR') },
@@ -160,12 +161,8 @@ const Sales = ({ currency, user, tenantSettings, plan }: { currency: string, use
     const paid = parseFloat(sale.amountPaid);
     const payRate = Math.min(100, Math.round((paid / (total || 1)) * 100));
 
-    const productItems = (sale.items || []).filter((i: any) => i.stock_item_id || i.stockItemId);
-    const totalQty = productItems.reduce((sum: number, i: any) => sum + i.quantity, 0);
-    const deliveredQty = productItems.reduce((sum: number, i: any) => sum + (i.quantityDelivered || 0), 0);
-    const delivRate = totalQty > 0 ? Math.min(100, Math.round((deliveredQty / totalQty) * 100)) : 100;
-
-    return { payRate, delivRate, deliveredQty, totalQty, isDeliverable: productItems.length > 0 };
+    const { isDeliverable, rate, delivered, total: totalQty } = deliveryState(sale);
+    return { payRate, delivRate: rate ?? 0, deliveredQty: delivered, totalQty, isDeliverable };
   };
 
   const filteredSales = useMemo(() => {
@@ -619,7 +616,7 @@ const Sales = ({ currency, user, tenantSettings, plan }: { currency: string, use
               ) : visibleSales.length === 0 ? (
                 <tr><td colSpan={6} className="py-20 text-center font-black text-slate-300 uppercase text-[10px]">Aucune vente trouvée</td></tr>
               ) : visibleSales.map((sale) => {
-                const { payRate, delivRate, deliveredQty, totalQty } = getRates(sale);
+                const { payRate, delivRate, deliveredQty, totalQty, isDeliverable } = getRates(sale);
                 const isAnnule = sale.status === 'ANNULE';
                 const isBrouillon = sale.status === 'BROUILLON';
                 const isRecurring = !!sale.recurringInstallmentId;
@@ -635,7 +632,7 @@ const Sales = ({ currency, user, tenantSettings, plan }: { currency: string, use
                       <div className="flex items-center gap-2">
                         <div>
                           <p className={`font-black text-slate-800 text-sm uppercase truncate max-w-[150px] ${isAnnule ? 'text-slate-400' : ''}`}>
-                            {sale.customer?.companyName || sale.walkin_name || sale.walkinName || 'VENTE DIRECTE'}
+                            {saleCustomerLabel(sale)}
                           </p>
                           {!sale.customer && (sale.walkin_name || sale.walkinName) && (
                             <p className="text-[9px] text-sky-600 font-bold mt-0.5">
@@ -659,6 +656,13 @@ const Sales = ({ currency, user, tenantSettings, plan }: { currency: string, use
                         </div>
                       </td>
                       <td className="px-3 md:px-8 py-3 md:py-5">
+                        {!isDeliverable ? (
+                          // Vente sans article physique : pas de taux de livraison
+                          <div className="flex flex-col items-center gap-1.5">
+                            <span className="px-2 py-0.5 bg-slate-100 text-slate-500 text-[8px] font-black rounded-full uppercase tracking-widest">Prestation</span>
+                            <span className="text-[9px] font-black text-slate-300 mt-1">—</span>
+                          </div>
+                        ) : (
                         <div className="flex flex-col items-center gap-1.5">
                           <div className="w-16 md:w-24 h-1.5 bg-slate-100 rounded-full overflow-hidden">
                             <div className={`h-full transition-all duration-700 ${isAnnule ? 'bg-slate-300' : delivRate === 100 ? 'bg-emerald-500' : 'bg-indigo-500'}`} style={{ width: `${delivRate}%` }}></div>
@@ -666,6 +670,7 @@ const Sales = ({ currency, user, tenantSettings, plan }: { currency: string, use
                           <span className={`text-[8px] font-black ${isAnnule ? 'text-slate-400' : delivRate === 100 ? 'text-emerald-600' : 'text-indigo-600'}`}>{delivRate}% LIVRÉ</span>
                           <span className="text-[9px] font-black text-slate-400 mt-1">{deliveredQty}/{totalQty} articles livrés</span>
                         </div>
+                        )}
                       </td>
                     <td className={`px-3 md:px-8 py-3 md:py-5 text-right font-black ${isAnnule ? 'text-slate-400' : 'text-slate-900'}`}>
                       {parseFloat(sale.totalTtc).toLocaleString()} {currency}

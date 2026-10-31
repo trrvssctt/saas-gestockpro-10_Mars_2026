@@ -3,6 +3,7 @@ import crypto from 'crypto';
 import { sequelize } from '../config/database.js';
 import { Op } from 'sequelize';
 import { CustomerService } from '../services/CustomerService.js';
+import { CREANCE_STATUSES, outstandingByCustomerId, customerHealth } from '../utils/salesMetrics.js';
 
 export class CustomerController {
   /**
@@ -22,7 +23,22 @@ export class CustomerController {
         where,
         order: [['companyName', 'ASC']]
       });
-      return res.status(200).json(customers);
+
+      // Encours réel calculé depuis les ventes (même règle que la page Recouvrement) :
+      // la colonne outstanding_balance n'est pas tenue à jour par les paiements.
+      const sales = await Sale.findAll({
+        where: { tenantId: req.user.tenantId, customerId: { [Op.ne]: null }, status: { [Op.in]: CREANCE_STATUSES } },
+        attributes: ['customerId', 'totalTtc', 'amountPaid', 'status', 'createdAt']
+      });
+      const outstanding = outstandingByCustomerId(sales);
+      const salesByCustomer = {};
+      sales.forEach(sl => { (salesByCustomer[sl.customerId] = salesByCustomer[sl.customerId] || []).push(sl); });
+      const payload = customers.map(c => ({
+        ...c.toJSON(),
+        outstandingBalance: Math.round((outstanding[c.id] || 0) * 100) / 100,
+        healthStatus: customerHealth(salesByCustomer[c.id] || [], c.paymentTerms)
+      }));
+      return res.status(200).json(payload);
     } catch (error) {
       return res.status(500).json({ error: 'ListError', message: error.message });
     }
@@ -74,7 +90,10 @@ export class CustomerController {
         stats: {
           totalInvoiced: parseFloat(totalInvoiced),
           totalPaid: parseFloat(totalPaid),
-          outstanding: Math.max(0, parseFloat(totalInvoiced) - parseFloat(totalPaid)),
+          outstanding: outstandingByCustomerId(await Sale.findAll({
+            where: { customerId: id, tenantId, status: { [Op.in]: CREANCE_STATUSES } },
+            attributes: ['customerId', 'totalTtc', 'amountPaid', 'status']
+          }))[id] || 0,
           orderCount: sales.length
         },
         recentSales: sales

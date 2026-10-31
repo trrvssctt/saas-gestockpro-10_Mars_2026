@@ -14,6 +14,8 @@ import { useToast } from './ToastProvider';
 import { authBridge } from '../services/authBridge';
 import { buildExportHandlers, ExportColumn } from '../services/exportUtils';
 import { FileDown } from 'lucide-react';
+import SafeImage, { CategoryIcon } from './SafeImage';
+import { marginPercent } from '../utils/displayHelpers.js';
 
 
 const Inventory = ({ currency, plan, refreshKey }: { currency: string, userRole?: UserRole, plan?: SubscriptionPlan, refreshKey?: number }) => {
@@ -56,6 +58,7 @@ const Inventory = ({ currency, plan, refreshKey }: { currency: string, userRole?
   };
   const [stocks, setStocks] = useState<StockItem[]>([]);
   const [subcategories, setSubcategories] = useState<any[]>([]);
+  const subcategoryName = (it: any) => subcategories.find((s: any) => s.id === (it?.subcategoryId || it?.subcategory_id))?.name || '';
   const [sales, setSales] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
@@ -551,11 +554,8 @@ const Inventory = ({ currency, plan, refreshKey }: { currency: string, userRole?
                 <div key={item.id} className={`bg-white rounded-[3rem] border border-slate-100 shadow-sm hover:shadow-2xl transition-all p-8 flex flex-col group border-b-4 border-transparent hover:border-indigo-500 ${isLinked ? 'grayscale-[0.3]' : ''} ${isDisabled ? 'opacity-50 grayscale' : ''}`}>
                   <div className="flex justify-between items-start mb-6">
                     <div className="w-14 h-14 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center transition-transform group-hover:scale-110 shadow-inner overflow-hidden">
-                      {item.imageUrl ? (
-                        <img src={item.imageUrl} className="w-full h-full object-cover" alt={item.name} />
-                      ) : (
-                        <Package size={28} />
-                      )}
+                      <SafeImage src={item.imageUrl} className="w-full h-full object-cover" alt={item.name}
+                        fallback={<CategoryIcon hint={`${subcategoryName(item)} ${item.name}`} size={28} />} />
                     </div>
                     <div className="flex flex-col items-end gap-2 relative">
                       <span className={`px-3 py-1 rounded-full text-[8px] font-black uppercase border ${item.currentLevel <= item.minThreshold ? 'bg-rose-50 text-rose-600 border-rose-100' : 'bg-emerald-50 text-emerald-600 border-emerald-100'}`}>
@@ -619,9 +619,10 @@ const Inventory = ({ currency, plan, refreshKey }: { currency: string, userRole?
                      <div className="p-3 bg-emerald-50 rounded-2xl border border-emerald-100">
                        <p className="text-[8px] font-black text-emerald-400 uppercase mb-1">Marge</p>
                        <p className="text-sm font-black text-emerald-700">
-                         {(item as any).purchasePrice && Number(item.unitPrice) > 0
-                           ? `${Math.round(((Number(item.unitPrice) - Number((item as any).purchasePrice)) / Number(item.unitPrice)) * 100)}%`
-                           : '—'}
+                         {/* PUMP inconnu (0) : pas de marge affichée */}
+                         {marginPercent(item.unitPrice, (item as any).purchasePrice) === null
+                           ? '—'
+                           : `${marginPercent(item.unitPrice, (item as any).purchasePrice)}%`}
                        </p>
                      </div>
                   </div>
@@ -704,7 +705,7 @@ const Inventory = ({ currency, plan, refreshKey }: { currency: string, userRole?
                 return (
                   <tr key={item.id} className={`group hover:bg-slate-50/50 transition-all ${item.status === 'desactive' || item.status === 'DESACTIVE' ? 'opacity-50 grayscale' : ''}`}> 
                     <td className="px-3 md:px-6 py-3 md:py-4 font-black text-slate-900 flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-lg bg-slate-50 flex items-center justify-center overflow-hidden">{item.imageUrl ? <img src={item.imageUrl} className="w-full h-full object-cover" alt="" /> : <Package size={18} />}</div>
+                      <div className="w-10 h-10 rounded-lg bg-slate-50 flex items-center justify-center overflow-hidden"><SafeImage src={item.imageUrl} className="w-full h-full object-cover" fallback={<CategoryIcon hint={`${scName} ${item.name}`} size={18} />} /></div>
                       <div className="truncate flex items-center gap-2">{item.name} {item.status === 'desactive' || item.status === 'DESACTIVE' ? <span className="text-[7px] font-black bg-rose-100 text-rose-600 px-2 py-0.5 rounded uppercase ml-2">Désactivé</span> : null}</div>
                     </td>
                     <td className="px-3 md:px-6 py-3 md:py-4 text-slate-500 font-mono">{item.sku}</td>
@@ -922,9 +923,8 @@ const Inventory = ({ currency, plan, refreshKey }: { currency: string, userRole?
             <div className="px-6 md:px-10 py-6 bg-gradient-to-r from-slate-900 to-indigo-900 text-white flex justify-between items-center shrink-0">
               <div className="flex items-center gap-4">
                 <div className="w-14 h-14 bg-indigo-500/30 border border-indigo-400/30 rounded-2xl flex items-center justify-center shadow-inner overflow-hidden shrink-0">
-                  {selectedItem.imageUrl
-                    ? <img src={selectedItem.imageUrl} className="w-full h-full object-cover" alt={selectedItem.name} />
-                    : <Package size={26} />}
+                  <SafeImage src={selectedItem.imageUrl} className="w-full h-full object-cover" alt={selectedItem.name}
+                    fallback={<CategoryIcon hint={`${subcategoryName(selectedItem)} ${selectedItem.name}`} size={26} />} />
                 </div>
                 <div>
                   <p className="text-[9px] font-black text-indigo-300 uppercase tracking-[0.3em] mb-1">Détail Produit</p>
@@ -977,9 +977,7 @@ const Inventory = ({ currency, plan, refreshKey }: { currency: string, userRole?
 
                   {/* Image si disponible */}
                   {selectedItem.imageUrl && (
-                    <div className="bg-white p-3 rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-                      <img src={selectedItem.imageUrl} className="w-full rounded-xl object-cover aspect-square" alt={selectedItem.name} />
-                    </div>
+                    <SafeImage src={selectedItem.imageUrl} alt={selectedItem.name} className="w-full rounded-xl object-cover aspect-square bg-white p-3 border border-slate-100 shadow-sm" fallback={null} />
                   )}
                 </div>
 

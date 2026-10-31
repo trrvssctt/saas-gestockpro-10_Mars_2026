@@ -319,7 +319,10 @@ export const connectDB = async () => {
       await sequelize.query(`
         ALTER TABLE IF EXISTS sales
           ADD COLUMN IF NOT EXISTS walkin_name VARCHAR(150),
-          ADD COLUMN IF NOT EXISTS walkin_phone VARCHAR(50);
+          ADD COLUMN IF NOT EXISTS walkin_phone VARCHAR(50),
+          ADD COLUMN IF NOT EXISTS operator_name VARCHAR(150);
+        ALTER TABLE IF EXISTS customers
+          ADD COLUMN IF NOT EXISTS is_vip BOOLEAN NOT NULL DEFAULT false;
       `, { type: QueryTypes.RAW });
       console.log('✅ Colonnes walkin_name / walkin_phone sur sales vérifiées');
     } catch (walkinErr) {

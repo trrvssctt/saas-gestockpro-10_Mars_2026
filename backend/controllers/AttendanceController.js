@@ -370,7 +370,8 @@ export class AttendanceController {
       let lateMinutes = 0;
       const resolvedStart = expectedStart || tenantStartTime;
       if (clockIn && date) {
-        const clockInTs = new Date(`${date}T${clockIn}`);
+        // clockIn accepté en « HH:MM » ou en date-heure complète
+        const clockInTs = /^\d{1,2}:\d{2}/.test(clockIn) ? new Date(`${date}T${clockIn}`) : new Date(clockIn);
         const expectedTs = new Date(`${date}T${resolvedStart}`);
         lateMinutes = Math.max(0, Math.floor((clockInTs - expectedTs) / 60000));
       }

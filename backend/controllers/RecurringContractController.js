@@ -82,7 +82,8 @@ export class RecurringContractController {
           {
             model: RecurringInstallment,
             as: 'installments',
-            attributes: ['id', 'installmentNumber', 'dueDate', 'amount', 'status', 'paidAt']
+            // generatedSaleId : nécessaire au compteur « facturées dans Ventes »
+            attributes: ['id', 'installmentNumber', 'dueDate', 'amount', 'status', 'paidAt', 'generatedSaleId']
           }
         ],
         order: [['createdAt', 'DESC']]

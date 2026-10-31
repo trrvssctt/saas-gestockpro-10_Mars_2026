@@ -10,6 +10,7 @@ import {
   TrendingUp, Banknote, Zap
 } from 'lucide-react';
 import { apiClient } from '../services/api';
+import { saleCustomerLabel, saleOriginLabel } from '../utils/displayHelpers.js';
 import YearMonthPicker from './YearMonthPicker';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -240,8 +241,9 @@ const Payments = ({ currency, tenantSettings }: { currency: string; tenantSettin
           ...p,
           saleRef: sale.reference,
           saleId: sale.id,
-          customer: sale.customer?.companyName || sale.customer?.name || 'Vente Directe',
-          operator: sale.operator || 'Admin',
+          customer: saleCustomerLabel(sale),
+          origin: saleOriginLabel(sale),
+          operator: sale.operatorName || saleOriginLabel(sale),
           saleStatus: sale.status,
         }))
       ).sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
@@ -633,7 +635,7 @@ const Payments = ({ currency, tenantSettings }: { currency: string; tenantSettin
                       </td>
                       <td className="px-4 py-4">
                         <p className="text-[11px] font-black text-slate-800 uppercase truncate max-w-[140px]">{p.customer}</p>
-                        <p className="text-[8px] text-slate-400 font-bold uppercase">{p.operator}</p>
+                        <p className="text-[8px] text-slate-400 font-bold uppercase">{p.operator !== p.origin ? `${p.origin} • ${p.operator}` : p.origin}</p>
                       </td>
                       <td className="px-4 py-4 text-center">
                         <MethodBadge method={p.method}/>

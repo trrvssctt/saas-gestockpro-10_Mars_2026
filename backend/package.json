@@ -7,7 +7,9 @@
     "dev": "vite --host 0.0.0.0",
     "build": "echo \"skip frontend build in backend package.json\"",
     "preview": "vite preview --host 0.0.0.0",
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node --test tests/",
+    "seed-demo": "node scripts/seed-demo.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1025.0",

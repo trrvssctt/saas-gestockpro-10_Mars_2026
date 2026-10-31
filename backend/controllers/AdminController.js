@@ -3,6 +3,7 @@ import { Tenant, User, Subscription, Plan, Payment, AuditLog, Sale, Customer, St
 import { sequelize } from '../config/database.js';
 import { Op, fn, col } from 'sequelize';
 import crypto from 'crypto';
+import { aggregateDebtors, saleCustomerName, rankSellers } from '../utils/salesMetrics.js';
 
 export class AdminController {
   /**
@@ -126,32 +127,33 @@ export class AdminController {
       const creancesPayWhere = tenantWhere ? { ...tenantWhere, ...creancesPayBase } : creancesPayBase;
 
       const [allSalesForCreances, allPaymentsForCreances] = await Promise.all([
-        Sale.findAll({ where: creancesSalesWhere, include: [{ model: Customer }], attributes: ['id','totalTtc','status','customerId'] }),
+        Sale.findAll({ where: creancesSalesWhere, include: [{ model: Customer }], attributes: ['id','totalTtc','status','customerId','walkinName'] }),
         Payment.findAll({ where: creancesPayWhere, attributes: ['saleId','amount'] })
       ]);
       const paidBySale = {};
       allPaymentsForCreances.forEach(p => {
         paidBySale[p.saleId] = (paidBySale[p.saleId] || 0) + parseFloat(p.amount || 0);
       });
-      const debtByCustomer = {};
-      allSalesForCreances.forEach(s => {
-        const paid = paidBySale[s.id] || 0;
-        const due  = parseFloat(s.totalTtc || 0) - paid;
-        if (due > 0) {
-          const cid   = s.Customer?.id || 'PASSAGE';
-          const cname = s.Customer?.companyName || s.Customer?.name || 'Client';
-          debtByCustomer[cid] = debtByCustomer[cid] || { id: cid, name: cname, total: 0 };
-          debtByCustomer[cid].total += due;
-        }
-      });
-      const topDebtors  = Object.values(debtByCustomer).sort((a, b) => b.total - a.total).slice(0, 5);
-      const totalUnpaid = Object.values(debtByCustomer).reduce((s, d) => s + d.total, 0);
+      // Même regroupement que la page Recouvrement (fiche client, sinon client de passage nommé)
+      const debtors     = aggregateDebtors(allSalesForCreances, s => paidBySale[s.id] || 0);
+      const topDebtors  = debtors.slice(0, 5);
+      const totalUnpaid = debtors.reduce((s, d) => s + d.total, 0);
 
       const overdueCount = await Sale.count({ where: withPeriod({ status: 'EN_COURS' }) });
 
       // Recent sales (in period)
       const recentSalesWhere = withPeriod({ status: { [Op.ne]: 'ANNULE' } });
       const recentSales = await Sale.findAll({ where: recentSalesWhere, include: [{ model: Customer }], order: [['createdAt','DESC']], limit: 20 });
+
+      // Ventes du jour (indépendant du filtre de période)
+      const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const todayWhere = { ...(tenantWhere || {}), status: { [Op.ne]: 'ANNULE' }, createdAt: { [Op.gte]: startOfToday } };
+      const todaySalesCount = await Sale.count({ where: todayWhere });
+      const todayRevenue    = parseFloat(await Sale.sum('totalTtc', { where: todayWhere }) || 0);
+
+      // Classement équipe sur toute la période (pas seulement les 20 dernières ventes)
+      const periodSalesForRanking = await Sale.findAll({ where: salesWhere, attributes: ['operatorName', 'totalTtc', 'status'] });
+      const sellerRanking = rankSellers(periodSalesForRanking);
 
       // Latest payments (in period) — uniquement les paiements liés à des ventes (saleId IS NOT NULL)
       const latestPaymentsWhere = {
@@ -181,7 +183,15 @@ export class AdminController {
       const movementsWhere = tenantWhere
         ? { ...tenantWhere, ...(periodStart ? { createdAt: { [Op.gte]: periodStart, [Op.lt]: periodEnd } } : {}) }
         : { ...(periodStart ? { createdAt: { [Op.gte]: periodStart, [Op.lt]: periodEnd } } : {}) };
-      const recentMovements = await ProductMovement.findAll({ where: movementsWhere, include: [{ model: StockItem }], order: [['createdAt','DESC']], limit: 10 });
+      const recentMovements = await ProductMovement.findAll({ where: movementsWhere, include: [{ model: StockItem, attributes: ['name'] }], order: [['createdAt','DESC']], limit: 10 });
+      const movementCountsRaw = await ProductMovement.findAll({
+        where: movementsWhere,
+        attributes: ['userRef', [fn('COUNT', col('id')), 'cnt']],
+        group: ['userRef'],
+        raw: true
+      });
+      const movementsByUser = {};
+      movementCountsRaw.forEach(r => { if (r.userRef) movementsByUser[r.userRef] = parseInt(r.cnt, 10); });
 
       // Categories
       const categoriesCount    = await Category.count({ where: tenantWhere || {} });
@@ -348,13 +358,16 @@ export class AdminController {
           totalSalesCount, totalRevenue, totalCollected, totalChequesPending, totalUnpaid,
           overdueCount, customersCount, stocksTotal, stocksRupture,
           stocksLow, categoriesCount, subcategoriesCount, usersCount,
-          totalSubscriptionRevenue, totalSubscriptionPending
+          totalSubscriptionRevenue, totalSubscriptionPending,
+          todaySalesCount, todayRevenue
         },
+        sellerRanking,
+        movementsByUser,
         topDebtors,
-        latestPayments: latestPayments.map(p => ({ id: p.id, amount: p.amount, createdAt: p.createdAt, saleId: p.saleId, customer: p.Sale?.Customer?.companyName || null })),
-        recentSales: recentSales.map(s => ({ id: s.id, reference: s.reference, totalTtc: s.totalTtc, amountPaid: s.amountPaid || 0, status: s.status, createdAt: s.createdAt, customer: s.Customer?.companyName, operator: s.operator || s.operatorName || null })),
+        latestPayments: latestPayments.map(p => ({ id: p.id, amount: p.amount, method: p.method, createdAt: p.createdAt, saleId: p.saleId, customer: saleCustomerName(p.sale) })),
+        recentSales: recentSales.map(s => ({ id: s.id, reference: s.reference, totalTtc: s.totalTtc, amountPaid: s.amountPaid || 0, status: s.status, createdAt: s.createdAt, customer: saleCustomerName(s), operator: s.operatorName || null, isRecurring: !!s.recurringInstallmentId })),
         latestCustomers: latestCustomers.map(c => ({ id: c.id, companyName: c.companyName || c.name, createdAt: c.createdAt })),
-        recentMovements: recentMovements.map(m => ({ id: m.id, productName: m.productName || m.StockItem?.name, quantity: m.quantity, createdAt: m.createdAt, type: m.type, userRef: m.userRef || m.userName || (m.user ? m.user.name : null) })),
+        recentMovements: recentMovements.map(m => ({ id: m.id, productName: m.stock_item?.name || null, quantity: m.qty, createdAt: m.createdAt, type: m.type, reason: m.reason, previousLevel: m.previousLevel, newLevel: m.newLevel, userRef: m.userRef || null })),
         users: { count: usersCount, byRole: usersByRole, recent: recentUsers.map(u => ({ id: u.id, name: u.name, email: u.email, lastLogin: u.lastLogin, role: u.role || 'EMPLOYEE' })) },
         subscriptionAlerts: subs.map(s => ({ tenant: s.Tenant?.name, nextBillingDate: s.nextBillingDate, status: s.status })),
         subscription: subs && subs.length > 0 ? { subscription: { nextBillingDate: subs[0].nextBillingDate, tenant: subs[0].Tenant?.name, status: subs[0].status, planId: subs[0].planId } } : null,

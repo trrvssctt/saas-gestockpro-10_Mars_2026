@@ -33,6 +33,7 @@ import TimeMachineFilter, {
   getPeriodLabel,
   NOW_FILTER,
 } from './TimeMachineFilter';
+import { movementActivity } from '../utils/displayHelpers.js';
 
 const fmt = (n: number, currency: string) => `${Number(n || 0).toLocaleString('fr-FR')} ${currency}`;
 const fmtShort = (n: number) => Number(n || 0).toLocaleString('fr-FR');
@@ -43,6 +44,9 @@ const getCustomerName = (c: any): string => {
   if (typeof c === 'object') return c.companyName || c.name || c.email || '';
   return String(c);
 };
+// Nom du client d'une vente : fiche client, sinon client de passage
+const getSaleCustomerName = (s: any): string =>
+  getCustomerName(s?.customer) || s?.walkinName || 'Client de passage';
 
 const StatCard = ({ title, value, subValue, icon: Icon, color, trend, onClick }: any) => {
   const iconColorClass = (color || 'bg-slate-400').replace('bg-', 'text-');
@@ -160,6 +164,8 @@ const Dashboard: React.FC<{
   const [revenueStats, setRevenueStats] = useState<any[]>([]);
   const [pendingValidations, setPendingValidations] = useState<any[]>([]);
   const [recurringContracts, setRecurringContracts] = useState<any[]>([]);
+  const [sellerRanking, setSellerRanking] = useState<any[] | null>(null);
+  const [movementsByUser, setMovementsByUser] = useState<Record<string, number>>({});
 
   const userRoles = user.roles || [user.role];
   const isAdmin = userRoles.includes(UserRole.ADMIN) || userRoles.includes(UserRole.SUPER_ADMIN);
@@ -208,6 +214,8 @@ const Dashboard: React.FC<{
           setLatestPayments(payload.latestPayments || []);
           setRevenueStats(payload.revenueStats || []);
           setPendingValidations(payload.pendingValidations || []);
+          setSellerRanking(Array.isArray(payload.sellerRanking) ? payload.sellerRanking : null);
+          setMovementsByUser(payload.movementsByUser || {});
         } else {
           const toData = (r: any) => (r && r.data !== undefined) ? r.data : r;
           if (userRoles.includes(UserRole.ACCOUNTANT)) {
@@ -418,19 +426,24 @@ const Dashboard: React.FC<{
       if (!u || !u.name) return;
       perfMap[u.name] = { name: u.name, role: u.role || 'EMPLOYEE', salesCount: 0, movCount: 0, score: 0 };
     });
-    sales.forEach((s: any) => {
-      const op = s.operator || s.operatorName || 'SYSTÈME';
-      ensureOp(op, 'SALES').salesCount += 1;
-    });
-    movements.forEach((m: any) => {
-      const op = m.userRef || m.userName || m.user || 'SYSTÈME';
-      ensureOp(op, 'STOCK_MANAGER').movCount += 1;
-    });
+    // Les factures automatiques des contrats (sans vendeur) ne comptent pas dans le classement
+    if (sellerRanking) {
+      sellerRanking.forEach((r: any) => { ensureOp(r.name, 'SALES').salesCount += Number(r.salesCount || 0); });
+      Object.entries(movementsByUser).forEach(([name, cnt]) => { ensureOp(name, 'STOCK_MANAGER').movCount += Number(cnt || 0); });
+    } else {
+      sales.forEach((s: any) => {
+        const op = s.operatorName || s.operator;
+        if (op) ensureOp(op, 'SALES').salesCount += 1;
+      });
+      movements.forEach((m: any) => {
+        if (m.userRef) ensureOp(m.userRef, 'STOCK_MANAGER').movCount += 1;
+      });
+    }
     return Object.values(perfMap).map((u: any) => ({
       ...u,
       score: (Number(u.salesCount || 0) * 10) + (Number(u.movCount || 0) * 2)
     })).sort((a: any, b: any) => b.score - a.score || b.salesCount - a.salesCount);
-  }, [usersList, sales, movements]);
+  }, [usersList, sales, movements, sellerRanking, movementsByUser]);
 
   // --- REVENUE CHART DATA ---
   const revenueChartData = useMemo(() => {
@@ -548,8 +561,7 @@ const Dashboard: React.FC<{
     const items: any[] = [];
     movements.slice(0, 5).forEach((m: any) => items.push({
       type: m.type === 'IN' ? 'stock_in' : 'stock_out',
-      title: m.productName || 'Produit',
-      sub: `${m.type === 'IN' ? '+' : '-'}${m.quantity} unités • ${m.userRef || 'Système'}`,
+      ...movementActivity(m),
       date: m.createdAt,
       icon: m.type === 'IN' ? ArrowUpCircle : ArrowDownCircle,
       color: m.type === 'IN' ? 'bg-emerald-500' : 'bg-rose-500'
@@ -601,21 +613,29 @@ const Dashboard: React.FC<{
         : selectedMonth !== null
         ? `${MONTH_LABELS[selectedMonth]} ${selectedYear}`
         : String(selectedYear);
+      // Admin : même base que la carte Chiffre d'affaires (TTC, hors annulées, période)
+      if (adminStats) {
+        return { count: adminStats.totalSalesCount || 0, revenue: adminStats.totalRevenue || 0, periodLabel: label };
+      }
       return {
         count: periodSales.length,
         revenue: periodSales.reduce((sum: number, s: any) => sum + parseFloat(s.totalTtc || 0), 0),
         periodLabel: label
       };
     }
+    // Admin : compteurs calculés par le backend (la liste `sales` est limitée aux 20 dernières)
+    if (adminStats && adminStats.todaySalesCount !== undefined) {
+      return { count: adminStats.todaySalesCount || 0, revenue: adminStats.todayRevenue || 0, periodLabel: "aujourd'hui" };
+    }
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    const todaySales = sales.filter((s: any) => new Date(s.createdAt) >= today);
+    const todaySales = sales.filter((s: any) => s.status !== 'ANNULE' && new Date(s.createdAt) >= today);
     return {
       count: todaySales.length,
       revenue: todaySales.reduce((sum: number, s: any) => sum + parseFloat(s.totalTtc || 0), 0),
       periodLabel: "aujourd'hui"
     };
-  }, [sales, selectedYear, selectedMonth, selectedQuarter, selectedDay, QTR_MONTHS]);
+  }, [sales, adminStats, selectedYear, selectedMonth, selectedQuarter, selectedDay, QTR_MONTHS]);
 
   // --- PAYMENT MODAL ---
   const [showPaymentModal, setShowPaymentModal] = useState(false);
@@ -1083,7 +1103,7 @@ const Dashboard: React.FC<{
 
         {/* ── ROW 1 : 8 KPI CARDS ── */}
         <div id="tour-kpi-grid" className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <StatCard title="Chiffre d'Affaires" value={fmtShort(salesStats.totalRevenue) + ' ' + currency.split(' ')[0]} subValue={`${todayStats.count} vente(s) — ${todayStats.periodLabel}`} icon={TrendingUp} color="bg-indigo-600" trend="up" onClick={() => onNavigate?.('sales')}/>
+          <StatCard title="Chiffre d'Affaires" value={fmtShort(salesStats.totalRevenue) + ' ' + currency.split(' ')[0]} subValue={`TTC hors annulées — ${salesStats.totalSalesCount} vente(s)${selectedYear ? '' : ' au total'}`} icon={TrendingUp} color="bg-indigo-600" trend="up" onClick={() => onNavigate?.('sales')}/>
           <StatCard title="Trésorerie Réelle" value={fmtShort(salesStats.totalCollected) + ' ' + currency.split(' ')[0]} subValue={`Taux encaissement : ${collectionRate}%`} icon={Wallet} color="bg-emerald-500" trend="up" onClick={() => onNavigate?.('payments')}/>
           <StatCard title="Créances Clients" value={fmtShort(salesStats.totalUnpaid) + ' ' + currency.split(' ')[0]} subValue={`${salesStats.overdueCount} facture(s) en retard${selectedYear ? ' (historique)' : ''}`} icon={Landmark} color="bg-rose-500" trend="down" onClick={() => onNavigate?.('recovery')}/>
           <StatCard title={selectedYear ? `Ventes ${todayStats.periodLabel}` : 'Ventes du jour'} value={`${todayStats.count}`} subValue={fmtShort(todayStats.revenue) + ' ' + currency.split(' ')[0]} icon={ShoppingCart} color="bg-violet-500" trend={todayStats.count > 0 ? 'up' : undefined} onClick={() => onNavigate?.('sales')}/>
@@ -1196,7 +1216,7 @@ const Dashboard: React.FC<{
                     {(d.name || '?').charAt(0).toUpperCase()}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-[10px] font-black text-slate-800 truncate">{d.name || 'Client'}</p>
+                    <p className="text-[10px] font-black text-slate-800 truncate">{d.name || 'Client de passage'}</p>
                     <div className="w-full bg-slate-200 rounded-full h-1 mt-1">
                       <div className="bg-rose-500 h-1 rounded-full" style={{ width: `${Math.min(100, (d.total / (topDebtors[0]?.total || 1)) * 100)}%` }}/>
                     </div>
@@ -1429,7 +1449,7 @@ const Dashboard: React.FC<{
                   {sales.slice(0, 8).map((s: any) => (
                     <tr key={s.id} className="border-b border-slate-50 last:border-0 hover:bg-slate-50 transition-all">
                       <td className="py-2.5 pr-3 text-[10px] font-black text-slate-700">{s.reference || `#${s.id?.slice(-6)}`}</td>
-                      <td className="py-2.5 pr-3 text-[10px] text-slate-500 truncate max-w-[120px]">{getCustomerName(s.customer) || 'N/A'}</td>
+                      <td className="py-2.5 pr-3 text-[10px] text-slate-500 truncate max-w-[120px]">{getSaleCustomerName(s)}</td>
                       <td className="py-2.5 pr-3 text-[10px] font-black text-slate-800 text-right">{Number(s.totalTtc).toLocaleString('fr-FR')}</td>
                       <td className="py-2.5 text-center">
                         <span className={`text-[8px] font-black px-2 py-0.5 rounded-lg uppercase ${
@@ -1565,7 +1585,7 @@ const Dashboard: React.FC<{
               <div key={s.id} className="flex items-center gap-3 p-2.5 bg-slate-50 rounded-xl">
                 <div className="flex-1 min-w-0">
                   <p className="text-[10px] font-black text-slate-800 truncate">{s.reference || `#${String(s.id).slice(-6)}`}</p>
-                  <p className="text-[8px] text-slate-400">{getCustomerName(s.customer) || 'N/A'}</p>
+                  <p className="text-[8px] text-slate-400">{getSaleCustomerName(s)}</p>
                 </div>
                 <div className="text-right flex-shrink-0">
                   <p className="text-[10px] font-black text-slate-700">{Number(s.totalTtc).toLocaleString('fr-FR')}</p>
@@ -1628,11 +1648,11 @@ const Dashboard: React.FC<{
                   {m.type === 'IN' ? <ArrowUpCircle size={12} className="text-emerald-600"/> : <ArrowDownCircle size={12} className="text-rose-600"/>}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-[10px] font-black text-slate-800 truncate">{m.productName || 'Produit'}</p>
-                  <p className="text-[8px] text-slate-400">{m.userRef || 'Système'} • {timeAgo(m.createdAt)}</p>
+                  <p className="text-[10px] font-black text-slate-800 truncate">{movementActivity(m).title}</p>
+                  <p className="text-[8px] text-slate-400">{m.userRef || m.reason || 'Mouvement'} • {timeAgo(m.createdAt)}</p>
                 </div>
-                <span className={`text-[9px] font-black ${m.type === 'IN' ? 'text-emerald-600' : 'text-rose-600'}`}>
-                  {m.type === 'IN' ? '+' : '-'}{m.quantity}
+                <span className={`text-[9px] font-black ${movementActivity(m).sub.startsWith('+') ? 'text-emerald-600' : 'text-rose-600'}`}>
+                  {movementActivity(m).sub.split(' ')[0]}
                 </span>
               </div>
             ))}
@@ -1699,7 +1719,7 @@ const Dashboard: React.FC<{
                   {sales.slice(0, 10).map((s: any) => (
                     <tr key={s.id} className="border-b border-slate-50 last:border-0 hover:bg-slate-50 transition-all">
                       <td className="py-2.5 pr-3 text-[10px] font-black text-slate-700">{s.reference || `#${String(s.id).slice(-6)}`}</td>
-                      <td className="py-2.5 pr-3 text-[10px] text-slate-500 truncate max-w-[120px]">{getCustomerName(s.customer) || 'N/A'}</td>
+                      <td className="py-2.5 pr-3 text-[10px] text-slate-500 truncate max-w-[120px]">{getSaleCustomerName(s)}</td>
                       <td className="py-2.5 pr-3 text-[10px] font-black text-slate-800 text-right">{Number(s.totalTtc).toLocaleString('fr-FR')}</td>
                       <td className="py-2.5 text-center">
                         <span className={`text-[8px] font-black px-2 py-0.5 rounded-lg uppercase ${s.status === 'TERMINE' ? 'bg-emerald-100 text-emerald-700' : s.status === 'EN_COURS' ? 'bg-amber-100 text-amber-700' : 'bg-rose-100 text-rose-700'}`}>

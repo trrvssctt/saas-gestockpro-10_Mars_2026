@@ -20,7 +20,9 @@ Sale.init({
   amountPaid: { type: DataTypes.NUMERIC(15, 2), defaultValue: 0, field: 'amount_paid' },
   saleDate: { type: DataTypes.DATE, defaultValue: DataTypes.NOW, field: 'sale_date' },
   // Lien vers l'échéance de contrat récurrent qui a généré cette vente
-  recurringInstallmentId: { type: DataTypes.UUID, allowNull: true, field: 'recurring_installment_id' }
+  recurringInstallmentId: { type: DataTypes.UUID, allowNull: true, field: 'recurring_installment_id' },
+  // Vendeur ayant saisi la vente (null pour les factures automatiques des contrats)
+  operatorName: { type: DataTypes.STRING(150), allowNull: true, field: 'operator_name' }
 }, {
   sequelize, 
   modelName: 'sale',

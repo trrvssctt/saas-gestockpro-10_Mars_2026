@@ -28,7 +28,8 @@ export class InvoiceService {
         totalHt: ht,
         totalTtc: ttc,
         taxAmount: tva,
-        amountPaid: 0
+        amountPaid: 0,
+        operatorName: userName || null
       }, { transaction });
 
       const invoiceId = `INV-${Date.now().toString().slice(-8)}`;

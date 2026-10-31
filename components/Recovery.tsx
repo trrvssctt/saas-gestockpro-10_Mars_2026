@@ -80,8 +80,9 @@ const Recovery = ({ currency }: { currency: string }) => {
       if (due <= 0) return;
       const customer = sale.customer;
       const customerId = sale.customerId || sale.customer_id;
-      // Regrouper par client enregistré ; sinon catégorie "Client de passage"
-      const key = customerId || 'PASSAGE';
+      // Regrouper par fiche client ; sinon par nom du client de passage (sans fiche dans Clients)
+      const walkin = (sale.walkinName || '').trim();
+      const key = customerId || (walkin ? `PASSAGE:${walkin.toLowerCase()}` : 'PASSAGE');
       if (!debtMap[key]) {
         debtMap[key] = {
           id: key,
@@ -425,6 +426,7 @@ const Recovery = ({ currency }: { currency: string }) => {
                             </div>
                             <div>
                               <p className="text-sm font-black text-slate-800 uppercase leading-tight">{d.companyName}</p>
+                              {d.isWalkin && <span className="text-[7px] font-black text-slate-400 uppercase tracking-widest">Sans fiche client</span>}
                               <p className="text-[9px] text-slate-400 font-semibold">{d.salesCount} vente(s) concernée(s)</p>
                             </div>
                           </div>
@@ -501,6 +503,7 @@ const Recovery = ({ currency }: { currency: string }) => {
                         </div>
                         <div>
                           <p className="text-sm font-black text-slate-800 uppercase leading-tight">{d.companyName}</p>
+                              {d.isWalkin && <span className="text-[7px] font-black text-slate-400 uppercase tracking-widest">Sans fiche client</span>}
                           <span className={`inline-flex items-center gap-1 text-[8px] font-black px-2 py-0.5 rounded-lg mt-0.5 ${risk.bg} ${risk.color}`}>
                             <Zap size={8}/> {risk.label}
                           </span>

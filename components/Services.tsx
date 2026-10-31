@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { authBridge } from '../services/authBridge';
 import { apiClient } from '../services/api';
+import SafeImage, { CategoryIcon } from './SafeImage';
 import { uploadFile } from '../services/uploadService';
 import { useToast } from './ToastProvider';
 
@@ -272,11 +273,8 @@ const Services = ({ currency }: { currency: string }) => {
                 <div key={service.id} className={`bg-white rounded-[2.5rem] border border-slate-100 p-8 shadow-sm hover:shadow-2xl transition-all group relative flex flex-col h-full border-b-4 border-b-transparent hover:border-b-indigo-500 ${!service.isActive ? 'opacity-60' : ''} ${isLinked ? 'grayscale-[0.3]' : ''}`}>
                    <div className="flex justify-between items-start mb-6 shrink-0">
                       <div className="w-14 h-14 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center transition-transform group-hover:scale-110 shadow-inner overflow-hidden">
-                        {service.imageUrl ? (
-                          <img src={service.imageUrl} className="w-full h-full object-cover" alt={service.name} />
-                        ) : (
-                          <Briefcase size={24}/>
-                        )}
+                        <SafeImage src={service.imageUrl} className="w-full h-full object-cover" alt={service.name}
+                          fallback={<CategoryIcon hint={service.name} size={24} fallback={Briefcase} />} />
                       </div>
                       <div className="flex gap-2">
                         <span className={`px-2 py-0.5 rounded-md text-[7px] font-black uppercase tracking-widest ${service.isActive ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'}`}>
@@ -454,9 +452,8 @@ const Services = ({ currency }: { currency: string }) => {
             <div className="px-6 md:px-10 py-6 bg-gradient-to-r from-slate-900 to-violet-900 text-white flex justify-between items-center shrink-0">
               <div className="flex items-center gap-4">
                 <div className="w-14 h-14 bg-violet-500/30 border border-violet-400/30 rounded-2xl flex items-center justify-center shadow-inner overflow-hidden shrink-0">
-                  {selectedService.imageUrl
-                    ? <img src={selectedService.imageUrl} className="w-full h-full object-cover" alt={selectedService.name} />
-                    : <Sparkles size={26} />}
+                  <SafeImage src={selectedService.imageUrl} className="w-full h-full object-cover" alt={selectedService.name}
+                    fallback={<CategoryIcon hint={selectedService.name} size={26} fallback={Sparkles} />} />
                 </div>
                 <div>
                   <p className="text-[9px] font-black text-violet-300 uppercase tracking-[0.3em] mb-1">Détail Service</p>
@@ -497,9 +494,7 @@ const Services = ({ currency }: { currency: string }) => {
 
                   {/* Image si disponible */}
                   {selectedService.imageUrl && (
-                    <div className="bg-white p-3 rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-                      <img src={selectedService.imageUrl} className="w-full rounded-xl object-cover aspect-square" alt={selectedService.name} />
-                    </div>
+                    <SafeImage src={selectedService.imageUrl} alt={selectedService.name} className="w-full rounded-xl object-cover aspect-square bg-white p-3 border border-slate-100 shadow-sm" fallback={null} />
                   )}
 
                   {/* Infos système */}

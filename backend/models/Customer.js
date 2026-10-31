@@ -34,7 +34,8 @@ Customer.init({
     type: DataTypes.DATE, 
     field: 'deleted_at' 
   },
-  isActive: { type: DataTypes.BOOLEAN, defaultValue: true, field: 'is_active' }
+  isActive: { type: DataTypes.BOOLEAN, defaultValue: true, field: 'is_active' },
+  isVip: { type: DataTypes.BOOLEAN, defaultValue: false, field: 'is_vip' }
 }, { 
   sequelize, 
   modelName: 'customer',

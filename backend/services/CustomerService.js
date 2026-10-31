@@ -1,29 +1,22 @@
 
-import { Customer, Invoice } from '../models/index.js';
+import { Customer, Sale } from '../models/index.js';
 import { Op } from 'sequelize';
+import { CREANCE_STATUSES, customerHealth } from '../utils/salesMetrics.js';
 
 export class CustomerService {
   /**
-   * Analyse les retards de paiement et met à jour le healthStatus
+   * Analyse les retards de paiement (ventes impayées au-delà du délai client)
+   * et met à jour le healthStatus.
    */
   static async refreshHealthStatus(customerId) {
     const customer = await Customer.findByPk(customerId);
     if (!customer) return;
 
-    const overdueInvoices = await Invoice.count({
-      where: {
-        customerId,
-        status: { [Op.ne]: 'PAID' },
-        dueDate: { [Op.lt]: new Date() }
-      }
+    const sales = await Sale.findAll({
+      where: { customerId, status: { [Op.in]: CREANCE_STATUSES } },
+      attributes: ['totalTtc', 'amountPaid', 'status', 'createdAt']
     });
-
-    let newStatus = 'GOOD';
-    if (overdueInvoices > 3) {
-      newStatus = 'CRITICAL';
-    } else if (overdueInvoices > 0) {
-      newStatus = 'WARNING';
-    }
+    const newStatus = customerHealth(sales, customer.paymentTerms);
 
     if (customer.healthStatus !== newStatus) {
       await customer.update({ healthStatus: newStatus });

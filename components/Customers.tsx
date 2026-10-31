@@ -225,7 +225,7 @@ const Customers: React.FC<CustomersProps> = ({ user, currency, plan, refreshKey 
       if (!matchesSearch) return false;
 
       // Segment quick filters
-      if (filterSegment === 'ELITE' && !((c.outstandingBalance || 0) > 10000)) return false;
+      if (filterSegment === 'ELITE' && !(c as any).isVip) return false;
       if (filterSegment === 'RISK' && !(c.healthStatus === 'CRITICAL')) return false;
 
       // Advanced filters
@@ -367,7 +367,7 @@ const Customers: React.FC<CustomersProps> = ({ user, currency, plan, refreshKey 
                         {customer.healthStatus === 'GOOD' ? 'SOLVABLE' : customer.healthStatus === 'WARNING' ? 'VIGILANCE' : 'RISQUE'}
                       </div>
                     </div>
-                    <h3 className="font-black text-slate-900 text-lg uppercase truncate leading-none">{customer.companyName || 'Passage'}</h3>
+                    <h3 className="font-black text-slate-900 text-lg uppercase truncate leading-none">{customer.companyName || 'Passage'}{(customer as any).isVip && <span className="ml-2 px-1.5 py-0.5 bg-amber-100 text-amber-700 text-[8px] font-black rounded uppercase align-middle">VIP</span>}</h3>
                     <p className="text-[10px] text-slate-400 font-bold uppercase mt-2 tracking-widest truncate flex items-center gap-2"><Mail size={12}/> {customer.email}</p>
                     
                     <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 gap-4 flex-1">
@@ -437,7 +437,7 @@ const Customers: React.FC<CustomersProps> = ({ user, currency, plan, refreshKey 
                   const isLinked = hasLinkedSales(customer.id);
                   return (
                     <tr key={customer.id} className="group hover:bg-slate-50/50 transition-all">
-                      <td className="px-3 md:px-6 py-3 md:py-4 font-black text-slate-900">{customer.companyName || '—'}</td>
+                      <td className="px-3 md:px-6 py-3 md:py-4 font-black text-slate-900">{customer.companyName || '—'}{(customer as any).isVip && <span className="ml-2 px-1.5 py-0.5 bg-amber-100 text-amber-700 text-[7px] font-black rounded uppercase align-middle">VIP</span>}</td>
                       <td className="px-3 md:px-6 py-3 md:py-4 text-slate-500 text-sm truncate max-w-[120px] md:max-w-[200px]">{customer.email}</td>
                       <td className="px-3 md:px-6 py-3 md:py-4 text-center text-[11px] font-black">{customer.healthStatus === 'GOOD' ? 'SOLVABLE' : customer.healthStatus === 'WARNING' ? 'VIGILANCE' : 'RISQUE'}</td>
                       <td className="px-3 md:px-6 py-3 md:py-4 text-right font-black">{(customer.outstandingBalance || 0).toLocaleString()} {currency}</td>

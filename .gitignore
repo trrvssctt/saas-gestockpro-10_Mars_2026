@@ -33,3 +33,6 @@ Thumbs.db
 
 # n8n
 .n8nac/
+
+# Identifiants du tenant de démo (backend/scripts/seed-demo.js)
+.env.demo

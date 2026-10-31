@@ -1,5 +1,6 @@
 
-import { Customer, AuditLog } from '../models/index.js';
+import { Customer, AuditLog, Sale } from '../models/index.js';
+import { aggregateDebtors, CREANCE_STATUSES } from '../utils/salesMetrics.js';
 import { NotificationService } from '../services/NotificationService.js';
 import { Op } from 'sequelize';
 import crypto from 'crypto';
@@ -10,13 +11,14 @@ export class RecoveryController {
    */
   static async listDebtors(req, res) {
     try {
-      const debtors = await Customer.findAll({
-        where: { 
-          tenantId: req.user.tenantId,
-          outstandingBalance: { [Op.gt]: 0 }
-        },
-        order: [['outstandingBalance', 'DESC']]
+      // Dette calculée depuis les ventes (outstanding_balance n'est pas maintenu)
+      const sales = await Sale.findAll({
+        where: { tenantId: req.user.tenantId, status: { [Op.in]: CREANCE_STATUSES } },
+        include: [{ model: Customer }]
       });
+      const debtors = aggregateDebtors(sales).map(d => ({
+        id: d.id, companyName: d.name, outstandingBalance: d.total, isWalkin: d.isWalkin
+      }));
       return res.status(200).json(debtors);
     } catch (error) {
       return res.status(500).json({ error: error.message });

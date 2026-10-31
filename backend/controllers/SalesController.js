@@ -2,6 +2,7 @@
 import { Sale, SaleItem, Payment, StockItem, ProductMovement, Customer, AuditLog, Service, Invoice, InvoiceItem } from '../models/index.js';
 import { InvoiceService } from '../services/InvoiceService.js';
 import { sequelize } from '../config/database.js';
+import { Op } from 'sequelize';
 import { RecurringContractController } from './RecurringContractController.js';
 
 
@@ -12,6 +13,11 @@ async function checkActiveInventory(tenantId) {
     { replacements: { tenantId }, type: sequelize.QueryTypes.SELECT }
   );
   if (active) throw new Error(`Action bloquée : Un inventaire physique ("${active.name}") est actuellement en cours.`);
+}
+
+// La facture liée suit le règlement complet de la vente
+async function markInvoicePaid(saleId, tenantId) {
+  await Invoice.update({ status: 'PAID' }, { where: { saleId, tenantId, status: { [Op.ne]: 'CANCELLED' } } });
 }
 
 export class SaleController {
@@ -73,7 +79,9 @@ export class SaleController {
         });
         if (!isPendingMethod) {
           // Méthodes immédiates (espèces, mobile money) → créditer directement
-          await result.sale.update({ amountPaid });
+          const fullyPaid = parseFloat(amountPaid) >= parseFloat(result.sale.totalTtc);
+          await result.sale.update({ amountPaid, status: fullyPaid ? 'TERMINE' : 'EN_COURS' });
+          if (fullyPaid) await markInvoicePaid(result.sale.id, req.user.tenantId);
         } else {
           // Chèque / virement → la vente passe en BROUILLON en attendant l'encaissement
           await result.sale.update({ status: 'BROUILLON' });
@@ -234,6 +242,7 @@ export class SaleController {
         const newPaid = parseFloat(sale.amountPaid) + parseFloat(amount);
         const newStatus = newPaid >= parseFloat(sale.totalTtc) ? 'TERMINE' : 'EN_COURS';
         await sale.update({ amountPaid: newPaid, status: newStatus });
+        if (newStatus === 'TERMINE') await markInvoicePaid(sale.id, req.user.tenantId);
         // Sync contrat récurrent
         if (sale.recurringInstallmentId) {
           if (newStatus === 'TERMINE') {
@@ -282,6 +291,7 @@ export class SaleController {
             const newPaid = parseFloat(sale.amountPaid) + parseFloat(payment.amount);
             const newSaleStatus = newPaid >= parseFloat(sale.totalTtc) ? 'TERMINE' : 'EN_COURS';
             await sale.update({ amountPaid: newPaid, status: newSaleStatus });
+            if (newSaleStatus === 'TERMINE') await markInvoicePaid(sale.id, req.user.tenantId);
             if (sale.recurringInstallmentId) {
               if (newSaleStatus === 'TERMINE') {
                 await RecurringContractController.syncInstallmentPaid(sale.recurringInstallmentId, req.user.tenantId);
