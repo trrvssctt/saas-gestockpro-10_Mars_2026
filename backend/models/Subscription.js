@@ -35,6 +35,14 @@ Subscription.init({
     type: DataTypes.STRING(10),
     defaultValue: '1M',
     field: 'current_period'
+  },
+  // Échéance pour laquelle la facture de renouvellement a déjà été envoyée.
+  // Empêche les doublons du cron quotidien ; se réarme seul au renouvellement
+  // puisque la date d'échéance change. Voir RenewalInvoiceService.
+  renewalNoticeSentFor: {
+    type: DataTypes.DATE,
+    allowNull: true,
+    field: 'renewal_notice_sent_for'
   }
 }, {
   sequelize,

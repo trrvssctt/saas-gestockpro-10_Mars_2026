@@ -1,5 +1,6 @@
 import { SupportTicket, Tenant } from '../models/index.js';
 import { Op, literal } from 'sequelize';
+import { MailNotificationService } from '../services/MailNotificationService.js';
 
 export class SupportController {
   /** POST /api/support — Soumettre un ticket (client connecté) */
@@ -23,6 +24,9 @@ export class SupportController {
         priority,
         status: 'OPEN'
       });
+
+      // Accusé de réception au client + alerte interne (non bloquants)
+      MailNotificationService.onSupportTicket({ ticket, tenantId });
 
       return res.status(201).json({ ticket });
     } catch (error) {

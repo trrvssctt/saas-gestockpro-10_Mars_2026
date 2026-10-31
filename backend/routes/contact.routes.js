@@ -4,6 +4,7 @@ import { checkPermission } from '../middlewares/rbac.js';
 import { ContactMessage } from '../models/ContactMessage.js';
 import { Op } from 'sequelize';
 import { concurrentLimiter, deduplicateRequests, contactSlowDown } from '../middlewares/floodProtection.js';
+import { MailNotificationService } from '../services/MailNotificationService.js';
 
 // Router principal pour les routes contact
 const router = express.Router();
@@ -187,7 +188,18 @@ publicRouter.post('/',
     
     // Log de l'action pour audit
     console.log(`[CONTACT] Nouveau message reçu de ${email} (IP: ${ipAddress})`);
-    
+
+    // Accusé de réception au visiteur + alerte interne (non bloquants)
+    MailNotificationService.onContactMessage({
+      fullName,
+      email,
+      phone,
+      message,
+      ipAddress,
+      messageId: newMessage.id,
+    });
+
+
     res.status(201).json({
       success: true,
       message: 'Votre message a été envoyé avec succès. Nous vous répondrons dans les plus brefs délais.',

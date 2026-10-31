@@ -3,6 +3,9 @@ import { Tenant, User, Subscription, Plan, Payment, AuditLog, Sale, Customer, St
 import { sequelize } from '../config/database.js';
 import { Op, fn, col } from 'sequelize';
 import crypto from 'crypto';
+import { MailNotificationService } from '../services/MailNotificationService.js';
+import { MailService } from '../services/MailService.js';
+import { RenewalInvoiceService } from '../services/RenewalInvoiceService.js';
 import { aggregateDebtors, saleCustomerName, rankSellers } from '../utils/salesMetrics.js';
 
 export class AdminController {
@@ -622,10 +625,87 @@ export class AdminController {
         sha256Signature: crypto.createHash('sha256').update(`RESET_PASSWORD:${userId}:${Date.now()}`).digest('hex'),
       });
 
-      return res.status(200).json({ message: `Mot de passe de "${user.name}" réinitialisé avec succès.` });
+      // Transmet le nouveau mot de passe à l'utilisateur (boîte support, non bloquant)
+      MailNotificationService.onPasswordResetByAdmin({
+        user,
+        newPassword: newPassword.trim(),
+        operatorName: auditUserName,
+      });
+
+      return res.status(200).json({ message: `Mot de passe de "${user.name}" réinitialisé avec succès et envoyé à ${user.email}.` });
     } catch (error) {
       console.error('[RESET USER PASSWORD ERROR]', error);
       return res.status(500).json({ error: error.message });
+    }
+  }
+
+  /**
+   * POST /api/admin/subscriptions/renewal-invoices/run
+   * Déclenche manuellement la campagne de factures d'échéance.
+   * Body : { daysBefore?, dryRun?, tenantId?, force? }
+   */
+  static async runRenewalInvoices(req, res) {
+    try {
+      const { daysBefore, dryRun = false, tenantId = null, force = false } = req.body || {};
+      const result = await RenewalInvoiceService.run({
+        daysBefore: daysBefore !== undefined ? Number(daysBefore) : undefined,
+        dryRun: Boolean(dryRun),
+        tenantId,
+        force: Boolean(force),
+      });
+      return res.status(200).json({
+        message: result.dryRun
+          ? `Simulation : ${result.sent} facture(s) seraient envoyée(s).`
+          : `${result.sent} facture(s) envoyée(s), ${result.failed} échec(s), ${result.skipped} ignorée(s).`,
+        ...result,
+      });
+    } catch (error) {
+      console.error('[RENEWAL INVOICES ERROR]', error);
+      return res.status(500).json({ error: 'RenewalInvoiceError', message: error.message });
+    }
+  }
+
+  /**
+   * GET /api/admin/mail/health — teste la connexion des 3 boîtes SMTP.
+   */
+  static async mailHealth(req, res) {
+    try {
+      const results = await MailService.verifyAll();
+      const allOk = Object.values(results).every((r) => r.ok);
+      return res.status(allOk ? 200 : 503).json({
+        ok: allOk,
+        enabled: String(process.env.MAIL_ENABLED ?? 'true').toLowerCase() !== 'false',
+        host: process.env.SMTP_HOST || null,
+        port: Number(process.env.SMTP_PORT) || null,
+        adminRecipients: (process.env.MAIL_ADMIN_NOTIFY || '').split(',').map(s => s.trim()).filter(Boolean),
+        mailboxes: results,
+      });
+    } catch (error) {
+      return res.status(500).json({ error: 'MailHealthError', message: error.message });
+    }
+  }
+
+  /**
+   * POST /api/admin/mail/test — envoie un email de test depuis une boîte donnée.
+   * Body : { to?: string, mailbox?: 'contact'|'compta'|'support' }
+   */
+  static async mailTest(req, res) {
+    try {
+      const { to, mailbox = 'contact' } = req.body || {};
+      const recipient = to || (process.env.MAIL_ADMIN_NOTIFY || '').split(',')[0]?.trim();
+      if (!recipient) return res.status(400).json({ error: 'Aucun destinataire.' });
+
+      const info = await MailService.send({
+        mailbox,
+        to: recipient,
+        subject: `Test SMTP GeStockPro — boîte « ${mailbox} »`,
+        html: `<p>Cet email confirme que la boîte <strong>${mailbox}</strong> est correctement configurée.</p>
+               <p>Envoyé le ${new Date().toLocaleString('fr-FR')} depuis ${process.env.SMTP_HOST}.</p>`,
+      });
+
+      return res.status(200).json({ message: `Email de test envoyé à ${recipient}.`, messageId: info?.messageId || null });
+    } catch (error) {
+      return res.status(502).json({ error: 'MailTestError', message: error.message });
     }
   }
 
@@ -698,69 +778,56 @@ export class AdminController {
       } catch (e) {
       }
 
-      // Attempt to send via SMTP if configured. Capture any SMTP error for diagnostics
-      let smtpError = null;
-      if (process.env.SMTP_HOST && process.env.SMTP_PORT) {
-        try {
-          const nodemailer = (await import('nodemailer')).default;
-          const transporter = nodemailer.createTransport({
-            host: process.env.SMTP_HOST,
-            port: Number(process.env.SMTP_PORT) || 587,
-            secure: process.env.SMTP_SECURE === 'true',
-            auth: process.env.SMTP_USER ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS } : undefined
-          });
+      const mailSubject = subject || 'Message de l\'équipe GeStockPro';
 
-          const mailOptions = {
-            from: process.env.SMTP_FROM || 'no-reply@kernel-saas.local',
-            to,
-            subject: subject || 'Notification Kernel SaaS',
-            text: bodyText || '',
-            html: bodyText ? (String(bodyText).replace(/\n/g, '<br/>')) : undefined
-          };
-
-          const info = await transporter.sendMail(mailOptions);
-          try {
-            await AuditLog.create({
-              tenantId: tenant ? tenant.id : null,
-              userId: auditUserId,
-              userName: auditUserName,
-              action: 'EMAIL_SENT',
-              resource: `To:${to} Subject:${mailOptions.subject}`,
-              severity: 'LOW',
-              sha256Signature: crypto.createHash('sha256').update(`EMAIL_SENT:${to}:${Date.now()}`).digest('hex')
-            });
-          } catch (auditErr) {
-            console.error('[AUDIT CREATE FAILED AFTER SMTP SEND]', auditErr);
-            // return success to client but include audit warning
-            return res.status(200).json({ message: 'Email envoyé (audit log failed)', info, auditError: String(auditErr?.message || auditErr) });
-          }
-
-          return res.status(200).json({ message: 'Email envoyé', info });
-        } catch (err) {
-          console.error('[SMTP SEND ERROR]', err);
-          smtpError = String(err?.message || err);
-          // fallthrough to queued fallback
-        }
-      }
-
-      // Fallback: queue/log the message in AuditLog when SMTP not configured or send failed
+      // Envoi via la boîte support, mis en forme avec le gabarit de marque
       try {
+        const info = await MailNotificationService.sendSuperAdminMessage({
+          to: toList,
+          subject: mailSubject,
+          body: bodyText || '',
+          recipientName: tenant?.name || null,
+        });
+
         await AuditLog.create({
           tenantId: tenant ? tenant.id : null,
           userId: auditUserId,
           userName: auditUserName,
-          action: 'EMAIL_QUEUED',
-          resource: `To:${to} Subject:${subject || 'no-subject'} Body:${String(bodyText || '').slice(0,240)}`,
+          action: 'EMAIL_SENT',
+          resource: `To:${to} Subject:${mailSubject}`,
           severity: 'LOW',
-          sha256Signature: crypto.createHash('sha256').update(`EMAIL_QUEUE:${to}:${Date.now()}`).digest('hex')
+          sha256Signature: crypto.createHash('sha256').update(`EMAIL_SENT:${to}:${Date.now()}`).digest('hex')
+        }).catch((auditErr) => {
+          console.error('[AUDIT CREATE FAILED AFTER SMTP SEND]', auditErr);
         });
-      } catch (auditErr) {
-        console.error('[AUDIT CREATE FAILED FOR QUEUED EMAIL]', auditErr);
-        // don't fail the request entirely; return a helpful 200 with diagnostic info
-        return res.status(200).json({ message: 'SMTP non configuré ou envoi échoué, tentative de mise en file échouée (audit log)', queuedTo: to, smtpError, auditError: String(auditErr?.message || auditErr) });
-      }
 
-      return res.status(200).json({ message: 'SMTP non configuré ou envoi échoué, message mis en file (audit log)', queuedTo: to, smtpError });
+        return res.status(200).json({
+          message: `Email envoyé à ${toList.length} destinataire(s).`,
+          recipients: toList,
+          messageId: info?.messageId || null
+        });
+      } catch (err) {
+        console.error('[SMTP SEND ERROR]', err);
+
+        // Trace l'échec pour pouvoir renvoyer le message manuellement
+        await AuditLog.create({
+          tenantId: tenant ? tenant.id : null,
+          userId: auditUserId,
+          userName: auditUserName,
+          action: 'EMAIL_FAILED',
+          resource: `To:${to} Subject:${mailSubject} Body:${String(bodyText || '').slice(0, 240)}`,
+          severity: 'MEDIUM',
+          sha256Signature: crypto.createHash('sha256').update(`EMAIL_FAILED:${to}:${Date.now()}`).digest('hex')
+        }).catch((auditErr) => {
+          console.error('[AUDIT CREATE FAILED FOR FAILED EMAIL]', auditErr);
+        });
+
+        return res.status(502).json({
+          error: 'MailDeliveryError',
+          message: `Échec de l'envoi : ${String(err?.message || err)}`,
+          attemptedTo: toList
+        });
+      }
     } catch (error) {
       console.error('[SEND EMAIL ERROR]', error);
       return res.status(500).json({ error: error.message });
@@ -814,6 +881,8 @@ export class AdminController {
       }, { transaction });
 
       // Marquer le paiement PENDING existant comme COMPLETED (évite les doublons)
+      // `validatedPayment` sert ensuite à envoyer le reçu PDF au client.
+      let validatedPayment = null;
       try {
         const existingPending = await Payment.findOne({
           where: { tenantId: id, saleId: null, status: 'PENDING' },
@@ -822,6 +891,7 @@ export class AdminController {
         });
         if (existingPending) {
           await existingPending.update({ status: 'COMPLETED', paymentDate: new Date() }, { transaction });
+          validatedPayment = existingPending;
         } else {
           // Aucun paiement PENDING trouvé : créer un enregistrement de confirmation
           const { amount: bodyAmount, method: bodyMethod } = req.body || {};
@@ -831,7 +901,7 @@ export class AdminController {
           const fallbackAmount = bodyAmount
             ? Number(bodyAmount)
             : Math.round((planObj?.priceMonthly || 0) * mths);
-          await Payment.create({
+          validatedPayment = await Payment.create({
             tenantId: id,
             saleId: null,
             amount: fallbackAmount,
@@ -868,6 +938,16 @@ export class AdminController {
       }, { transaction });
 
       await transaction.commit();
+
+      // Reçu de paiement PDF au client + alerte interne (non bloquants)
+      if (validatedPayment) {
+        MailNotificationService.onPaymentCompleted({
+          payment: validatedPayment,
+          tenant,
+          planId: activatePlanId,
+          period: pendingPeriod,
+        });
+      }
 
       return res.status(200).json({ message: 'Abonnement validé.', tenant: { id: tenant.id, isActive: true } });
     } catch (error) {

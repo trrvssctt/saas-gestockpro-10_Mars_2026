@@ -19,6 +19,7 @@ import { Op } from 'sequelize';
 import apiRoutes from './routes/api.js';
 import { errorHandler } from './middlewares/errorHandler.js';
 import { BackupService } from './services/BackupService.js';
+import { RenewalInvoiceService } from './services/RenewalInvoiceService.js';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -50,9 +51,14 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization', 'x-tenant-id', 'x-session-token']
 }));
 
-// Use raw body for payment webhooks (Stripe requires raw body to verify signature)
-// Ce middleware doit être AVANT express.json() pour les routes de webhook
-app.use('/api/payments/webhook', express.raw({ type: 'application/json' }));
+// Use raw body for payment webhooks (Stripe et Wave signent le corps brut)
+// Ce middleware doit être AVANT express.json() : une fois le corps parsé,
+// Express pose req._body = true et tous les parsers suivants passent leur tour.
+app.use([
+  '/api/payments/webhook',
+  '/api/billing/stripe/webhook',
+  '/api/billing/wave/webhook',
+], express.raw({ type: 'application/json' }));
 
 app.use(express.json());
 
@@ -136,6 +142,22 @@ app.listen(PORT, async () => {
     }
   }, { timezone: 'Africa/Dakar' });
   console.log('✅ Cron suppressions planifié : tous les jours à 03:00 (Africa/Dakar)');
+
+  // ── Factures d'échéance — tous les jours à 08:00 ───────────────────────────
+  // Envoie au client sa facture de renouvellement (PDF joint) N jours avant la
+  // fin de son abonnement (RENEWAL_NOTICE_DAYS, 5 par défaut), puis un
+  // récapitulatif interne. Anti-doublon via subscriptions.renewal_notice_sent_for.
+  const RENEWAL_NOTICE_DAYS = Number(process.env.RENEWAL_NOTICE_DAYS || 5);
+  cron.schedule('0 8 * * *', async () => {
+    console.log(`[CRON] ▶ Factures d'échéance J-${RENEWAL_NOTICE_DAYS}…`);
+    try {
+      const r = await RenewalInvoiceService.run({ daysBefore: RENEWAL_NOTICE_DAYS });
+      console.log(`[CRON] ✅ Factures d'échéance : ${r.sent} envoyée(s), ${r.failed} échec(s), ${r.skipped} ignorée(s).`);
+    } catch (err) {
+      console.error('[CRON] ❌ Échec factures d\'échéance :', err.message);
+    }
+  }, { timezone: 'Africa/Dakar' });
+  console.log(`✅ Cron factures d'échéance planifié : tous les jours à 08:00, J-${RENEWAL_NOTICE_DAYS} (Africa/Dakar)`);
 
   // ── Auto-dépointage toutes les minutes ─────────────────────────────────────
   // Pour chaque tenant ayant deductionEnabled=true, si l'heure courante >= workEndTime,

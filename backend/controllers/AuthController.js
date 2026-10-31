@@ -8,6 +8,7 @@ import { Op } from 'sequelize';
 import bcrypt from 'bcrypt';
 import crypto from 'crypto';
 import { StripeService } from '../services/StripeService.js';
+import { MailNotificationService } from '../services/MailNotificationService.js';
 
 // ── Emails et domaines bloqués (spam / abus avérés) ──────────────────────────
 const BLOCKED_EMAILS = new Set([
@@ -126,6 +127,14 @@ export class AuthController {
       }, { transaction });
 
       await transaction.commit();
+
+      // Transmet le nouveau mot de passe à l'utilisateur concerné (boîte support)
+      MailNotificationService.onPasswordResetByAdmin({
+        user,
+        newPassword,
+        operatorName: req.user?.name || null,
+      });
+
       return res.status(200).json({ message: 'Identifiants scellés avec succès.' });
     } catch (error) {
       if (transaction) await transaction.rollback();
@@ -465,17 +474,23 @@ static async login(req, res) {
         tenantId: tenant.id
       }, { transaction });
 
+      const { period } = req.body;
+
       await Subscription.create({
         tenantId: tenant.id,
         planId: planId || 'FREE_TRIAL',
         status: planId === 'FREE_TRIAL' ? 'TRIAL' : 'PENDING',
+        // Conserve la période choisie : elle sert au calcul de la facture
+        // d'échéance envoyée avant la fin de l'abonnement.
+        currentPeriod: period || '1M',
         nextBillingDate: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000)
       }, { transaction });
 
       // Si un paiement mobile money est fourni, l'enregistrer en PENDING
       const { paymentInfo } = req.body;
+      let pendingPayment = null;
       if (paymentInfo && planId !== 'FREE_TRIAL') {
-        await Payment.create({
+        pendingPayment = await Payment.create({
           tenantId: tenant.id,
           saleId: null,
           amount: Number(paymentInfo.amount) || 0,
@@ -490,7 +505,18 @@ static async login(req, res) {
       await transaction.commit();
       const token = AuthService.generateToken(user);
 
-      return res.status(201).json({ 
+      // Emails d'inscription + notification interne — hors transaction, non bloquants.
+      // Avec un paiement en attente : facture PDF au client + alerte « à valider ».
+      MailNotificationService.onRegistration({
+        user,
+        tenant,
+        planId: planId || 'FREE_TRIAL',
+        period,
+        payment: pendingPayment,
+        source: 'Formulaire web',
+      });
+
+      return res.status(201).json({
         token,
         user: { 
           id: user.id, 
@@ -599,7 +625,7 @@ static async login(req, res) {
                   autoRenew: true,
                 }, { transaction: t });
 
-                await Payment.create({
+                const payment = await Payment.create({
                   tenantId: tenant.id,
                   saleId: null,
                   amount: session.amount_total || 0,
@@ -623,6 +649,14 @@ static async login(req, res) {
                 }, { transaction: t });
 
                 await t.commit();
+
+                // Bienvenue + reçu de paiement PDF (non bloquants)
+                MailNotificationService.onRegistration({
+                  user, tenant, planId: rPlanId, source: 'Stripe Checkout',
+                });
+                MailNotificationService.onPaymentCompleted({
+                  payment, tenant, planId: rPlanId, period: rPeriod,
+                });
 
                 const token = AuthService.generateToken(user);
                 return res.status(200).json({
@@ -1250,6 +1284,13 @@ static async login(req, res) {
       }, { transaction });
 
       await transaction.commit();
+
+      // Notification de sécurité à l'utilisateur
+      MailNotificationService.onPasswordChanged({
+        user,
+        ipAddress: req.ip || req.headers['x-forwarded-for'] || req.socket?.remoteAddress || null,
+      });
+
       return res.status(200).json({ message: 'Mot de passe mis à jour avec succès.' });
     } catch (error) {
       if (transaction) await transaction.rollback();

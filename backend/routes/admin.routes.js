@@ -46,6 +46,13 @@ router.delete('/plans/:id', AdminController.deletePlan);
 // Communication
 router.post('/email/send', AdminController.sendEmailToOwner);
 
+// Factures d'échéance — déclenchement manuel de la campagne J-5 (SuperAdmin)
+router.post('/subscriptions/renewal-invoices/run', checkRole(['SUPER_ADMIN']), AdminController.runRenewalInvoices);
+
+// Diagnostic SMTP (SuperAdmin uniquement)
+router.get('/mail/health', checkRole(['SUPER_ADMIN']), AdminController.mailHealth);
+router.post('/mail/test',  checkRole(['SUPER_ADMIN']), AdminController.mailTest);
+
 // ── Support Tickets (SuperAdmin) ──
 // IMPORTANT: /support/stats MUST be before /support/:id to avoid route conflict
 router.get('/support/stats', SupportController.getStats);

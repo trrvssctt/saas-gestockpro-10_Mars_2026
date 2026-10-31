@@ -1,12 +1,15 @@
 import { v2 as cloudinary } from 'cloudinary';
 import { sequelize } from '../config/database.js';
 
-cloudinary.config({
-  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-  api_key:    process.env.CLOUDINARY_API_KEY,
-  api_secret: process.env.CLOUDINARY_API_SECRET,
-  secure:     true,
-});
+// Config appelée en lazy (évite le problème d'ordre d'imports ESM + dotenv)
+const configureCloudinary = () => {
+  cloudinary.config({
+    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+    api_key:    process.env.CLOUDINARY_API_KEY,
+    api_secret: process.env.CLOUDINARY_API_SECRET,
+    secure:     true,
+  });
+};
 
 const IMAGE_MIMES = [
   'image/jpeg', 'image/jpg', 'image/png',
@@ -40,6 +43,7 @@ export const decodeKey = (key) => {
  * @returns {{ url: string, key: string, sizeBytes: number }}
  */
 export const uploadToCloudinary = async (fileBuffer, originalName, mimeType, tenantId, folder = 'uploads') => {
+  configureCloudinary();
   const resourceType = getResourceType(mimeType);
   const safeName     = originalName.replace(/[^a-zA-Z0-9._-]/g, '_');
   // Cloudinary retire l'extension du public_id pour les images — on la retire en amont
@@ -68,6 +72,7 @@ export const uploadToCloudinary = async (fileBuffer, originalName, mimeType, ten
  */
 export const deleteFromCloudinary = async (key, tenantId) => {
   try {
+    configureCloudinary();
     const { resourceType, publicId } = decodeKey(key);
     let sizeBytes = 0;
     try {
@@ -85,8 +90,16 @@ export const deleteFromCloudinary = async (key, tenantId) => {
  * Reconstruit l'URL publique Cloudinary à partir d'une clé encodée.
  */
 export const getCloudinaryDirectUrl = (key) => {
+  configureCloudinary();
   const { resourceType, publicId } = decodeKey(key);
-  return cloudinary.url(publicId, { resource_type: resourceType, secure: true });
+  // URL signée (expire dans 1h) — nécessaire pour les fichiers raw (PDF, DOCX)
+  return cloudinary.url(publicId, {
+    resource_type: resourceType,
+    secure:        true,
+    sign_url:      true,
+    expires_at:    Math.floor(Date.now() / 1000) + 3600,
+    type:          'upload',
+  });
 };
 
 // ─── Storage tracking (même logique qu'avec S3) ───────────────────────────────

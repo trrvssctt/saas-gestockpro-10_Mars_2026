@@ -2,7 +2,8 @@
 import { Plan, Subscription, Tenant, AuditLog, Payment, RegistrationIntent, User } from '../models/index.js';
 import { sequelize } from '../config/database.js';
 import { StripeService } from '../services/StripeService.js';
-import { WaveService } from '../services/WaveService.js';
+import { WaveService, PERIOD_MONTHS } from '../services/WaveService.js';
+import { MailNotificationService } from '../services/MailNotificationService.js';
 import crypto from 'crypto';
 
 export class SubscriptionController {
@@ -99,6 +100,14 @@ export class SubscriptionController {
       }, { transaction });
 
       await transaction.commit();
+
+      // Accusé au client + alerte interne « à valider » (non bloquants)
+      MailNotificationService.onPaymentPending({
+        payment,
+        tenantId,
+        userName: req.user?.name,
+        userEmail: req.user?.email,
+      });
 
       return res.status(200).json({ message: 'Paiement enregistré et en attente de validation.', payment });
     } catch (error) {
@@ -372,7 +381,7 @@ export class SubscriptionController {
             autoRenew: true,
           }, { transaction: t });
 
-          await Payment.create({
+          const payment = await Payment.create({
             tenantId: tenant.id,
             saleId: null,
             amount: session.amount_total || 0,
@@ -396,6 +405,14 @@ export class SubscriptionController {
           }, { transaction: t });
 
           await t.commit();
+
+          // Bienvenue + reçu de paiement PDF (non bloquants)
+          MailNotificationService.onRegistration({
+            user, tenant, planId: rPlanId, source: 'Stripe Checkout',
+          });
+          MailNotificationService.onPaymentCompleted({
+            payment, tenant, planId: rPlanId, period: rPeriod,
+          });
         } catch (dbErr) {
           await t.rollback();
           console.error('[stripeWebhook/registration] DB error:', dbErr.message);
@@ -450,6 +467,15 @@ export class SubscriptionController {
         }, { transaction: t });
 
         await t.commit();
+
+        // Reçu de paiement PDF au client + alerte interne (non bloquants)
+        const paidRecord = await Payment.findOne({
+          where: { tenantId, reference: session.id },
+          order: [['created_at', 'DESC']],
+        }).catch(() => null);
+        if (paidRecord) {
+          MailNotificationService.onPaymentCompleted({ payment: paidRecord, tenantId, planId, period });
+        }
       } catch (dbErr) {
         await t.rollback();
         console.error('[stripeWebhook] DB error:', dbErr.message);
@@ -523,133 +549,85 @@ export class SubscriptionController {
   // ─────────────────────────────────────────────────────────────────────────
 
   /**
-   * Crée une session Wave Checkout et retourne l'URL de paiement Wave.
-   * POST /api/billing/wave/checkout
+   * Active (ou prolonge) l'abonnement d'un tenant après un paiement Wave confirmé.
+   * Chemin d'activation UNIQUE, partagé par le webhook et par le repli de polling
+   * de /wave/session/:ref — pour qu'ils ne puissent pas diverger.
+   *
+   * Idempotent : ne fait rien si le Payment n'est plus en PENDING (webhook rejoué,
+   * ou webhook et polling arrivés en même temps).
+   *
+   * @param {object} opts
+   * @param {string} opts.tenantId
+   * @param {string} opts.planId
+   * @param {string} opts.period          - '1M' | '3M' | '1Y'
+   * @param {string} opts.clientReference
+   * @param {string} opts.waveSessionId
+   * @param {number|null} opts.receivedAmount - montant réellement encaissé par Wave
+   * @param {string} opts.source          - 'WEBHOOK' | 'POLLING' (traçabilité)
+   * @returns {Promise<{ activated: boolean, reason?: string }>}
    */
-  static async waveCheckout(req, res) {
-    try {
-      if (!WaveService.isAvailable()) {
-        return res.status(503).json({ error: 'WaveUnavailable', message: 'Wave API non configurée (WAVE_API_KEY manquante).' });
-      }
+  static async activateSubscriptionFromWave({
+    tenantId, planId, period, clientReference, waveSessionId, receivedAmount, source,
+  }) {
+    // Période invalide → on refuse sans même interroger la base.
+    if (!PERIOD_MONTHS[period]) {
+      console.error(`[wave/${source}] Période inconnue "${period}" pour ${clientReference}`);
+      return { activated: false, reason: 'UNKNOWN_PERIOD' };
+    }
 
-      const tenantId = req.user.tenantId;
-      const { planId, period, amount } = req.body;
+    // Contrôle du montant : le prix fait foi côté serveur, jamais côté client.
+    const plan = await Plan.findByPk(planId);
+    const expectedAmount = WaveService.computePrice(plan, period);
 
-      if (!planId || !period || !amount) {
-        return res.status(400).json({ error: 'MissingParams', message: 'planId, period et amount sont requis.' });
-      }
+    if (expectedAmount == null) {
+      console.error(`[wave/${source}] Plan inconnu "${planId}" pour ${clientReference}`);
+      return { activated: false, reason: 'UNKNOWN_PLAN' };
+    }
 
-      const plan = await Plan.findByPk(planId);
-      const clientReference = WaveService.encodeClientReference(tenantId, planId, period);
-
-      const { sessionId, waveUrl } = await WaveService.createCheckoutSession({
-        amount: Number(amount),
-        clientReference,
+    if (receivedAmount != null && receivedAmount < expectedAmount) {
+      console.error(
+        `[wave/${source}] Montant insuffisant pour ${clientReference} : ` +
+        `reçu ${receivedAmount}, attendu ${expectedAmount}`
+      );
+      await AuditLog.create({
         tenantId,
-        planId,
-        period,
-        description: `GeStockPro — ${plan?.name || planId} (${period})`,
-      });
-
-      const t = await sequelize.transaction();
-      try {
-        await Payment.create({
-          tenantId,
-          saleId: null,
-          amount: Number(amount),
-          method: 'WAVE',
-          reference: clientReference,
-          transactionId: sessionId,
-          status: 'PENDING',
-          paymentDate: new Date(),
-        }, { transaction: t });
-
-        await AuditLog.create({
-          tenantId,
-          userId: req.user.id,
-          userName: req.user?.name || 'ADMIN',
-          action: 'WAVE_CHECKOUT_INITIATED',
-          resource: `plan:${planId} period:${period}`,
-          severity: 'LOW',
-          sha256Signature: crypto.createHash('sha256').update(`${tenantId}:${sessionId}:${Date.now()}`).digest('hex'),
-        }, { transaction: t });
-
-        await t.commit();
-      } catch (dbErr) {
-        await t.rollback();
-        console.error('[waveCheckout] DB error:', dbErr.message);
-      }
-
-      return res.status(200).json({ url: waveUrl, sessionId, clientReference });
-    } catch (error) {
-      return res.status(500).json({ error: 'WaveCheckoutError', message: error.message });
+        userId: null,
+        userName: `WAVE_${source}`,
+        action: 'WAVE_AMOUNT_MISMATCH',
+        resource: `plan:${planId} period:${period} reçu:${receivedAmount} attendu:${expectedAmount}`,
+        severity: 'HIGH',
+        sha256Signature: crypto.createHash('sha256')
+          .update(`${tenantId}:${waveSessionId}:${Date.now()}`).digest('hex'),
+      }).catch(() => null);
+      return { activated: false, reason: 'AMOUNT_MISMATCH' };
     }
-  }
-
-  /**
-   * Webhook Wave — reçoit les notifications de paiement Wave.
-   * POST /api/billing/wave/webhook  (body: JSON, pas de JWT)
-   */
-  static async waveWebhook(req, res) {
-    // Vérifier la signature Wave si WAVE_WEBHOOK_SECRET est configuré
-    const waveSignature = req.headers['wave-signature'];
-    if (waveSignature) {
-      const valid = WaveService.verifyWebhookSignature(req.body, waveSignature);
-      if (!valid) {
-        return res.status(400).json({ error: 'InvalidSignature' });
-      }
-    }
-
-    let payload;
-    try {
-      payload = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
-    } catch {
-      return res.status(400).json({ error: 'InvalidPayload' });
-    }
-
-    // Wave envoie un objet avec checkout_status et client_reference
-    const { type, data } = payload;
-
-    // Wave webhook envelope: { type: "checkout.session.completed", data: { id, checkout_status, client_reference, amount, ... } }
-    if (type !== 'checkout.session.completed' && data?.checkout_status !== 'complete') {
-      return res.status(200).json({ received: true });
-    }
-
-    const sessionData = data || payload;
-    const clientReference = sessionData.client_reference;
-    const checkoutStatus = sessionData.checkout_status;
-    const waveSessionId = sessionData.id;
-    const receivedAmount = sessionData.amount ? Number(sessionData.amount) : null;
-
-    if (checkoutStatus !== 'complete') {
-      return res.status(200).json({ received: true });
-    }
-
-    // Décoder les informations depuis client_reference
-    const decoded = WaveService.decodeClientReference(clientReference);
-    if (!decoded) {
-      console.error('[waveWebhook] Impossible de décoder client_reference:', clientReference);
-      return res.status(200).json({ received: true });
-    }
-
-    const { tenantId, planId, period } = decoded;
 
     const t = await sequelize.transaction();
     try {
-      // Marquer le paiement comme COMPLETED
-      await Payment.update(
+      // Verrou d'idempotence : seule la première confirmation fait passer
+      // PENDING → COMPLETED, et donc seule elle prolonge l'abonnement.
+      const [updatedCount] = await Payment.update(
         { status: 'COMPLETED', transactionId: waveSessionId },
         { where: { tenantId, reference: clientReference, status: 'PENDING' }, transaction: t }
       );
 
-      // Calculer la date de fin d'abonnement
-      const PERIOD_MONTHS = { '1M': 1, '3M': 3, '1Y': 12 };
+      if (updatedCount === 0) {
+        await t.rollback();
+        return { activated: false, reason: 'ALREADY_PROCESSED' };
+      }
+
+      // Prolongation : on repart de la fin d'abonnement en cours si elle est
+      // dans le futur, pour qu'un renouvellement anticipé cumule au lieu d'écraser.
+      const tenant = await Tenant.findByPk(tenantId, { transaction: t });
+      const now = new Date();
+      const currentEnd = tenant?.subscriptionEndsAt ? new Date(tenant.subscriptionEndsAt) : null;
+      const base = currentEnd && currentEnd > now ? currentEnd : now;
+
       const months = PERIOD_MONTHS[period] || 1;
-      const nextBilling = new Date();
+      const nextBilling = new Date(base);
       nextBilling.setMonth(nextBilling.getMonth() + months);
 
-      // Activer/mettre à jour l'abonnement
-      let sub = await Subscription.findOne({ where: { tenantId }, transaction: t });
+      const sub = await Subscription.findOne({ where: { tenantId }, transaction: t });
       if (sub) {
         await sub.update({
           planId,
@@ -668,12 +646,11 @@ export class SubscriptionController {
         }, { transaction: t });
       }
 
-      // Mettre à jour le tenant
       await Tenant.update({
         planId,
         isActive: true,
         paymentStatus: 'UP_TO_DATE',
-        lastPaymentDate: new Date(),
+        lastPaymentDate: now,
         subscriptionEndsAt: nextBilling,
         pendingPlanId: null,
         pendingPeriod: null,
@@ -682,26 +659,212 @@ export class SubscriptionController {
       await AuditLog.create({
         tenantId,
         userId: null,
-        userName: 'WAVE_WEBHOOK',
+        userName: `WAVE_${source}`,
         action: 'SUBSCRIPTION_ACTIVATED_WAVE',
-        resource: `plan:${planId} period:${period}`,
+        resource: `plan:${planId} period:${period} montant:${receivedAmount ?? expectedAmount}`,
         severity: 'HIGH',
-        sha256Signature: crypto.createHash('sha256').update(`${tenantId}:${waveSessionId}:${Date.now()}`).digest('hex'),
+        sha256Signature: crypto.createHash('sha256')
+          .update(`${tenantId}:${waveSessionId}:${Date.now()}`).digest('hex'),
       }, { transaction: t });
 
       await t.commit();
+
+      // Reçu de paiement PDF au client + alerte interne (non bloquants)
+      const paidRecord = await Payment.findOne({
+        where: { tenantId, reference: clientReference },
+        order: [['created_at', 'DESC']],
+      }).catch(() => null);
+      if (paidRecord) {
+        MailNotificationService.onPaymentCompleted({ payment: paidRecord, tenantId, planId, period });
+      }
+
+      return { activated: true };
     } catch (dbErr) {
       await t.rollback();
-      console.error('[waveWebhook] DB error:', dbErr.message);
-      return res.status(500).json({ error: 'WebhookDBError', message: dbErr.message });
+      console.error(`[wave/${source}] DB error:`, dbErr.name, '|', dbErr.message || dbErr.parent?.message || dbErr);
+      throw dbErr;
     }
-
-    return res.status(200).json({ received: true });
   }
 
   /**
-   * Vérifie le statut d'une session Wave Checkout (appelé depuis la page /wave/success)
+   * Crée une session Wave Checkout et retourne l'URL de paiement Wave.
+   * POST /api/billing/wave/checkout
+   *
+   * Le montant est TOUJOURS recalculé côté serveur : un `amount` envoyé par le
+   * client serait un moyen trivial de s'offrir un plan à 100 F.
+   */
+  static async waveCheckout(req, res) {
+    try {
+      if (!WaveService.isAvailable()) {
+        return res.status(503).json({ error: 'WaveUnavailable', message: 'Wave API non configurée (WAVE_API_KEY manquante).' });
+      }
+
+      const tenantId = req.user.tenantId;
+      const { planId, period } = req.body;
+
+      if (!planId || !period) {
+        return res.status(400).json({ error: 'MissingParams', message: 'planId et period sont requis.' });
+      }
+
+      const plan = await Plan.findByPk(planId);
+      if (!plan) {
+        return res.status(404).json({ error: 'PlanNotFound', message: `Plan "${planId}" introuvable.` });
+      }
+
+      const amount = WaveService.computePrice(plan, period);
+      if (amount == null) {
+        return res.status(400).json({ error: 'InvalidPeriod', message: `Période "${period}" invalide.` });
+      }
+      if (amount <= 0) {
+        return res.status(400).json({ error: 'InvalidAmount', message: 'Ce plan n\'est pas payable en ligne.' });
+      }
+
+      const clientReference = WaveService.encodeClientReference(tenantId, planId, period);
+
+      const { sessionId, waveUrl } = await WaveService.createCheckoutSession({
+        amount,
+        clientReference,
+        tenantId,
+        planId,
+        period,
+        description: `GeStockPro — ${plan.name || planId} (${period})`,
+      });
+
+      // Le Payment PENDING est le point d'ancrage du webhook : s'il n'est pas
+      // enregistré, le client paierait sans que son compte puisse être activé.
+      // On échoue donc franchement plutôt que de renvoyer l'URL Wave.
+      const t = await sequelize.transaction();
+      try {
+        await Payment.create({
+          tenantId,
+          saleId: null,
+          amount,
+          method: 'WAVE',
+          reference: clientReference,
+          transactionId: sessionId,
+          status: 'PENDING',
+          paymentDate: new Date(),
+        }, { transaction: t });
+
+        await AuditLog.create({
+          tenantId,
+          userId: req.user.id,
+          userName: req.user?.name || 'ADMIN',
+          action: 'WAVE_CHECKOUT_INITIATED',
+          resource: `plan:${planId} period:${period} montant:${amount}`,
+          severity: 'LOW',
+          sha256Signature: crypto.createHash('sha256').update(`${tenantId}:${sessionId}:${Date.now()}`).digest('hex'),
+        }, { transaction: t });
+
+        await t.commit();
+      } catch (dbErr) {
+        await t.rollback();
+        console.error('[waveCheckout] DB error:', dbErr.message);
+        return res.status(500).json({
+          error: 'WaveCheckoutError',
+          message: 'Impossible d\'enregistrer le paiement. Aucun débit n\'a été effectué, réessayez.',
+        });
+      }
+
+      return res.status(200).json({ url: waveUrl, sessionId, clientReference, amount });
+    } catch (error) {
+      return res.status(500).json({ error: 'WaveCheckoutError', message: error.message });
+    }
+  }
+
+  /**
+   * Webhook Wave — reçoit les notifications de paiement Wave.
+   * POST /api/billing/wave/webhook  (body brut, pas de JWT)
+   */
+  static async waveWebhook(req, res) {
+    const signatureHeader = req.headers['wave-signature'];
+
+    if (WaveService.isSignatureRequired()) {
+      if (!process.env.WAVE_WEBHOOK_SECRET) {
+        console.error('[waveWebhook] WAVE_WEBHOOK_SECRET absent en production — webhook refusé.');
+        return res.status(503).json({ error: 'WebhookSecretMissing' });
+      }
+      const check = WaveService.verifyWebhookSignature(req.body, signatureHeader);
+      if (!check.valid) {
+        console.error('[waveWebhook] Signature invalide:', check.reason);
+        return res.status(400).json({ error: 'InvalidSignature' });
+      }
+      // TODO(wave): la doc publique ne précise pas la chaîne signée. On logue la
+      // variante retenue au premier webhook réel, puis on supprime l'autre.
+      console.log(`[waveWebhook] Signature valide (variante "${check.variant}")`);
+    } else {
+      console.warn('[waveWebhook] Signature non vérifiée (WAVE_WEBHOOK_SECRET absent, hors production).');
+    }
+
+    let payload;
+    try {
+      const raw = Buffer.isBuffer(req.body) ? req.body.toString('utf8') : req.body;
+      payload = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    } catch {
+      return res.status(400).json({ error: 'InvalidPayload' });
+    }
+
+    // Enveloppe Wave : { type: "checkout.session.completed", data: { id, checkout_status, ... } }
+    const { type, data } = payload || {};
+    const sessionData = data || payload || {};
+    const clientReference = sessionData.client_reference;
+    const checkoutStatus = sessionData.checkout_status;
+    const paymentStatus = sessionData.payment_status;
+    const waveSessionId = sessionData.id;
+
+    const decoded = WaveService.decodeClientReference(clientReference);
+    if (!decoded) {
+      console.error('[waveWebhook] client_reference non décodable:', clientReference);
+      return res.status(200).json({ received: true });
+    }
+    const { tenantId, planId, period } = decoded;
+
+    // Échec / expiration : on clôt le paiement pour que la page de retour
+    // arrête de poller au lieu d'attendre 60 s dans le vide.
+    const isFailure = type === 'checkout.session.payment_failed'
+      || checkoutStatus === 'expired'
+      || paymentStatus === 'cancelled';
+
+    if (isFailure) {
+      await Payment.update(
+        { status: 'FAILED' },
+        { where: { tenantId, reference: clientReference, status: 'PENDING' } }
+      ).catch(err => console.error('[waveWebhook] échec MAJ FAILED:', err.message));
+      return res.status(200).json({ received: true, failed: true });
+    }
+
+    const isSuccess = checkoutStatus === 'complete'
+      && (paymentStatus == null || paymentStatus === 'succeeded');
+    if (!isSuccess) {
+      // Événement intermédiaire (session ouverte, paiement en cours…) — rien à faire.
+      return res.status(200).json({ received: true });
+    }
+
+    try {
+      const result = await SubscriptionController.activateSubscriptionFromWave({
+        tenantId,
+        planId,
+        period,
+        clientReference,
+        waveSessionId,
+        receivedAmount: sessionData.amount != null ? Number(sessionData.amount) : null,
+        source: 'WEBHOOK',
+      });
+      return res.status(200).json({ received: true, ...result });
+    } catch (dbErr) {
+      // 500 → Wave rejouera le webhook, et l'activation est idempotente.
+      const detail = dbErr.message || dbErr.parent?.message || dbErr.name || 'erreur inconnue';
+      console.error('[waveWebhook] activation impossible:', detail);
+      return res.status(500).json({ error: 'WebhookDBError', message: detail });
+    }
+  }
+
+  /**
+   * Vérifie le statut d'une session Wave Checkout (appelé depuis /wave/success).
    * GET /api/billing/wave/session/:clientReference
+   *
+   * Sert aussi de filet : si le webhook s'est perdu, on interroge Wave
+   * directement et on active depuis la réponse.
    */
   static async getWaveSession(req, res) {
     try {
@@ -716,10 +879,35 @@ export class SubscriptionController {
         return res.status(403).json({ error: 'Forbidden' });
       }
 
-      // Retrouver le paiement en base
-      const payment = await Payment.findOne({
+      let payment = await Payment.findOne({
         where: { tenantId: decoded.tenantId, reference: clientReference },
       });
+
+      // Repli : paiement encore PENDING → on demande son sort à Wave.
+      if (payment && payment.status === 'PENDING' && payment.transactionId && WaveService.isAvailable()) {
+        try {
+          const session = await WaveService.retrieveSession(payment.transactionId);
+
+          if (session.checkout_status === 'complete' && session.payment_status !== 'cancelled') {
+            await SubscriptionController.activateSubscriptionFromWave({
+              tenantId: decoded.tenantId,
+              planId: decoded.planId,
+              period: decoded.period,
+              clientReference,
+              waveSessionId: payment.transactionId,
+              receivedAmount: session.amount != null ? Number(session.amount) : null,
+              source: 'POLLING',
+            });
+            payment = await payment.reload();
+          } else if (session.checkout_status === 'expired' || session.payment_status === 'cancelled') {
+            await payment.update({ status: 'FAILED' });
+          }
+        } catch (fallbackErr) {
+          // Wave injoignable ou activation en échec : on renvoie l'état local,
+          // le front continue de poller et le webhook reste le chemin nominal.
+          console.error('[getWaveSession] repli impossible:', fallbackErr.message);
+        }
+      }
 
       return res.status(200).json({
         clientReference,

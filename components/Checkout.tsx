@@ -4,7 +4,7 @@
  *
  * Fonctionnalités :
  *  - Durées 1M / 3M (-15%) / 1Y (-30%) avec affichage des économies
- *  - Mobile Money : Wave (QR + référence), Orange Money (téléphone), MTN (téléphone)
+ *  - Mobile Money : Wave (paiement direct via Wave Checkout API), Orange Money, MTN
  *  - Carte Bancaire : Stripe Checkout Session (redirection sécurisée)
  */
 
@@ -19,8 +19,6 @@ import { SubscriptionPlan } from '../types';
 import { apiClient } from '../services/api';
 import { useToast } from './ToastProvider';
 
-/* ─── Assets ──────────────────────────────────────────────────── */
-import waveQr from '../assets/qr_code_marchant_wave.png';
 /* ─── Constantes ──────────────────────────────────────────────── */
 const PERIOD_OPTIONS = [
   { id: '1M', label: '1 Mois',  months: 1,  discountPct: 0  },
@@ -74,11 +72,9 @@ const Checkout: React.FC<CheckoutProps> = ({ planId, user, planObj, isUpgrade = 
   const [method, setMethod] = useState<'MOBILE' | 'CARD' | null>(null);
   const [operator, setOperator] = useState<'WAVE' | 'ORANGE' | 'MTN'>('WAVE');
   const [phoneNumber, setPhoneNumber] = useState('');
-  const [txReference, setTxReference] = useState('');
   const [status, setStatus] = useState<'IDLE' | 'WAITING' | 'SUCCESS' | 'ERROR'>('IDLE');
   const [isProcessing, setIsProcessing] = useState(false);
   const [isWaveOnlineLoading, setIsWaveOnlineLoading] = useState(false);
-  const [waveMode, setWaveMode] = useState<'ONLINE' | 'MANUAL'>('ONLINE');
 
   /* Prix */
   const totalPrice = useMemo(() => getPeriodPrice(plan, selectedPeriod), [plan, selectedPeriod]);
@@ -87,14 +83,15 @@ const Checkout: React.FC<CheckoutProps> = ({ planId, user, planObj, isUpgrade = 
   const operatorCfg = OPERATORS.find(o => o.id === operator)!;
 
   /* ─── Paiement Mobile Money ──────────────────────────────────── */
-  const canSubmitMobile =
-    operator === 'WAVE' ? txReference.trim().length >= 3 : phoneNumber.trim().length >= 8;
+  // Wave passe exclusivement par la Checkout API : seuls Orange/MTN
+  // empruntent encore la validation manuelle par numéro.
+  const canSubmitMobile = phoneNumber.trim().length >= 8;
 
   const handleMobilePayment = async () => {
     setIsProcessing(true);
     setStatus('WAITING');
     try {
-      const ref = operator === 'WAVE' ? txReference : `MOB-${Date.now()}`;
+      const ref = `MOB-${Date.now()}`;
       if (isUpgrade) {
         // Upgrade : crée une demande PENDING → validation par SuperAdmin
         await apiClient.post('/subscription/upgrade', {
@@ -104,7 +101,7 @@ const Checkout: React.FC<CheckoutProps> = ({ planId, user, planObj, isUpgrade = 
           paymentMethod: operator,
           transactionId: ref,
           reference: ref,
-          phone: operator !== 'WAVE' ? phoneNumber : undefined,
+          phone: phoneNumber,
         });
       } else {
         // Activation initiale (post-inscription)
@@ -118,7 +115,7 @@ const Checkout: React.FC<CheckoutProps> = ({ planId, user, planObj, isUpgrade = 
           period: selectedPeriod,
           months: periodOpt.months,
           discountPct: periodOpt.discountPct,
-          phone: operator !== 'WAVE' ? phoneNumber : undefined,
+          phone: phoneNumber,
         });
       }
       setStatus('SUCCESS');
@@ -135,10 +132,10 @@ const Checkout: React.FC<CheckoutProps> = ({ planId, user, planObj, isUpgrade = 
   const handleWaveOnlineCheckout = async () => {
     setIsWaveOnlineLoading(true);
     try {
+      // Le montant n'est plus envoyé : le backend le recalcule depuis le plan.
       const res: any = await apiClient.post('/billing/wave/checkout', {
         planId: plan.id,
         period: selectedPeriod,
-        amount: totalPrice,
       });
       if (res?.url) {
         window.location.href = res.url;
@@ -146,8 +143,10 @@ const Checkout: React.FC<CheckoutProps> = ({ planId, user, planObj, isUpgrade = 
         throw new Error('URL Wave manquante.');
       }
     } catch (e: any) {
-      showToast(e?.message || 'Wave indisponible. Utilisez le paiement manuel.', 'error');
-      setWaveMode('MANUAL');
+      showToast(
+        e?.message || 'Le service de paiement Wave est momentanément indisponible. Réessayez dans quelques instants ou contactez le support.',
+        'error'
+      );
     } finally {
       setIsWaveOnlineLoading(false);
     }
@@ -380,7 +379,7 @@ const Checkout: React.FC<CheckoutProps> = ({ planId, user, planObj, isUpgrade = 
                   {OPERATORS.map(op => (
                     <button
                       key={op.id}
-                      onClick={() => { setOperator(op.id as any); setPhoneNumber(''); setTxReference(''); }}
+                      onClick={() => { setOperator(op.id as any); setPhoneNumber(''); }}
                       className={`flex-1 py-2.5 px-3 rounded-2xl border-2 text-[10px] font-black uppercase tracking-widest transition-all ${
                         operator === op.id
                           ? `${op.bg} border-current ${op.text} shadow-inner`
@@ -393,98 +392,43 @@ const Checkout: React.FC<CheckoutProps> = ({ planId, user, planObj, isUpgrade = 
                 </div>
               </div>
 
-              {/* ── Wave : Online (Checkout API) + Manuel (QR) ── */}
+              {/* ── Wave : paiement direct via la Checkout API ── */}
               {operator === 'WAVE' && (
                 <div className="space-y-4 animate-in fade-in duration-200">
-                  {/* Onglets Online / Manuel */}
-                  <div className="flex gap-2 p-1 bg-slate-100 rounded-2xl">
-                    <button
-                      onClick={() => setWaveMode('ONLINE')}
-                      className={`flex-1 py-2 text-[10px] font-black uppercase tracking-widest rounded-xl transition-all ${
-                        waveMode === 'ONLINE' ? 'bg-white text-cyan-700 shadow' : 'text-slate-400 hover:text-slate-600'
-                      }`}
-                    >
-                      Payer en ligne
-                    </button>
-                    <button
-                      onClick={() => setWaveMode('MANUAL')}
-                      className={`flex-1 py-2 text-[10px] font-black uppercase tracking-widest rounded-xl transition-all ${
-                        waveMode === 'MANUAL' ? 'bg-white text-cyan-700 shadow' : 'text-slate-400 hover:text-slate-600'
-                      }`}
-                    >
-                      QR manuel
-                    </button>
-                  </div>
-
-                  {/* Mode online : redirection Wave */}
-                  {waveMode === 'ONLINE' && (
-                    <div className={`rounded-3xl p-6 ${operatorCfg.bg} border border-cyan-100 space-y-4`}>
-                      <div className="flex items-center gap-3">
-                        <div className="w-12 h-12 bg-cyan-500 rounded-2xl flex items-center justify-center shadow-lg">
-                          <QrCode size={24} className="text-white" />
-                        </div>
-                        <div>
-                          <p className="text-sm font-black text-cyan-900">Paiement Wave en ligne</p>
-                          <p className="text-[9px] text-cyan-600 font-bold">Redirection sécurisée vers Wave</p>
-                        </div>
-                      </div>
-                      <div className="bg-white/80 rounded-2xl p-4 space-y-1">
-                        <p className="text-[9px] font-black text-cyan-800 uppercase tracking-widest">Montant à payer</p>
-                        <p className="text-2xl font-black text-cyan-900">{totalPrice.toLocaleString('fr-FR')} F CFA</p>
-                        <p className="text-[9px] text-cyan-600 font-bold">{plan?.name} — {periodOpt.label}</p>
-                      </div>
-                      <div className="space-y-1.5">
-                        {['Paiement sécurisé via Wave', 'Activation automatique du compte', 'Aucune saisie manuelle requise'].map(t => (
-                          <div key={t} className="flex items-center gap-2">
-                            <CheckCircle2 size={12} className="text-cyan-500 flex-shrink-0" />
-                            <span className="text-[9px] text-cyan-700 font-bold">{t}</span>
-                          </div>
-                        ))}
-                      </div>
-                      <button
-                        onClick={handleWaveOnlineCheckout}
-                        disabled={isWaveOnlineLoading}
-                        className="w-full py-4 bg-cyan-500 hover:bg-cyan-600 text-white rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl flex items-center justify-center gap-3 disabled:opacity-50 transition-all"
-                      >
-                        {isWaveOnlineLoading
-                          ? <><Loader2 size={18} className="animate-spin" /> Connexion Wave...</>
-                          : <><CheckCircle2 size={18} /> Payer {totalPrice.toLocaleString('fr-FR')} F CFA avec Wave</>
-                        }
-                      </button>
-                    </div>
-                  )}
-
-                  {/* Mode manuel : QR + référence */}
-                  {waveMode === 'MANUAL' && (
-                    <div className="space-y-4">
-                      <div className={`rounded-3xl p-6 ${operatorCfg.bg} border border-cyan-100 text-center`}>
-                        <p className="text-[9px] font-black text-cyan-600 uppercase tracking-widest mb-4">
-                          Scannez avec l'app Wave
-                        </p>
-                        <div className="bg-white p-3 rounded-2xl inline-block shadow-lg mb-4">
-                          <img src={waveQr} alt="Wave QR" className="w-40 h-40 object-contain rounded-xl" />
-                        </div>
-                        <div className="bg-white/70 rounded-2xl p-3 text-left space-y-1">
-                          <p className="text-[9px] font-black text-cyan-800">
-                            Montant : <span className="font-black">{totalPrice.toLocaleString('fr-FR')} F CFA</span>
-                          </p>
-                          <p className="text-[9px] text-cyan-700 font-bold">Entrez la référence ci-dessous après paiement</p>
-                        </div>
+                  <div className={`rounded-3xl p-6 ${operatorCfg.bg} border border-cyan-100 space-y-4`}>
+                    <div className="flex items-center gap-3">
+                      <div className="w-12 h-12 bg-cyan-500 rounded-2xl flex items-center justify-center shadow-lg">
+                        <QrCode size={24} className="text-white" />
                       </div>
                       <div>
-                        <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-1.5">
-                          Référence de transaction *
-                        </label>
-                        <input
-                          type="text"
-                          value={txReference}
-                          onChange={(e: React.ChangeEvent<HTMLInputElement>) => setTxReference(e.target.value)}
-                          placeholder="Ex: TXN-A1B2C3D4"
-                          className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-5 py-4 text-sm font-black outline-none focus:ring-4 focus:ring-cyan-500/10 focus:border-cyan-400 uppercase tracking-wider"
-                        />
+                        <p className="text-sm font-black text-cyan-900">Paiement Wave en ligne</p>
+                        <p className="text-[9px] text-cyan-600 font-bold">Redirection sécurisée vers Wave</p>
                       </div>
                     </div>
-                  )}
+                    <div className="bg-white/80 rounded-2xl p-4 space-y-1">
+                      <p className="text-[9px] font-black text-cyan-800 uppercase tracking-widest">Montant à payer</p>
+                      <p className="text-2xl font-black text-cyan-900">{totalPrice.toLocaleString('fr-FR')} F CFA</p>
+                      <p className="text-[9px] text-cyan-600 font-bold">{plan?.name} — {periodOpt.label}</p>
+                    </div>
+                    <div className="space-y-1.5">
+                      {['Paiement sécurisé via Wave', 'Activation automatique du compte', 'Aucune saisie manuelle requise'].map(t => (
+                        <div key={t} className="flex items-center gap-2">
+                          <CheckCircle2 size={12} className="text-cyan-500 flex-shrink-0" />
+                          <span className="text-[9px] text-cyan-700 font-bold">{t}</span>
+                        </div>
+                      ))}
+                    </div>
+                    <button
+                      onClick={handleWaveOnlineCheckout}
+                      disabled={isWaveOnlineLoading}
+                      className="w-full py-4 bg-cyan-500 hover:bg-cyan-600 text-white rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl flex items-center justify-center gap-3 disabled:opacity-50 transition-all"
+                    >
+                      {isWaveOnlineLoading
+                        ? <><Loader2 size={18} className="animate-spin" /> Connexion Wave...</>
+                        : <><CheckCircle2 size={18} /> Payer {totalPrice.toLocaleString('fr-FR')} F CFA avec Wave</>
+                      }
+                    </button>
+                  </div>
                 </div>
               )}
 
@@ -524,8 +468,8 @@ const Checkout: React.FC<CheckoutProps> = ({ planId, user, planObj, isUpgrade = 
               )}
                 */}
 
-              {/* Bouton validation Mobile — uniquement pour Orange/MTN ou Wave manuel */}
-              {(operator !== 'WAVE' || waveMode === 'MANUAL') && (
+              {/* Bouton validation Mobile — Orange/MTN uniquement (Wave est 100% API) */}
+              {operator !== 'WAVE' && (
                 <button
                   onClick={handleMobilePayment}
                   disabled={!canSubmitMobile || isProcessing}

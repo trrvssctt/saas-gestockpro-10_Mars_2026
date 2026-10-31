@@ -23,9 +23,13 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import HRModal from './HRModal';
-import { apiClient } from '../../services/api';
+import { apiClient, BASE_URL } from '../../services/api';
 import { authBridge } from '../../services/authBridge';
 import { uploadFile, getStorageUsage, StorageInfo } from '../../services/uploadService';
+
+// Génère une URL signée via le backend pour éviter le 401 Cloudinary sur les PDFs
+const getSignedFileUrl = (fileUrl: string) =>
+  `${BASE_URL}/api/files?url=${encodeURIComponent(fileUrl)}`;
 
 interface DocumentCenterProps {
   onNavigate: (tab: string, meta?: any) => void;
@@ -580,15 +584,16 @@ const DocumentCenter: React.FC<DocumentCenterProps> = ({ onNavigate }) => {
                   <FileText size={32} />
                 </div>
                 <div className="flex items-center gap-2">
-                  <button 
-                    onClick={() => window.open(doc.fileUrl, '_blank')}
+                  <button
+                    onClick={() => window.open(getSignedFileUrl(doc.fileUrl), '_blank')}
                     className="w-10 h-10 bg-slate-50 text-slate-400 rounded-xl flex items-center justify-center hover:bg-slate-900 hover:text-white transition-all"
                   >
                     <Eye size={18} />
                   </button>
-                  <a 
-                    href={doc.fileUrl} 
-                    download={doc.name}
+                  <a
+                    href={getSignedFileUrl(doc.fileUrl)}
+                    target="_blank"
+                    rel="noopener noreferrer"
                     className="w-10 h-10 bg-slate-50 text-slate-400 rounded-xl flex items-center justify-center hover:bg-slate-900 hover:text-white transition-all"
                   >
                     <Download size={18} />

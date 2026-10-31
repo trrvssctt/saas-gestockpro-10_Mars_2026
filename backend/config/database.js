@@ -238,7 +238,9 @@ export const connectDB = async () => {
           ADD COLUMN IF NOT EXISTS price_yearly FLOAT;
 
         ALTER TABLE IF EXISTS subscriptions
-          ADD COLUMN IF NOT EXISTS current_period VARCHAR(10) DEFAULT '1M';
+          ADD COLUMN IF NOT EXISTS current_period VARCHAR(10) DEFAULT '1M',
+          -- Échéance déjà facturée par le cron J-5 (anti-doublon)
+          ADD COLUMN IF NOT EXISTS renewal_notice_sent_for TIMESTAMPTZ;
 
         ALTER TABLE IF EXISTS tenants
           ADD COLUMN IF NOT EXISTS plan_id VARCHAR(50),

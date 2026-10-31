@@ -115,8 +115,29 @@ const App: React.FC = () => {
 
   const setActiveTab = (tab: string) => {
     localStorage.setItem('gsp_active_tab', tab);
+    // Pousse une entrée dans l'historique du navigateur pour que le bouton retour fonctionne
+    window.history.pushState({ gspTab: tab }, '', '/');
     setActiveTabState(tab);
   };
+
+  // Gère le bouton retour du navigateur : navigue entre onglets au lieu de quitter l'app
+  useEffect(() => {
+    const handlePopState = (event: PopStateEvent) => {
+      const tab = event.state?.gspTab;
+      if (isLoggedIn) {
+        if (tab) {
+          setActiveTabState(tab);
+          localStorage.setItem('gsp_active_tab', tab);
+        } else {
+          // Entrée sans état (page initiale) — empêche de quitter l'app
+          window.history.replaceState({ gspTab: activeTab }, '', '/');
+        }
+      }
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [isLoggedIn, activeTab]);
+
   // Permet de sortir des pages de redirection Stripe sans rechargement complet
   const [stripeHandled, setStripeHandled] = useState(false);
   const [navigationMetadata, setNavigationMetadata] = useState<any>(null);

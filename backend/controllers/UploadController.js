@@ -91,22 +91,42 @@ export class UploadController {
   }
 
   /**
-   * GET /api/files?key=...
-   * Redirige vers l'URL Cloudinary publique correspondant à la clé.
-   * Les nouvelles clés ont le format "{resourceType}:{publicId}".
+   * GET /api/files?key=...   (clé Cloudinary encodée : "raw:gestockpro/...")
+   * GET /api/files?url=...   (URL Cloudinary directe : "https://res.cloudinary.com/...")
+   * Génère une URL signée (valide 1h) et redirige.
+   * Les anciennes clés S3 retournent 410.
    */
   static async serveFile(req, res) {
-    const { key } = req.query;
-    if (!key) return res.status(400).json({ error: 'Paramètre "key" manquant.' });
+    const raw = req.query.key || req.query.url;
+    if (!raw) return res.status(400).json({ error: 'Paramètre "key" ou "url" manquant.' });
 
     try {
-      const decodedKey = decodeURIComponent(key);
-      // Clés Cloudinary uniquement (les anciennes clés S3 retournent 404)
-      if (!decodedKey.startsWith('image:') && !decodedKey.startsWith('raw:') && !decodedKey.startsWith('video:')) {
-        return res.status(404).json({ error: 'Fichier introuvable (ancienne clé S3 non migrée).' });
+      const input = decodeURIComponent(raw);
+      let cloudinaryKey = input;
+
+      // Si c'est une URL Cloudinary complète, on en extrait la clé
+      if (input.startsWith('https://res.cloudinary.com/') || input.startsWith('http://res.cloudinary.com/')) {
+        // Format : https://res.cloudinary.com/{cloud}/{resourceType}/upload/[v{n}/]{publicId}
+        const match = input.match(/res\.cloudinary\.com\/[^/]+\/([^/]+)\/upload\/(?:v\d+\/)?(.+?)(?:\?.*)?$/);
+        if (!match) return res.status(400).json({ error: 'URL Cloudinary invalide.' });
+        const [, resourceType, publicIdPath] = match;
+        // Pour les images Cloudinary retire l'extension interne — on la garde pour raw/video
+        const publicId = resourceType === 'image'
+          ? publicIdPath.replace(/\.[^.]+$/, '')
+          : publicIdPath;
+        cloudinaryKey = `${resourceType}:${publicId}`;
       }
-      const url = getCloudinaryDirectUrl(decodedKey);
-      return res.redirect(302, url);
+
+      // Clé S3 legacy (pas de préfixe image:/raw:/video:)
+      if (!cloudinaryKey.startsWith('image:') && !cloudinaryKey.startsWith('raw:') && !cloudinaryKey.startsWith('video:')) {
+        return res.status(410).json({
+          error: 'Fichier non disponible.',
+          detail: 'Ce document a été archivé avant la migration cloud. Veuillez le re-téléverser.',
+        });
+      }
+
+      const signedUrl = getCloudinaryDirectUrl(cloudinaryKey);
+      return res.redirect(302, signedUrl);
     } catch (err) {
       console.error('[UploadController] serveFile error:', err.message);
       return res.status(404).json({ error: 'Fichier introuvable.' });

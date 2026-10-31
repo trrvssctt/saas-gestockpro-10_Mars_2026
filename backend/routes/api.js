@@ -1,5 +1,5 @@
 
-import express, { Router } from 'express';
+import { Router } from 'express';
 import { authenticateJWT } from '../middlewares/auth.js';
 import { tenantIsolation } from '../middlewares/tenant.js';
 import { checkPermission } from '../middlewares/rbac.js';
@@ -37,19 +37,11 @@ const router = Router();
 // --- ROUTES PUBLIQUES ---
 router.post('/payments/callback', PaymentController.handleWebhook); // Route callback globale
 
-// Webhook Stripe — doit être PUBLIC (pas de JWT) et recevoir le body brut
-router.post(
-  '/billing/stripe/webhook',
-  express.raw({ type: 'application/json' }),
-  SubscriptionController.stripeWebhook
-);
-
-// Webhook Wave — PUBLIC (pas de JWT), body JSON brut pour vérification HMAC
-router.post(
-  '/billing/wave/webhook',
-  express.raw({ type: 'application/json' }),
-  SubscriptionController.waveWebhook
-);
+// Webhooks Stripe & Wave — PUBLICS (pas de JWT).
+// Le corps brut (Buffer) est fourni par le express.raw() monté dans server.js
+// AVANT express.json() : le remonter ici serait sans effet (req._body déjà posé).
+router.post('/billing/stripe/webhook', SubscriptionController.stripeWebhook);
+router.post('/billing/wave/webhook', SubscriptionController.waveWebhook);
 
 router.use('/auth', authRoutes);
 router.get('/plans', SubscriptionController.listPlans); 
