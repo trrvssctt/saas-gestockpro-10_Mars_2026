@@ -1493,7 +1493,7 @@ const RecurringContracts: React.FC<RecurringContractsProps> = ({ currency, onNav
                 </div>
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2 md:gap-3">
-                    <h2 className="text-base md:text-2xl font-black uppercase tracking-tighter leading-none truncate max-w-xs md:max-w-lg">
+                    <h2 className="text-base md:text-2xl font-black uppercase tracking-tighter leading-tight truncate max-w-xs md:max-w-lg">
                       {showDetail.title}
                     </h2>
                     <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase ${STATUS_CONFIG[showDetail.status]?.badge}`}>

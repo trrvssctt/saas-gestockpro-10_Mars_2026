@@ -367,7 +367,7 @@ const Customers: React.FC<CustomersProps> = ({ user, currency, plan, refreshKey 
                         {customer.healthStatus === 'GOOD' ? 'SOLVABLE' : customer.healthStatus === 'WARNING' ? 'VIGILANCE' : 'RISQUE'}
                       </div>
                     </div>
-                    <h3 className="font-black text-slate-900 text-lg uppercase truncate leading-none">{customer.companyName || 'Passage'}{(customer as any).isVip && <span className="ml-2 px-1.5 py-0.5 bg-amber-100 text-amber-700 text-[8px] font-black rounded uppercase align-middle">VIP</span>}</h3>
+                    <h3 className="font-black text-slate-900 text-lg uppercase truncate leading-tight">{customer.companyName || 'Passage'}{(customer as any).isVip && <span className="ml-2 px-1.5 py-0.5 bg-amber-100 text-amber-700 text-[8px] font-black rounded uppercase align-middle">VIP</span>}</h3>
                     <p className="text-[10px] text-slate-400 font-bold uppercase mt-2 tracking-widest truncate flex items-center gap-2"><Mail size={12}/> {customer.email}</p>
                     
                     <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 gap-4 flex-1">

@@ -112,7 +112,9 @@ export const CUSTOMERS = [
   { key: 'NDOYE', companyName: 'M. Ibrahima Ndoye', mainContact: 'Ibrahima Ndoye', terms: 0, particulier: true, address: 'Grand Yoff, Dakar', created: '2026-07-25' }
 ];
 CUSTOMERS.forEach((c, i) => {
-  c.email = `${slug(c.companyName).slice(0, 24)}@exemple.sn`;
+  // Email lisible : prenom.nom du contact principal (titres retirés)
+  const [first, ...rest] = c.mainContact.replace(/^(Maître|Dr|M\.|Mme)\s+/, '').split(' ');
+  c.email = `${slug(first)}.${slug(rest.join(''))}@exemple.sn`;
   c.phone = `+221 70 000 10 ${String(i + 1).padStart(2, '0')}`;
 });
 

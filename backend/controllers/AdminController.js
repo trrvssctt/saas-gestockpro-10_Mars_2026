@@ -326,7 +326,8 @@ export class AdminController {
               Payment.sum('amount', { where: creancePayUpTo })
             ]);
             const creances = Math.max(0, parseFloat(salesTot || 0) - parseFloat(payTot || 0));
-            revenueStats.push({ label: start.toLocaleDateString('fr-FR', { month: 'short' }), month: start.toISOString(), total, collected, creances });
+            // year/monthIndex explicites : le client ne doit pas déduire le mois d'un ISO dépendant du fuseau serveur
+            revenueStats.push({ label: start.toLocaleDateString('fr-FR', { month: 'short' }), month: start.toISOString(), year: start.getFullYear(), monthIndex: start.getMonth(), total, collected, creances });
           }
         }
       } catch (e) { console.error('[REVENUE STATS ERROR]', e.message || e); }

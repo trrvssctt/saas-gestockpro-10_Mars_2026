@@ -16,6 +16,8 @@ module.exports = {
       env: {
         NODE_ENV: 'production',
         PORT: 3000,
+        // Fuseau métier : bornes de jour/mois des statistiques à l'heure de Dakar
+        TZ: 'Africa/Dakar',
       },
       // Les variables sensibles restent dans backend/.env
       // Le server.js charge .env avec un chemin absolu (dirname de server.js)

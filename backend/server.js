@@ -6,6 +6,9 @@ import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 const __serverDir = dirname(fileURLToPath(import.meta.url));
 loadEnv({ path: join(__serverDir, '.env') });
+// Fuseau métier par défaut (le VPS est à l'heure européenne) : les bornes de jour
+// et de mois des tableaux de bord doivent suivre l'heure de Dakar
+process.env.TZ = process.env.TZ || 'Africa/Dakar';
 
 import express from 'express';
 import path from 'path';

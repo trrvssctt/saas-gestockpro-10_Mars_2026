@@ -180,8 +180,12 @@ async function main() {
   await preflight();
   printStats();
 
-  const adminPassword = `Demo-${crypto.randomBytes(9).toString('base64url')}`;
-  const teamPassword = `Equipe-${crypto.randomBytes(9).toString('base64url')}`;
+  // Réutilise les mots de passe d'un .env.demo existant : un --reset ne change pas les accès
+  const previous = fs.existsSync(ENV_DEMO_PATH)
+    ? Object.fromEntries(fs.readFileSync(ENV_DEMO_PATH, 'utf8').split('\n').filter(l => /^[A-Z_]+=/.test(l)).map(l => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1)]))
+    : {};
+  const adminPassword = previous.DEMO_ADMIN_PASSWORD || `Demo-${crypto.randomBytes(9).toString('base64url')}`;
+  const teamPassword = previous.DEMO_TEAM_PASSWORD || `Equipe-${crypto.randomBytes(9).toString('base64url')}`;
   const tenantStart = new Date(2026, 0, 5, 9, 0);
 
   // 1. Inscription (contrôleur) puis activation de l'abonnement Enterprise

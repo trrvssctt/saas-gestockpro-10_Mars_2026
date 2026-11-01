@@ -392,7 +392,7 @@ const Suppliers: React.FC<SuppliersProps> = ({ user, currency }) => {
                   </div>
                 </div>
 
-                <h3 className="font-black text-slate-900 text-lg uppercase truncate leading-none">{s.companyName}</h3>
+                <h3 className="font-black text-slate-900 text-lg uppercase truncate leading-tight">{s.companyName}</h3>
                 {s.mainContact && (
                   <p className="text-[10px] text-slate-400 font-bold uppercase mt-1 tracking-widest truncate">{s.mainContact}</p>
                 )}

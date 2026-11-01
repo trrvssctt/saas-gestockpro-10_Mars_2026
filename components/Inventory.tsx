@@ -600,7 +600,7 @@ const Inventory = ({ currency, plan, refreshKey }: { currency: string, userRole?
                           </div>
                         )}
                   </div>
-                  <h3 className="font-black text-slate-900 text-lg uppercase truncate leading-none">{item.name}</h3>
+                  <h3 className="font-black text-slate-900 text-lg uppercase truncate leading-tight">{item.name}</h3>
                   <p className="text-[10px] text-slate-400 font-mono mt-3 truncate font-bold">SKU: {item.sku}</p>
                   
                   <div className="grid grid-cols-2 gap-3 mt-6">

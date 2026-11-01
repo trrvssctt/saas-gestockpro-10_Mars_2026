@@ -104,8 +104,11 @@ check('Cartes KPI : même nombre de ventes (filtre année)', dashYear.stats.tota
 check('Taux d\'encaissement ≈ 78 %', true, `${(st.totalCollected / st.totalRevenue * 100).toFixed(1)} %`);
 
 // Courbe
+// Chaque point doit porter son mois explicite (indépendant du fuseau du serveur)
+check('Revenus : mois explicites 0 → 11 sur l\'année', dashYear.revenueStats.every((r, i) => r.year === year && r.monthIndex === i),
+  `TZ processus = ${process.env.TZ || Intl.DateTimeFormat().resolvedOptions().timeZone}`);
 const months = dashYear.revenueStats.map(r => r.total);
-const upTo = new Date().getMonth();
+const upTo = Math.max(0, new Date().getMonth() - 1); // dernier mois complet
 const growing = months.slice(0, upTo + 1).every((v, i, a) => i === 0 || v > a[i - 1]);
 check(`Courbe « Revenus ${year} » croissante de janvier à ${new Date(year, upTo).toLocaleDateString('fr-FR', { month: 'long' })}`, growing, months.slice(0, upTo + 1).map(v => (v / 1e6).toFixed(1)).join(' → ') + ' M TTC');
 

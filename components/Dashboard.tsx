@@ -122,6 +122,10 @@ const SkeletonCard = () => (
 );
 
 const MONTH_LABELS = ['Jan','Fév','Mar','Avr','Mai','Jun','Jul','Aoû','Sep','Oct','Nov','Déc'];
+// Mois d'un point de revenueStats : champs explicites du backend (indépendants du fuseau
+// du serveur et du navigateur), repli sur l'ISO pour les anciennes réponses
+const statYear = (r: any): number => r.year ?? new Date(r.month).getFullYear();
+const statMonth = (r: any): number => r.monthIndex ?? new Date(r.month).getMonth();
 
 const Dashboard: React.FC<{
   user: User,
@@ -456,16 +460,15 @@ const Dashboard: React.FC<{
 
     if (revenueStats.length > 0) {
       if (selectedYear) {
-        const yearStats = revenueStats.filter(r => new Date(r.month).getFullYear() === selectedYear);
+        const yearStats = revenueStats.filter(r => statYear(r) === selectedYear);
         return monthsToShow.map(m => {
-          const r = yearStats.find(r => new Date(r.month).getMonth() === m);
+          const r = yearStats.find(r => statMonth(r) === m);
           return { label: MONTH_LABELS[m], total: r?.total || 0, collected: r?.collected || 0 };
         });
       }
       return revenueStats.map((r: any) => {
-        const d = new Date(r.month);
         return {
-          label: `${MONTH_LABELS[d.getMonth()]} ${d.getFullYear()}`,
+          label: `${MONTH_LABELS[statMonth(r)]} ${statYear(r)}`,
           total: r.total || 0,
           collected: r.collected || 0
         };
