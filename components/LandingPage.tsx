@@ -1,18 +1,21 @@
-// Options de durée d'abonnement
-const PERIOD_OPTIONS = [
-  { id: '1M', label: '1 Mois', months: 1, discountPct: 0 },
-  { id: '3M', label: '3 Mois', months: 3, discountPct: 15 },
-  { id: '1Y', label: '1 An', months: 12, discountPct: 30 },
-];
+// Durées, remises (-15 % / -30 %) et formats : source unique partagée avec
+// l'inscription, l'abonnement et le backend. Les prix viennent de GET /plans.
+import { PERIOD_OPTIONS, getPeriodPrice as getPlanPeriodPrice, getSavings, formatAmount } from '../utils/pricing';
+import { SUBSCRIPTION_PLANS } from '../constants';
+import { apiClient } from '../services/api';
 
-function getPeriodPrice(baseMonthlyPrice: number, periodId: string) {
-  const opt = PERIOD_OPTIONS.find(p => p.id === periodId);
-  if (!opt) return baseMonthlyPrice;
-  const fullPrice = baseMonthlyPrice * opt.months;
-  return Math.round(fullPrice * (1 - opt.discountPct / 100));
-}
+/**
+ * Affirmations non vérifiées (nombre de clients, gains chiffrés, témoignages).
+ * Masquées tant qu'elles ne reposent pas sur de vrais clients ayant donné leur
+ * accord : une pub qui renvoie vers des allégations trompeuses peut être refusée.
+ * Passer à true uniquement avec des données réelles.
+ */
+const SHOW_UNVERIFIED_CLAIMS = false;
 
-import React, { useState } from 'react';
+/** Adresse de contact affichée sur la landing. */
+const CONTACT_EMAIL = 'diankaseydou52@gmail.com';
+
+import React, { useState, useEffect } from 'react';
 import {
   CheckCircle2,
   ArrowRight,
@@ -85,6 +88,21 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLogin }) => {
   const [activeLegalPage, setActiveLegalPage] = useState<LegalPage>(null);
   const [activeFaq, setActiveFaq] = useState<number | null>(null);
   const [selectedPeriod, setSelectedPeriod] = useState('1M');
+  // Prix du backend (même source que l'inscription), repli sur les constantes
+  const [serverPlans, setServerPlans] = useState<any[] | null>(null);
+  useEffect(() => {
+    apiClient.get('/plans')
+      .then((data: any[]) => { if (Array.isArray(data)) setServerPlans(data); })
+      .catch(() => {});
+  }, []);
+  const planById = (id: string): any =>
+    serverPlans?.find(p => p.id === id) || SUBSCRIPTION_PLANS.find(p => p.id === id);
+  const planPrice = (id: string) => formatAmount(getPlanPeriodPrice(planById(id), selectedPeriod));
+  const planSavings = (id: string) => getSavings(planById(id), selectedPeriod);
+  const usersLabel = (id: string) => {
+    const n = Number(planById(id)?.maxUsers) || 1;
+    return `${n} utilisateur${n > 1 ? 's' : ''}`;
+  };
   // État du formulaire de contact
   const [contactForm, setContactForm] = useState({
     fullName: '',
@@ -245,7 +263,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLogin }) => {
     {
       icon: <CreditCard className="text-indigo-500" />,
       title: "Paiements & Trésorerie",
-      description: "Intégration Stripe et Mobile Money pour une encaissement fluide."
+      description: "Encaissements Mobile Money (Wave) pour un suivi de trésorerie fluide."
     },
     {
       icon: <ShieldCheck className="text-indigo-500" />,
@@ -255,7 +273,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLogin }) => {
     {
       icon: <RefreshCw className="text-indigo-500" />,
       title: "Sécurité & Recovery",
-      description: "Sauvegardes automatiques et protocoles de résilience de niveau bancaire."
+      description: "Données chiffrées et sauvegardées chaque jour."
     },
     {
       icon: <BarChart3 className="text-indigo-500" />,
@@ -324,14 +342,14 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLogin }) => {
           </div>
           <div className="flex items-center gap-3">
             <button 
-              onClick={onLogin}
+              onClick={() => onLogin()}
               className="px-4 py-2 text-sm font-medium text-slate-700 hover:text-slate-900 transition-colors"
               style={{ fontSize: '14px', fontWeight: '500', border: 'none', background: 'transparent', cursor: 'pointer', fontFamily: 'inherit' }}
             >
               Connexion
             </button>
             <button 
-              onClick={onLogin}
+              onClick={() => onLogin({ openRegister: true, planId: 'FREE_TRIAL', regStep: 1 })}
               className="px-4 py-2 text-sm font-medium bg-slate-900 text-white hover:bg-slate-800 transition-colors"
               style={{ fontSize: '14px', fontWeight: '500', border: 'none', cursor: 'pointer', fontFamily: 'inherit' }}
             >
@@ -348,7 +366,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLogin }) => {
             <div className="inline-flex items-center gap-2 px-3 py-1 bg-indigo-50 text-indigo-600 rounded-full text-[10px] font-black uppercase tracking-widest mb-6" style={{ fontSize: '10px', fontWeight: '900', fontFamily: 'inherit' }}>
               <Zap size={12} /> AI-Native ERP for Modern Business
             </div>
-            <h1 className="text-3xl md:text-5xl lg:text-6xl xl:text-7xl font-black tracking-tighter leading-[0.9] mb-8 uppercase" style={{ fontSize: 'clamp(1.875rem, 8vw, 7rem)', fontWeight: '900', lineHeight: '0.9', fontFamily: 'inherit', margin: '0 0 2rem 0' }}>
+            <h1 className="landing-hero-title font-black tracking-tighter leading-[0.9] mb-8 uppercase" style={{ fontWeight: '900', lineHeight: '0.9', fontFamily: 'inherit', margin: '0 0 2rem 0' }}>
               Pilotez votre entreprise avec <span className="text-indigo-600">intelligence.</span>
             </h1>
             <p className="text-xl text-slate-500 font-medium leading-relaxed mb-10 max-w-lg" style={{ fontSize: '20px', fontWeight: '500', lineHeight: '1.7', fontFamily: 'inherit', margin: '0 0 2.5rem 0' }}>
@@ -356,7 +374,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLogin }) => {
             </p>
             <div className="flex flex-wrap gap-4">
               <button 
-                onClick={() => onLogin({ openRegister: true, planId: 'BASIC', regStep: 1 })}
+                onClick={() => onLogin({ openRegister: true, planId: 'FREE_TRIAL', regStep: 1 })}
                 className="px-8 py-4 bg-slate-900 text-white rounded-2xl font-black text-sm uppercase tracking-widest flex items-center gap-3 hover:bg-indigo-600 transition-all shadow-2xl shadow-slate-200"
                 style={{ fontSize: '14px', fontWeight: '900', fontFamily: 'inherit', border: 'none', cursor: 'pointer' }}
               >
@@ -370,7 +388,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLogin }) => {
                 Voir les tarifs
               </a>
             </div>
-            <div className="mt-8 flex items-center gap-4">
+            {SHOW_UNVERIFIED_CLAIMS && <div className="mt-8 flex items-center gap-4">
               <div className="flex -space-x-2">
                 <div className="w-8 h-8 bg-slate-200 rounded-full flex items-center justify-center text-slate-600 text-sm font-medium border border-white" style={{ fontSize: '14px', fontWeight: '500', fontFamily: 'inherit' }}>M</div>
                 <div className="w-8 h-8 bg-slate-200 rounded-full flex items-center justify-center text-slate-600 text-sm font-medium border border-white" style={{ fontSize: '14px', fontWeight: '500', fontFamily: 'inherit' }}>A</div>
@@ -380,7 +398,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLogin }) => {
               <p className="text-sm text-slate-500" style={{ fontSize: '14px', fontWeight: '400', fontFamily: 'inherit' }}>
                 Utilisé par +500 entreprises
               </p>
-            </div>
+            </div>}
           </div>
           <div className="relative mt-10 lg:mt-0">
             <div className="bg-slate-100 border border-slate-200 p-3">
@@ -596,14 +614,14 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLogin }) => {
               {/* Price */}
               <div className="mb-6">
                 <div className="flex items-baseline gap-1.5 mb-1">
-                  <span className="text-4xl font-black text-white tracking-tighter">{getPeriodPrice(7900, selectedPeriod).toLocaleString()}</span>
+                  <span className="text-4xl font-black text-white tracking-tighter">{planPrice('BASIC')}</span>
                   <span className="text-slate-400 font-bold text-sm">FCFA</span>
                 </div>
                 <p className="text-slate-500 text-xs font-bold">par {PERIOD_OPTIONS.find(p => p.id === selectedPeriod)?.label.toLowerCase()}</p>
                 {selectedPeriod !== '1M' && (
                   <div className="mt-2 inline-flex items-center gap-1 px-2.5 py-1 rounded-lg" style={{ background: 'rgba(16,185,129,0.1)' }}>
                     <span className="text-emerald-400 text-[10px] font-black">
-                      Économie {((7900 * (PERIOD_OPTIONS.find(p => p.id === selectedPeriod)?.months ?? 1)) - getPeriodPrice(7900, selectedPeriod)).toLocaleString()} FCFA
+                      Économie {formatAmount(planSavings('BASIC'))} FCFA
                     </span>
                   </div>
                 )}
@@ -612,9 +630,9 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLogin }) => {
               {/* Features */}
               <ul className="space-y-3 flex-1 mb-8">
                 {[
-                  { ok: true,  label: '3 utilisateur' },
+                  { ok: true,  label: usersLabel('BASIC') },
                   { ok: true,  label: 'Stock illimité' },
-                  { ok: true,  label: 'factures & devis illimités' },
+                  { ok: true,  label: 'Factures & devis illimités' },
                   { ok: true,  label: 'Gestion clients & fournisseurs' },
                   { ok: true,  label: 'Dashboard analytique' },
                   { ok: true,  label: 'Support email inclus' },
@@ -665,14 +683,14 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLogin }) => {
                 {/* Price */}
                 <div className="mb-6">
                   <div className="flex items-baseline gap-1.5 mb-1">
-                    <span className="text-4xl font-black text-white tracking-tighter">{getPeriodPrice(19900, selectedPeriod).toLocaleString()}</span>
+                    <span className="text-4xl font-black text-white tracking-tighter">{planPrice('PRO')}</span>
                     <span className="text-indigo-200 font-bold text-sm">FCFA</span>
                   </div>
                   <p className="text-indigo-300/70 text-xs font-bold">par {PERIOD_OPTIONS.find(p => p.id === selectedPeriod)?.label.toLowerCase()}</p>
                   {selectedPeriod !== '1M' && (
                     <div className="mt-2 inline-flex items-center gap-1 px-2.5 py-1 rounded-lg" style={{ background: 'rgba(255,255,255,0.12)' }}>
                       <span className="text-emerald-300 text-[10px] font-black">
-                        Économie {((19900 * (PERIOD_OPTIONS.find(p => p.id === selectedPeriod)?.months ?? 1)) - getPeriodPrice(19900, selectedPeriod)).toLocaleString()} FCFA
+                        Économie {formatAmount(planSavings('PRO'))} FCFA
                       </span>
                     </div>
                   )}
@@ -720,14 +738,14 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLogin }) => {
               {/* Price */}
               <div className="mb-6">
                 <div className="flex items-baseline gap-1.5 mb-1">
-                  <span className="text-4xl font-black text-white tracking-tighter">{getPeriodPrice(69000, selectedPeriod).toLocaleString()}</span>
+                  <span className="text-4xl font-black text-white tracking-tighter">{planPrice('ENTERPRISE')}</span>
                   <span className="text-slate-400 font-bold text-sm">FCFA</span>
                 </div>
                 <p className="text-slate-500 text-xs font-bold">par {PERIOD_OPTIONS.find(p => p.id === selectedPeriod)?.label.toLowerCase()}</p>
                 {selectedPeriod !== '1M' && (
                   <div className="mt-2 inline-flex items-center gap-1 px-2.5 py-1 rounded-lg" style={{ background: 'rgba(16,185,129,0.1)' }}>
                     <span className="text-emerald-400 text-[10px] font-black">
-                      Économie {((69000 * (PERIOD_OPTIONS.find(p => p.id === selectedPeriod)?.months ?? 1)) - getPeriodPrice(69000, selectedPeriod)).toLocaleString()} FCFA
+                      Économie {formatAmount(planSavings('ENTERPRISE'))} FCFA
                     </span>
                   </div>
                 )}
@@ -736,7 +754,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLogin }) => {
               {/* Features */}
               <ul className="space-y-3 flex-1 mb-8">
                 {[
-                  'utilisateurs illimités',
+                  'Utilisateurs illimités',
                   'Module RH complet (paie, congés)',
                   'Inventory Campaigns IA',
                   'Multi-entités & filiales',
@@ -767,7 +785,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLogin }) => {
               {[
                 { icon: <ShieldCheck size={15} />, label: 'SSL & Chiffrement AES-256' },
                 { icon: <RefreshCw size={15} />, label: 'Sauvegardes automatiques' },
-                { icon: <CreditCard size={15} />, label: 'Stripe & Mobile Money' },
+                { icon: <CreditCard size={15} />, label: 'Paiement Mobile Money' },
               ].map((item, i) => (
                 <div key={i} className="flex items-center gap-2 text-slate-500 text-xs font-bold">
                   <span className="text-slate-600">{item.icon}</span>{item.label}
@@ -787,10 +805,10 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLogin }) => {
               <h2 className="text-2xl md:text-3xl lg:text-4xl font-black tracking-tighter uppercase mb-12">Pourquoi choisir <span className="text-indigo-600">GeStockPro ?</span></h2>
               <div className="grid sm:grid-cols-2 gap-8">
                 {[
-                  { title: "Sécurité Renforcée", desc: "Protocoles de sécurité militaires pour vos données.", icon: <ShieldCheck /> },
+                  { title: "Sécurité Renforcée", desc: "Données chiffrées et sauvegardées chaque jour.", icon: <ShieldCheck /> },
                   { title: "Cloud Scalable", desc: "Une infrastructure qui grandit avec votre succès.", icon: <Globe /> },
                   { title: "AI-Native", desc: "L'intelligence artificielle intégrée nativement.", icon: <Cpu /> },
-                  { title: "Performance", desc: "Une rapidité d'exécution inégalée sur le marché.", icon: <Zap /> }
+                  { title: "Performance", desc: "Une interface rapide, pensée aussi pour le mobile.", icon: <Zap /> }
                 ].map((item, i) => (
                   <div key={i}>
                     <div className="w-12 h-12 bg-white text-indigo-600 rounded-2xl flex items-center justify-center shadow-lg mb-6">
@@ -806,9 +824,11 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLogin }) => {
               <div className="absolute top-0 right-0 w-64 h-64 bg-indigo-500/10 blur-3xl rounded-full"></div>
               <h3 className="text-3xl font-black tracking-tighter uppercase mb-8 leading-tight">Optimisez votre trésorerie dès aujourd'hui.</h3>
               <p className="text-slate-400 font-medium mb-10 leading-relaxed">
-                Nos clients constatent en moyenne une réduction de 30% de leurs coûts opérationnels dès les 3 premiers mois d'utilisation.
+                {SHOW_UNVERIFIED_CLAIMS
+                  ? "Nos clients constatent en moyenne une réduction de 30% de leurs coûts opérationnels dès les 3 premiers mois d'utilisation."
+                  : 'Suivez vos ventes, vos encaissements et vos créances clients en temps réel, depuis votre ordinateur ou votre téléphone.'}
               </p>
-              <div className="space-y-6">
+              {SHOW_UNVERIFIED_CLAIMS && <div className="space-y-6">
                 <div className="flex items-center gap-4">
                   <div className="w-10 h-10 bg-emerald-500 rounded-full flex items-center justify-center text-white">
                     <CheckCircle2 size={20} />
@@ -821,14 +841,14 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLogin }) => {
                   </div>
                   <span className="text-sm font-bold uppercase tracking-wider">-40% de temps administratif</span>
                 </div>
-              </div>
+              </div>}
             </div>
           </div>
         </div>
       </section>
 
-      {/* Testimonials */}
-      <section className="py-12 md:py-24">
+      {/* Testimonials — masqués tant qu'il ne s'agit pas de vrais clients (cf. SHOW_UNVERIFIED_CLAIMS) */}
+      {SHOW_UNVERIFIED_CLAIMS && <section className="py-12 md:py-24">
         <div className="max-w-7xl mx-auto px-4 md:px-6">
           <div className="text-center mb-12 md:mb-20">
             <h2 className="text-2xl md:text-3xl lg:text-4xl font-black tracking-tighter uppercase mb-6">Ils nous font confiance</h2>
@@ -857,7 +877,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLogin }) => {
             ))}
           </div>
         </div>
-      </section>
+      </section>}
 
       {/* About Section */}
       <section id="about" className="py-12 md:py-24 bg-slate-900 text-white overflow-hidden relative">
@@ -944,7 +964,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLogin }) => {
                   </div>
                   <div>
                     <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Email Professionnel</p>
-                    <p className="text-lg font-black text-slate-900">diankaseydou52@gmail.com</p>
+                    <p className="text-lg font-black text-slate-900">{CONTACT_EMAIL}</p>
                   </div>
                 </div>
                 <div className="flex items-center gap-6">
@@ -1096,16 +1116,16 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLogin }) => {
             </div>
             <div className="relative z-10">
               <h2 className="text-2xl sm:text-4xl md:text-5xl lg:text-6xl font-black tracking-tighter uppercase mb-8 leading-tight">Prêt à transformer <br />votre gestion ?</h2>
-              <p className="text-xl text-indigo-100 font-medium mb-12 max-w-2xl mx-auto">Rejoignez des centaines d'entrepreneurs qui ont déjà fait le choix de l'intelligence et de la simplicité.</p>
+              <p className="text-xl text-indigo-100 font-medium mb-12 max-w-2xl mx-auto">Essayez GeStockPro gratuitement pendant 14 jours, sans carte bancaire.</p>
               <div className="flex flex-wrap justify-center gap-6">
                 <button
-                  onClick={onLogin}
+                  onClick={() => onLogin({ openRegister: true, planId: 'FREE_TRIAL', regStep: 1 })}
                   className="px-6 md:px-10 py-3 md:py-5 bg-white text-indigo-600 rounded-2xl font-black text-xs md:text-sm uppercase tracking-widest hover:bg-slate-900 hover:text-white transition-all shadow-2xl"
                 >
                   Essayer gratuitement
                 </button>
                 <button
-                  onClick={onLogin}
+                  onClick={() => document.getElementById('contact')?.scrollIntoView({ behavior: 'smooth' })}
                   className="px-6 md:px-10 py-3 md:py-5 bg-indigo-700 text-white border-2 border-indigo-500 rounded-2xl font-black text-xs md:text-sm uppercase tracking-widest hover:bg-indigo-800 transition-all"
                 >
                   Parler à un expert
@@ -1157,7 +1177,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLogin }) => {
             </div>
           </div>
           <div className="pt-10 border-t border-slate-100 flex flex-col md:flex-row items-center justify-between gap-6">
-            <p className="text-xs font-bold text-slate-400 uppercase tracking-[0.2em]">© 2024 GeStockPro. Tous droits réservés.</p>
+            <p className="text-xs font-bold text-slate-400 uppercase tracking-[0.2em]">© {new Date().getFullYear()} GeStockPro. Tous droits réservés.</p>
             <div className="flex items-center gap-2 text-xs font-bold text-slate-400 uppercase tracking-[0.2em]">
               Fait avec <Star size={12} className="text-indigo-500 fill-indigo-500" /> à Dakar
             </div>

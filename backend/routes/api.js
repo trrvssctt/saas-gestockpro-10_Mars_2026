@@ -45,6 +45,8 @@ router.post('/billing/wave/webhook', SubscriptionController.waveWebhook);
 
 router.use('/auth', authRoutes);
 router.get('/plans', SubscriptionController.listPlans); 
+// Infos de paiement marchand (code, bénéficiaire, QR généré) — publiques, aucun secret
+router.get('/billing/merchant-info', SubscriptionController.getMerchantInfo);
 // Expose bridge as public to allow server-side forwarding from clients without requiring JWT
 router.post('/ai/bridge', AIController.bridgeWebhook);
 // Route publique pour l'envoi de messages de contact depuis la landing page

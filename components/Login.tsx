@@ -8,8 +8,11 @@ import {
   Terminal, Shield, Smartphone, Copy, Dices
 } from 'lucide-react';
 import { User, SubscriptionPlan, UserRole } from '../types';
+import { SUBSCRIPTION_PLANS } from '../constants';
 import logo from '../assets/logo_gestockpro.png';
-import waveQr from '../assets/qr_code_marchant_wave.png';
+// QR figé remplacé par le panneau de paiement unique (QR généré côté backend)
+import MerchantPaymentPanel, { ManualPaymentInput } from './payment/MerchantPaymentPanel';
+import { PERIOD_OPTIONS, PERIOD_LABELS, getPeriodPrice, getMonthlyPrice, formatAmount } from '../utils/pricing';
 import { authBridge } from '../services/authBridge';
 import { apiClient, ApiError } from '../services/api';
 
@@ -144,6 +147,8 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBackToLanding, initialM
         }
       } catch (err) {
         console.error("Kernel Plans Error", err);
+        // Repli : ne jamais laisser l'étape 1 vide (prospect venu de la pub)
+        setDynamicPlans(SUBSCRIPTION_PLANS as any);
       }
     };
     fetchPlans();
@@ -595,8 +600,8 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBackToLanding, initialM
               </div>
             )}
             <div className="mb-6">
-              <h3 className="text-xl font-black text-slate-900 uppercase tracking-tight">Sélectionnez votre moteur</h3>
-              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">Choisissez la puissance de votre instance</p>
+              <h3 className="text-xl font-black text-slate-900 uppercase tracking-tight">Choisissez votre formule</h3>
+              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">Vous pourrez changer de formule à tout moment</p>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {dynamicPlans.map(plan => (
@@ -608,41 +613,47 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBackToLanding, initialM
                   {regData.planId === plan.id && <Check className="absolute top-4 right-4 text-indigo-600" size={18} />}
                   <h4 className="text-xs font-black uppercase text-slate-900 tracking-widest">{plan.name}</h4>
                   <div className="mt-2 flex items-baseline gap-1">
-                    <span className="text-xl font-black text-slate-900">{plan.price.toLocaleString()}</span>
-                    <span className="text-[8px] font-bold text-slate-400 uppercase">F CFA/m</span>
+                    {getMonthlyPrice(plan) === 0 ? (
+                      <span className="text-xl font-black text-emerald-600">Gratuit <span className="text-[10px] font-bold text-slate-400">· 14 jours</span></span>
+                    ) : (
+                      <>
+                        <span className="text-xl font-black text-slate-900">{formatAmount(getMonthlyPrice(plan))}</span>
+                        <span className="text-[10px] font-bold text-slate-400">F CFA / mois</span>
+                      </>
+                    )}
                   </div>
                 </button>
               ))}
             </div>
-            <button onClick={() => setRegStep(2)} className="w-full py-4 md:py-5 bg-slate-900 text-white rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-indigo-600 transition-all flex items-center justify-center gap-3 mt-8 shadow-xl">CONTINUER L'IDENTITÉ <ArrowRight size={18} /></button>
+            <button onClick={() => setRegStep(2)} className="w-full py-4 md:py-5 bg-slate-900 text-white rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-indigo-600 transition-all flex items-center justify-center gap-3 mt-8 shadow-xl">CONTINUER <ArrowRight size={18} /></button>
           </div>
         );
       case 2:
         return (
           <div className="space-y-6 animate-in slide-in-from-right-4 duration-500">
             <div className="mb-6">
-              <h3 className="text-xl font-black text-slate-900 uppercase tracking-tight">Identité de la Structure</h3>
-              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">Information légale pour l'isolation du tenant</p>
+              <h3 className="text-xl font-black text-slate-900 uppercase tracking-tight">Votre entreprise</h3>
+              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">Ces informations apparaîtront sur vos factures</p>
             </div>
             <div className="space-y-4">
               <div>
-                <div className="relative"><Building2 className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-300" size={18} /><input type="text" value={regData.companyName} onChange={(e: React.ChangeEvent<HTMLInputElement>) => { setRegData({ ...regData, companyName: e.target.value }); setStepErrors((p: Record<string, string>) => ({ ...p, companyName: '' })); }} className={inputCls('companyName')} placeholder="Raison Sociale *" /></div>
+                <div className="relative"><Building2 className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-300" size={18} /><input type="text" value={regData.companyName} onChange={(e: React.ChangeEvent<HTMLInputElement>) => { setRegData({ ...regData, companyName: e.target.value }); setStepErrors((p: Record<string, string>) => ({ ...p, companyName: '' })); }} className={inputCls('companyName')} placeholder="Nom de l'entreprise *" /></div>
                 {fieldErr('companyName')}
               </div>
               <div>
-                <div className="relative"><Shield className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-300" size={18} /><input type="text" value={regData.siret} onChange={(e: React.ChangeEvent<HTMLInputElement>) => { setRegData({ ...regData, siret: e.target.value }); setStepErrors((p: Record<string, string>) => ({ ...p, siret: '' })); }} className={inputCls('siret')} placeholder="N° SIRET / Registre Commerce" /></div>
+                <div className="relative"><Shield className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-300" size={18} /><input type="text" value={regData.siret} onChange={(e: React.ChangeEvent<HTMLInputElement>) => { setRegData({ ...regData, siret: e.target.value }); setStepErrors((p: Record<string, string>) => ({ ...p, siret: '' })); }} className={inputCls('siret')} placeholder="NINEA / RCCM (facultatif)" /></div>
                 {fieldErr('siret')}
               </div>
               <div>
                 <div className="relative"><Phone className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-300" size={18} /><input type="tel" value={regData.phone} onChange={(e: React.ChangeEvent<HTMLInputElement>) => { setRegData({ ...regData, phone: e.target.value }); setStepErrors((p: Record<string, string>) => ({ ...p, phone: '' })); }} className={inputCls('phone')} placeholder="Téléphone Entreprise *" /></div>
                 {fieldErr('phone')}
               </div>
-              <div className="relative"><MapPin className="absolute left-5 top-4 text-slate-300" size={18} /><textarea value={regData.address} onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setRegData({ ...regData, address: e.target.value })} className="w-full bg-slate-50 border border-slate-100 rounded-2xl pl-12 pr-6 py-4 text-sm font-bold outline-none focus:ring-4 focus:ring-indigo-500/10 min-h-[100px]" placeholder="Adresse du Siège Social" /></div>
+              <div className="relative"><MapPin className="absolute left-5 top-4 text-slate-300" size={18} /><textarea value={regData.address} onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setRegData({ ...regData, address: e.target.value })} className="w-full bg-slate-50 border border-slate-100 rounded-2xl pl-12 pr-6 py-4 text-sm font-bold outline-none focus:ring-4 focus:ring-indigo-500/10 min-h-[100px]" placeholder="Adresse de l'entreprise" /></div>
             </div>
 
             <div className="flex gap-4 mt-8">
               <button onClick={() => setRegStep(1)} className="px-4 py-3 md:py-4 border-2 border-slate-100 text-slate-400 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-slate-50 transition-all">RETOUR</button>
-              <button onClick={() => { if (validateStep2()) setRegStep(3); }} className="flex-1 py-3 md:py-4 bg-slate-900 text-white rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-indigo-600 transition-all flex items-center justify-center gap-3 shadow-xl">CRÉER L'ADMIN <ArrowRight size={18} /></button>
+              <button onClick={() => { if (validateStep2()) setRegStep(3); }} className="flex-1 py-3 md:py-4 bg-slate-900 text-white rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-indigo-600 transition-all flex items-center justify-center gap-3 shadow-xl">CONTINUER <ArrowRight size={18} /></button>
             </div>
           </div>
         );
@@ -650,8 +661,8 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBackToLanding, initialM
         return (
           <div className="space-y-6 animate-in slide-in-from-right-4 duration-500">
             <div className="mb-6">
-              <h3 className="text-xl font-black text-slate-900 uppercase tracking-tight">Compte Propriétaire</h3>
-              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">Accès Maître de l'instance {regData.companyName}</p>
+              <h3 className="text-xl font-black text-slate-900 uppercase tracking-tight">Votre compte</h3>
+              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">Vous serez l'administrateur de {regData.companyName || 'votre entreprise'}</p>
             </div>
             <div className="space-y-4">
               <div>
@@ -659,7 +670,7 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBackToLanding, initialM
                 {fieldErr('adminName')}
               </div>
               <div>
-                <div className="relative"><Mail className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-300" size={18} /><input type="email" value={regData.adminEmail} onChange={(e: React.ChangeEvent<HTMLInputElement>) => { setRegData({ ...regData, adminEmail: e.target.value }); setStepErrors((p: Record<string, string>) => ({ ...p, adminEmail: '' })); }} className={inputCls('adminEmail')} placeholder="Email Administrateur *" /></div>
+                <div className="relative"><Mail className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-300" size={18} /><input type="email" value={regData.adminEmail} onChange={(e: React.ChangeEvent<HTMLInputElement>) => { setRegData({ ...regData, adminEmail: e.target.value }); setStepErrors((p: Record<string, string>) => ({ ...p, adminEmail: '' })); }} className={inputCls('adminEmail')} placeholder="Adresse email *" /></div>
                 {fieldErr('adminEmail')}
               </div>
 
@@ -676,7 +687,7 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBackToLanding, initialM
                       setStepErrors((p: Record<string, string>) => ({ ...p, adminPassword: '' }));
                     }}
                     className={`w-full bg-slate-50 border rounded-2xl pl-12 pr-32 py-4 text-sm font-bold outline-none focus:ring-4 transition-all ${stepErrors.adminPassword ? 'border-rose-300 focus:ring-rose-500/10' : 'border-slate-100 focus:ring-indigo-500/10'}`}
-                    placeholder="Clé d'Accès de Sécurité *"
+                    placeholder="Mot de passe *"
                   />
                   <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-2">
                     <button
@@ -755,16 +766,10 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBackToLanding, initialM
   };
 
   const selectedPlan = dynamicPlans.find(p => p.id === regData.planId);
-  const isFree = !selectedPlan || Number(selectedPlan.price) === 0 || selectedPlan.id === 'FREE_TRIAL';
+  const isFree = !selectedPlan || getMonthlyPrice(selectedPlan) === 0 || selectedPlan.id === 'FREE_TRIAL';
 
-  const computeAmount = () => {
-    if (!selectedPlan) return 0;
-    const PERIOD_MULT: Record<string, number> = { '1M': 1, '3M': 3, '1Y': 12 };
-    const mult = PERIOD_MULT[regData.period] || 1;
-    const PERIOD_DISCOUNT: Record<string, number> = { '1M': 1, '3M': 0.9, '1Y': 0.8 };
-    const discount = PERIOD_DISCOUNT[regData.period] || 1;
-    return Math.round(selectedPlan.price * mult * discount);
-  };
+  // Même grille que la landing, l'abonnement et le backend (-15 % / -30 %)
+  const computeAmount = () => getPeriodPrice(selectedPlan, regData.period);
 
   const handleFreeRegister = async () => {
     setLoading(true);
@@ -788,8 +793,11 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBackToLanding, initialM
     }
   };
 
-  const handleMobileRegister = async () => {
-    if (!regData.paymentReference.trim()) {
+  const handleMobileRegister = async (manual?: ManualPaymentInput) => {
+    const reference = (manual?.reference ?? regData.paymentReference).trim();
+    const method = manual?.method || regData.paymentMethod;
+    if (manual) setRegData(prev => ({ ...prev, paymentReference: reference, paymentMethod: method }));
+    if (!reference) {
       setApiError({ error: 'ValidationError', message: 'Veuillez saisir votre référence de transaction.', status: 400 });
       return;
     }
@@ -803,7 +811,8 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBackToLanding, initialM
         primaryColor: regData.primaryColor, buttonColor: regData.buttonColor,
         period: regData.period,
         admin: { name: regData.adminName, email: regData.adminEmail, password: regData.adminPassword },
-        paymentInfo: { method: regData.paymentMethod, reference: regData.paymentReference, amount }
+        // Le serveur recalcule le montant et laisse l'instance inactive jusqu'à vérification
+        paymentInfo: { method, reference, amount, phone: manual?.phone }
       };
       const response = await apiClient.post('/auth/register', payload);
       localStorage.removeItem(REG_DRAFT_KEY);
@@ -844,7 +853,6 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBackToLanding, initialM
 
   const PaymentStep = () => {
     const amount = computeAmount();
-    const PERIOD_LABELS: Record<string, string> = { '1M': '1 mois', '3M': '3 mois', '1Y': '1 an' };
 
     if (isFree) {
       return (
@@ -888,7 +896,7 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBackToLanding, initialM
             <span>Durée</span><span>{PERIOD_LABELS[regData.period] || regData.period}</span>
           </div>
           <div className="flex justify-between text-sm font-black text-slate-900 border-t border-slate-200 pt-2 mt-2">
-            <span>Total</span><span>{amount.toLocaleString()} F CFA</span>
+            <span>Total</span><span>{formatAmount(amount)} F CFA</span>
           </div>
         </div>
 
@@ -896,7 +904,7 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBackToLanding, initialM
         <div>
           <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-3">Durée de l'abonnement</p>
           <div className="grid grid-cols-3 gap-3">
-            {[{ id: '1M', label: '1 Mois', disc: '' }, { id: '3M', label: '3 Mois', disc: '-10%' }, { id: '1Y', label: '1 An', disc: '-20%' }].map(opt => (
+            {PERIOD_OPTIONS.map(o => ({ id: o.id, label: o.label, disc: o.discountPct ? `-${o.discountPct}%` : '' })).map(opt => (
               <button key={opt.id} type="button" onClick={() => setRegData({ ...regData, period: opt.id })}
                 className={`py-3 px-2 rounded-2xl border-2 text-center transition-all ${regData.period === opt.id ? 'border-indigo-600 bg-indigo-50' : 'border-slate-100 hover:border-slate-200'}`}>
                 <div className="text-[10px] font-black text-slate-800 uppercase">{opt.label}</div>
@@ -906,56 +914,25 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBackToLanding, initialM
           </div>
         </div>
 
-        {/* Sélecteur méthode : Wave ou Stripe */}
-        <div>
-          <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-3">Méthode de paiement</p>
-          <div className="grid grid-cols-1 gap-3">
-            <button type="button" onClick={() => setRegData({ ...regData, paymentMethod: 'Wave' })}
-              className={`py-4 px-4 rounded-2xl border-2 font-black text-[10px] uppercase tracking-widest transition-all flex items-center justify-center gap-2 ${regData.paymentMethod === 'Wave' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-100 text-slate-500 hover:border-slate-200'}`}>
-              <Smartphone size={16} /> Wave
-            </button>
-            {/* Bouton Carte Stripe — temporairement masqué
-            <button type="button" onClick={() => setRegData({...regData, paymentMethod: 'Stripe'})}
-              className={`py-4 px-4 rounded-2xl border-2 font-black text-[10px] uppercase tracking-widest transition-all flex items-center justify-center gap-2 ${regData.paymentMethod === 'Stripe' ? 'border-indigo-500 bg-indigo-50 text-indigo-700' : 'border-slate-100 text-slate-500 hover:border-slate-200'}`}>
-              <CreditCard size={16} /> Carte Stripe
-            </button>
-            */}
-          </div>
-        </div>
-
-        {/* Wave : QR code + référence */}
-        {regData.paymentMethod === 'Wave' && (
-          <div className="space-y-4 animate-in fade-in duration-300">
-            <div className="flex flex-col items-center gap-3 p-5 bg-blue-50 border-2 border-blue-100 rounded-3xl">
-              <p className="text-[9px] font-black text-blue-700 uppercase tracking-widest">Scannez le QR code Wave pour payer {amount.toLocaleString()} F CFA</p>
-              <img src={waveQr} alt="QR Code Wave Marchand" className="w-48 h-48 rounded-2xl object-contain border border-blue-200 bg-white p-2" />
-              <p className="text-[8px] text-blue-500 font-bold text-center leading-relaxed">
-                Ouvrez l'application Wave → Scanner → Pointez vers ce QR code → Confirmez le montant
-              </p>
-            </div>
-            <div>
-              <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-2">Référence de transaction Wave</p>
-              <div className="relative">
-                <Smartphone className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-300" size={18} />
-                <input
-                  type="text"
-                  value={regData.paymentReference}
-                  onChange={e => setRegData({ ...regData, paymentReference: e.target.value })}
-                  className="w-full bg-slate-50 border border-slate-100 rounded-2xl pl-12 pr-6 py-4 text-sm font-bold outline-none focus:ring-4 focus:ring-blue-500/10"
-                  placeholder="Collez ici la référence Wave (ex : W-XXXXXXXX)"
-                />
-              </div>
-              <p className="text-[8px] text-slate-400 font-bold mt-2">Après le paiement, Wave vous envoie une référence par SMS — collez-la ici.</p>
-            </div>
-            <div className="flex gap-4">
-              <button type="button" onClick={() => setRegStep(3)} className="px-4 py-4 border-2 border-slate-100 text-slate-400 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-slate-50 transition-all">RETOUR</button>
-              <button type="button" onClick={handleMobileRegister} disabled={loading || !regData.paymentReference.trim()}
-                className="flex-1 py-4 bg-blue-600 text-white rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-slate-900 transition-all flex items-center justify-center gap-3 shadow-xl disabled:opacity-40">
-                {loading ? <RefreshCw className="animate-spin" size={18} /> : <>VALIDER LE PAIEMENT WAVE <Check size={18} /></>}
-              </button>
-            </div>
+        {/* Paiement : même écran que dans l'application (code marchand, bénéficiaire,
+            bouton « Payer avec Wave », QR généré). À l'inscription le compte n'existe
+            pas encore : la confirmation passe par la référence, vérifiée par l'équipe. */}
+        <MerchantPaymentPanel
+          amount={amount}
+          planName={selectedPlan?.name}
+          periodLabel={PERIOD_LABELS[regData.period] || regData.period}
+          onManualSubmit={handleMobileRegister}
+          manualOpenByDefault
+          manualSubmitLabel="Créer mon compte"
+        />
+        {loading && (
+          <div className="flex items-center justify-center gap-2 text-xs font-bold text-slate-500">
+            <RefreshCw className="animate-spin" size={14} /> Création de votre compte…
           </div>
         )}
+        <div className="flex gap-4">
+          <button type="button" onClick={() => setRegStep(3)} className="px-4 py-4 border-2 border-slate-100 text-slate-400 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-slate-50 transition-all">RETOUR</button>
+        </div>
 
         {/* Stripe : redirection — temporairement masqué
         {regData.paymentMethod === 'Stripe' && (
@@ -980,12 +957,6 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBackToLanding, initialM
         )}
         */}
 
-        {/* Aucune méthode sélectionnée */}
-        {regData.paymentMethod !== 'Wave' && regData.paymentMethod !== 'Stripe' && (
-          <div className="flex gap-4">
-            <button type="button" onClick={() => setRegStep(3)} className="px-4 py-4 border-2 border-slate-100 text-slate-400 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-slate-50 transition-all">RETOUR</button>
-          </div>
-        )}
       </div>
     );
   };
@@ -1002,7 +973,7 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBackToLanding, initialM
 
           <img src={logo} alt="GeStockPro" className="mx-auto mb-4 h-14" />
           <h1 className="text-2xl md:text-3xl font-black text-white uppercase tracking-tighter">
-            {mode === 'REGISTER' ? 'Déploiement Instance SaaS' : mode === 'SUPERADMIN' ? 'Console Maître Kernel' : mode === 'MFA' ? 'Vérification de Sécurité' : 'Accès Privé GeStock'}
+            {mode === 'REGISTER' ? 'Créer mon compte' : mode === 'SUPERADMIN' ? 'Console Maître Kernel' : mode === 'MFA' ? 'Vérification de Sécurité' : 'Accès Privé GeStock'}
           </h1>
         </div>
 
@@ -1085,7 +1056,7 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBackToLanding, initialM
               {/* Barre de progression mobile (inscription) */}
               <div className="flex lg:hidden items-center justify-between px-5 py-3 bg-slate-900 text-white">
                 <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">
-                  {[{ step: 1, label: 'Moteur' }, { step: 2, label: 'Entreprise' }, { step: 3, label: 'Admin' }, { step: 4, label: 'Paiement' }].find(s => s.step === regStep)?.label}
+                  {[{ step: 1, label: 'Formule' }, { step: 2, label: 'Entreprise' }, { step: 3, label: 'Compte' }, { step: 4, label: 'Paiement' }].find(s => s.step === regStep)?.label}
                 </span>
                 <div className="flex items-center gap-1.5">
                   {[1, 2, 3, 4].map(s => (
@@ -1097,7 +1068,7 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess, onBackToLanding, initialM
               <div className="lg:col-span-4 bg-slate-900 p-6 lg:p-10 text-white hidden lg:flex flex-col justify-between relative overflow-hidden">
                 <div className="absolute top-0 right-0 p-8 opacity-5"><Zap size={200} /></div>
                 <div className="space-y-8 relative z-10">
-                  {[{ step: 1, label: 'Choix du Plan', icon: Star }, { step: 2, label: 'L\'Entreprise', icon: Building2 }, { step: 3, label: 'Administrateur', icon: UserIcon }, { step: 4, label: 'Paiement', icon: CreditCard }].map(s => (
+                  {[{ step: 1, label: 'Formule', icon: Star }, { step: 2, label: 'L\'Entreprise', icon: Building2 }, { step: 3, label: 'Votre compte', icon: UserIcon }, { step: 4, label: 'Paiement', icon: CreditCard }].map(s => (
                     <div key={s.step} className={`flex items-center gap-4 transition-all duration-500 ${regStep === s.step ? 'opacity-100 translate-x-2' : regStep > s.step ? 'opacity-60 grayscale' : 'opacity-40'}`}><div className={`w-12 h-12 rounded-xl flex items-center justify-center border-2 transition-all ${regStep === s.step ? 'bg-indigo-600 border-indigo-500 shadow-xl shadow-indigo-500/30' : regStep > s.step ? 'bg-emerald-50 border-emerald-500' : 'border-slate-700'}`}>{regStep > s.step ? <Check size={20} /> : <s.icon size={18} />}</div><div><span className="text-[10px] font-black uppercase tracking-widest block">Étape {s.step}</span><span className="text-xs font-bold text-slate-400">{s.label}</span></div></div>
                   ))}
                 </div>

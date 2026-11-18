@@ -24,7 +24,9 @@ import {
 import { User, UserRole, StockItem } from '../types';
 import { apiClient } from '../services/api';
 import { authBridge } from '../services/authBridge';
-import waveQr from '../assets/qr_code_marchant_wave.png';
+// QR figé remplacé par un QR généré côté backend (MerchantPaymentPanel)
+import MerchantPaymentPanel, { ManualPaymentInput } from './payment/MerchantPaymentPanel';
+import { getMonthlyPrice } from '../utils/pricing';
 import { Timer } from 'lucide-react';
 import TimeMachineFilter, {
   FilterState,
@@ -131,8 +133,10 @@ const Dashboard: React.FC<{
   user: User,
   currency: string,
   onNavigate?: (tab: string, meta?: any) => void,
-  onLogout?: () => void
-}> = ({ user, currency, onNavigate, onLogout }) => {
+  onLogout?: () => void,
+  /** Ouvre l'écran de paiement unique (même que « Souscrire »). */
+  onRegularize?: () => void
+}> = ({ user, currency, onNavigate, onLogout, onRegularize }) => {
   const [sales, setSales] = useState<any[]>([]);
   const [customers, setCustomers] = useState<any[]>([]);
   const [stocks, setStocks] = useState<StockItem[]>([]);
@@ -646,6 +650,31 @@ const Dashboard: React.FC<{
   const [phoneNumber, setPhoneNumber] = useState('');
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
   const [paymentSuccess, setPaymentSuccess] = useState(false);
+  const [legacyPlan, setLegacyPlan] = useState<any>(null);
+
+  // Repli (si onRegularize n'est pas fourni) : prix du plan courant pour le panneau
+  useEffect(() => {
+    if (!showPaymentModal || legacyPlan) return;
+    const pid = subscription?.subscription?.planId || subscription?.planId;
+    apiClient.get('/plans')
+      .then((plans: any[]) => setLegacyPlan((plans || []).find(p => p.id === pid) || null))
+      .catch(() => {});
+  }, [showPaymentModal, legacyPlan, subscription]);
+
+  const submitLegacyManualPayment = async ({ method, reference, phone }: ManualPaymentInput) => {
+    await apiClient.post('/billing/upgrade', {
+      planId: subscription?.subscription?.planId || subscription?.planId || 'DEFAULT',
+      period: '1M',
+      paymentMethod: method,
+      transactionId: reference,
+      reference,
+      phone,
+      status: 'PENDING'
+    });
+    setSubscription((prev: any) => ({ ...(prev || {}), status: 'PENDING' }));
+    setPaymentSuccess(true);
+    setTimeout(() => { setShowPaymentModal(false); setPaymentSuccess(false); }, 2200);
+  };
 
   const processSubscriptionPayment = async () => {
     setIsProcessingPayment(true);
@@ -961,7 +990,7 @@ const Dashboard: React.FC<{
                   Historique réel + Projections IA
                 </p>
                 <div className="h-48">
-                  <ResponsiveContainer width="100%" height="100%">
+                  <ResponsiveContainer width="100%" height="100%" initialDimension={{ width: 1, height: 1 }}>
                     <ComposedChart data={combinedChart}>
                       <defs>
                         <linearGradient id="gradReal" x1="0" y1="0" x2="0" y2="1">
@@ -1080,7 +1109,7 @@ const Dashboard: React.FC<{
         )}
 
         {/* ALERTE ABONNEMENT */}
-        {subAlert && subAlert.isCritical && (
+        {subAlert && (subAlert.isCritical || subAlert.isExpired) && (
           <div className={`p-5 md:p-7 rounded-2xl border-2 flex flex-col md:flex-row items-center justify-between gap-4 shadow-xl ${subAlert.isExpired ? 'bg-rose-50 border-rose-200' : 'bg-amber-50 border-amber-200'}`}>
             <div className="flex items-center gap-4">
               <div className={`w-12 h-12 rounded-2xl flex items-center justify-center shadow ${subAlert.isExpired ? 'bg-rose-600 text-white' : 'bg-amber-500 text-white'}`}>
@@ -1095,7 +1124,7 @@ const Dashboard: React.FC<{
                 </p>
               </div>
             </div>
-            <button onClick={() => setShowPaymentModal(true)}
+            <button onClick={() => (onRegularize ? onRegularize() : setShowPaymentModal(true))}
               className={`px-6 py-3 rounded-2xl font-black text-[10px] uppercase tracking-widest flex items-center gap-2 shadow-lg ${subAlert.isExpired ? 'bg-rose-600 text-white hover:bg-black' : 'bg-amber-600 text-white hover:bg-amber-700'} transition-all`}>
               <CreditCard size={14}/> Régulariser
             </button>
@@ -1140,7 +1169,7 @@ const Dashboard: React.FC<{
               </div>
             ) : (
               <div className="h-64">
-                <ResponsiveContainer width="100%" height="100%">
+                <ResponsiveContainer width="100%" height="100%" initialDimension={{ width: 1, height: 1 }}>
                   <ComposedChart data={revenueChartData} margin={{ top: 4, right: 4, left: 4, bottom: 4 }}>
                     <defs>
                       <linearGradient id="gradRevenue" x1="0" y1="0" x2="0" y2="1">
@@ -1172,7 +1201,7 @@ const Dashboard: React.FC<{
             <SectionHeader icon={Scale} title="Recouvrement" color="text-emerald-600"/>
             <div className="flex-1 flex flex-col items-center justify-center gap-4">
               <div className="relative h-40 w-full">
-                <ResponsiveContainer width="100%" height="100%">
+                <ResponsiveContainer width="100%" height="100%" initialDimension={{ width: 1, height: 1 }}>
                   <PieChart>
                     <Pie data={salesStats.recoveryData} dataKey="value" innerRadius={48} outerRadius={68} paddingAngle={3} startAngle={90} endAngle={-270}>
                       {salesStats.recoveryData.map((entry: any, i: number) => (
@@ -1505,8 +1534,8 @@ const Dashboard: React.FC<{
 
         {/* PAYMENT MODAL */}
         {showPaymentModal && (
-          <div className="fixed inset-0 z-[900] flex items-center justify-center p-6 bg-slate-950/90 backdrop-blur-xl">
-            <div className="w-full max-w-xl bg-white rounded-[2rem] shadow-2xl overflow-hidden">
+          <div className="fixed inset-0 z-[900] flex items-center justify-center p-3 md:p-6 bg-slate-950/90 backdrop-blur-xl">
+            <div className="w-full max-w-xl bg-white rounded-[2rem] shadow-2xl overflow-hidden max-h-[92vh] overflow-y-auto">
               <div className="px-6 py-4 bg-slate-900 text-white flex justify-between items-center">
                 <h3 className="text-sm font-black uppercase">Paiement Wave</h3>
                 <button onClick={() => setShowPaymentModal(false)} className="p-1.5 hover:bg-white/10 rounded-xl transition-all">
@@ -1521,28 +1550,12 @@ const Dashboard: React.FC<{
                     <p className="text-xs text-slate-500">En attente de validation.</p>
                   </div>
                 ) : (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-5 items-center">
-                    <div className="flex flex-col items-center gap-3">
-                      <img src={waveQr} alt="Wave QR" className="w-48 h-48 object-contain rounded-xl shadow border"/>
-                      <p className="text-[9px] text-slate-500 text-center">Scannez avec l'app Wave puis saisissez la référence.</p>
-                    </div>
-                    <div className="space-y-3">
-                      <div>
-                        <label className="text-[9px] font-black uppercase text-slate-400">Téléphone (optionnel)</label>
-                        <input value={phoneNumber} onChange={e => setPhoneNumber(e.target.value)} placeholder="22177xxxxxxx" className="w-full mt-1 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-xs outline-none"/>
-                      </div>
-                      <div>
-                        <label className="text-[9px] font-black uppercase text-slate-400">Référence Transaction</label>
-                        <input value={txReference} onChange={e => setTxReference(e.target.value)} placeholder="Référence Wave" className="w-full mt-1 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-xs outline-none"/>
-                      </div>
-                      <div className="flex gap-2 pt-2">
-                        <button onClick={() => setShowPaymentModal(false)} className="flex-1 py-2.5 rounded-xl border border-slate-200 font-black uppercase text-xs">Annuler</button>
-                        <button disabled={isProcessingPayment} onClick={processSubscriptionPayment} className="flex-1 py-2.5 rounded-xl bg-emerald-600 text-white font-black uppercase text-xs disabled:opacity-50">
-                          {isProcessingPayment ? '...' : 'Enregistrer'}
-                        </button>
-                      </div>
-                    </div>
-                  </div>
+                  <MerchantPaymentPanel
+                    amount={getMonthlyPrice(legacyPlan)}
+                    planName={legacyPlan?.name}
+                    periodLabel="1 Mois"
+                    onManualSubmit={submitLegacyManualPayment}
+                  />
                 )}
               </div>
             </div>
@@ -1570,7 +1583,7 @@ const Dashboard: React.FC<{
         <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
           <SectionHeader icon={Scale} title="Encaissements vs Impayés" color="text-indigo-600"/>
           <div className="h-52 flex items-center justify-center">
-            <ResponsiveContainer width="100%" height="100%">
+            <ResponsiveContainer width="100%" height="100%" initialDimension={{ width: 1, height: 1 }}>
               <PieChart>
                 <Pie data={salesStats.recoveryData} dataKey="value" innerRadius={50} outerRadius={80} paddingAngle={4}>
                   {salesStats.recoveryData.map((entry: any, i: number) => <Cell key={i} fill={entry.color}/>)}

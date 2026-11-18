@@ -8,6 +8,7 @@ import { Op } from 'sequelize';
 import bcrypt from 'bcrypt';
 import crypto from 'crypto';
 import { StripeService } from '../services/StripeService.js';
+import { WaveService } from '../services/WaveService.js';
 import { MailNotificationService } from '../services/MailNotificationService.js';
 
 // ── Emails et domaines bloqués (spam / abus avérés) ──────────────────────────
@@ -490,13 +491,22 @@ static async login(req, res) {
       const { paymentInfo } = req.body;
       let pendingPayment = null;
       if (paymentInfo && planId !== 'FREE_TRIAL') {
+        // L'instance reste inactive (isActive=false, paymentStatus=PENDING) tant que
+        // le SuperAdmin n'a pas confirmé la référence : saisir « W-123 » ne donne
+        // accès à rien. Le montant est recalculé côté serveur pour que l'admin
+        // compare la référence au vrai prix, pas à un montant envoyé par le client.
+        const regPlan = await Plan.findByPk(planId, { transaction });
+        const serverAmount = regPlan ? WaveService.computePrice(regPlan, period || '1M') : null;
+        const reference = String(paymentInfo.reference || '').trim().slice(0, 120);
+        const ALLOWED_METHODS = ['WAVE', 'ORANGE', 'FREE', 'MTN'];
+        const method = String(paymentInfo.method || 'WAVE').toUpperCase();
         pendingPayment = await Payment.create({
           tenantId: tenant.id,
           saleId: null,
-          amount: Number(paymentInfo.amount) || 0,
-          method: paymentInfo.method || 'WAVE',
-          reference: paymentInfo.reference || `REG-${Date.now()}`,
-          transactionId: paymentInfo.reference || null,
+          amount: serverAmount ?? (Number(paymentInfo.amount) || 0),
+          method: ALLOWED_METHODS.includes(method) ? method : 'WAVE',
+          reference: reference || `REG-${Date.now()}`,
+          transactionId: reference || null,
           status: 'PENDING',
           paymentDate: new Date(),
         }, { transaction });

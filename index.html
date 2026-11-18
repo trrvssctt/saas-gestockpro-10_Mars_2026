@@ -5,7 +5,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>GeStockPro - ERP AI-Native</title>
-    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Tailwind : compilé dans le build Vite (index.css), plus de Play CDN en production -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Poppins:wght@300;400;600;700&family=Montserrat:wght@400;600&family=Lora:wght@400;700&display=swap" rel="stylesheet">
@@ -33,7 +33,7 @@
         ::-webkit-scrollbar-thumb:hover { background: #cbd5e1; }
     </style>
 <!-- importmap removed for production builds to avoid runtime module conflicts -->
-<link rel="stylesheet" href="/index.css">
+<!-- index.css est importé par index.tsx (évite de charger Tailwind deux fois) -->
 </head>
 <body class="bg-slate-50 text-slate-900">
     <div id="root"></div>

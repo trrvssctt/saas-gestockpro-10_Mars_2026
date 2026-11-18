@@ -150,7 +150,8 @@ const App: React.FC = () => {
   const [activationPending, setActivationPending] = useState(false);
   const [initialLoginOptions, setInitialLoginOptions] = useState<{ mode?: string; planId?: string; regStep?: number; period?: string; wavePending?: boolean } | null>(null);
   // Upgrade de plan depuis Subscription.tsx → Checkout.tsx
-  const [upgradeContext, setUpgradeContext] = useState<{ planObj: SubscriptionPlan } | null>(null);
+  // mode RENEW : « Payer ce mois » / « Régulariser » ouvrent le même écran que « Souscrire »
+  const [upgradeContext, setUpgradeContext] = useState<{ planObj: SubscriptionPlan; mode?: 'UPGRADE' | 'RENEW' } | null>(null);
 
   // Tour de démarrage — affiché à la première connexion
   const [showTour, setShowTour] = useState(false);
@@ -341,6 +342,26 @@ const App: React.FC = () => {
     setActiveTab('dashboard');
   };
 
+  /** Ouvre l'écran de paiement unique pour renouveler le plan courant. */
+  const openRenewal = async () => {
+    try {
+      const [subInfo, plans]: [any, SubscriptionPlan[]] = await Promise.all([
+        apiClient.get('/billing/my-subscription'),
+        apiClient.get('/plans'),
+      ]);
+      const pid = subInfo?.subscription?.planId || (currentUser as any)?.planId;
+      const planObj = Array.isArray(plans) ? plans.find(p => p.id === pid) : undefined;
+      if (!planObj || pid === 'FREE_TRIAL') {
+        // Essai gratuit / plan inconnu : choisir une formule
+        setActiveTab('subscription');
+        return;
+      }
+      setUpgradeContext({ planObj, mode: 'RENEW' });
+    } catch {
+      setActiveTab('subscription');
+    }
+  };
+
   const handleContextualNavigate = (tab: string, meta?: any) => {
     if (currentUser && authBridge.canAccess(currentUser, tab)) {
       setNavigationMetadata(meta);
@@ -465,7 +486,8 @@ const App: React.FC = () => {
     planId={upgradeContext.planObj.id}
     user={currentUser}
     planObj={upgradeContext.planObj}
-    isUpgrade={true}
+    isUpgrade={upgradeContext.mode !== 'RENEW'}
+    mode={upgradeContext.mode === 'RENEW' ? 'RENEW' : 'UPGRADE'}
     onSuccess={() => {
       setUpgradeContext(null);
       setActiveTab('subscription');
@@ -629,7 +651,7 @@ const App: React.FC = () => {
 
     // Quand l'abonnement est expiré, bloquer tout sauf dashboard et subscription
     if (isTenantExpired && isAdminUser && !EXPIRED_ALLOWED_TABS.includes(activeTab) && activeTab !== 'superadmin') {
-      return <Dashboard user={currentUser} currency={appSettings.currency} onNavigate={handleContextualNavigate} />;
+      return <Dashboard user={currentUser} currency={appSettings.currency} onNavigate={handleContextualNavigate} onRegularize={openRenewal} />;
     }
 
     // Normalize module check for RH subpages (rh.employees -> rh)
@@ -695,7 +717,7 @@ const App: React.FC = () => {
 
     switch (activeTab) {
       case 'superadmin': return <SuperAdmin />;
-      case 'dashboard': return <Dashboard user={currentUser} currency={appSettings.currency} onNavigate={handleContextualNavigate} />;
+      case 'dashboard': return <Dashboard user={currentUser} currency={appSettings.currency} onNavigate={handleContextualNavigate} onRegularize={openRenewal} />;
       case 'ai_analysis': return <AIAnalysis user={currentUser} />;
       case 'categories': return <CategoryManager plan={currentPlan} />;
       case 'subcategories': return <SubcategoryManager plan={currentPlan} />;
@@ -743,13 +765,13 @@ const App: React.FC = () => {
         return <EmployeePointage onNavigate={handleContextualNavigate} />;
       }
       case 'governance': return <Governance tenantId={currentUser.tenantId} plan={currentPlan} />;
-      case 'subscription': return <Subscription user={currentUser} currency={appSettings.currency} onUpgrade={(plan) => setUpgradeContext({ planObj: plan })} onLogout={handleLogout} />;
+      case 'subscription': return <Subscription user={currentUser} currency={appSettings.currency} onUpgrade={(plan) => setUpgradeContext({ planObj: plan, mode: 'UPGRADE' })} onPayCurrent={openRenewal} onLogout={handleLogout} />;
       case 'info': return <Info user={currentUser} />;
       case 'support': return <Support user={currentUser} />;
       case 'security': return <SecurityPanel />;
       case 'audit': return <AuditLogs tenantSettings={appSettings} />;
       case 'settings': return <Settings settings={appSettings} onSave={setAppSettings} onLogout={handleLogout} />;
-      default: return <Dashboard user={currentUser} currency={appSettings.currency} onNavigate={handleContextualNavigate} />;
+      default: return <Dashboard user={currentUser} currency={appSettings.currency} onNavigate={handleContextualNavigate} onRegularize={openRenewal} />;
     }
   };
 

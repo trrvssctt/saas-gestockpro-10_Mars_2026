@@ -29,6 +29,14 @@ export class PaymentController {
           try { payload = JSON.parse(payload.toString()); } catch (e) { }
         }
         ({ provider, status, tenantId, amount, transactionId, planId } = payload || {});
+        // Route publique et NON signée : n'importe qui peut l'appeler avec un
+        // tenantId. Elle ne doit donc jamais activer un abonnement — seul un
+        // événement Stripe signé (ci-dessus), le webhook Wave signé ou la
+        // validation SuperAdmin le peuvent. Toute demande devient PENDING.
+        if (status && status !== 'PENDING') {
+          console.warn(`[payments/callback] statut "${status}" non signé ramené à PENDING (tenant ${tenantId})`);
+        }
+        status = 'PENDING';
         // Extraire la période pour calculer correctement nextBillingDate
         period = payload?.period || payload?.billingPeriod || '1M';
       }

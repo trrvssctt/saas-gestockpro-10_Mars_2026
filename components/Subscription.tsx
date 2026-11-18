@@ -14,46 +14,19 @@ import { apiClient } from '../services/api';
 import DocumentPreview from './DocumentPreview';
 import { useToast } from './ToastProvider';
 import waveLogo from '../assets/wave_logo.png';
-
-// ─── Grille tarifaire avec remises ─────────────────────────────────────────
-type BillingPeriod = '1M' | '3M' | '1Y';
-
-interface PeriodOption {
-  id: BillingPeriod;
-  label: string;
-  months: number;
-  discountPct: number; // % de réduction vs mensuel
-}
-
-const PERIOD_OPTIONS: PeriodOption[] = [
-  { id: '1M', label: '1 Mois',  months: 1,  discountPct: 0  },
-  { id: '3M', label: '3 Mois',  months: 3,  discountPct: 15 },
-  { id: '1Y', label: '1 An',    months: 12, discountPct: 30 },
-];
-
-function getPeriodPrice(plan: SubscriptionPlan, period: BillingPeriod): number {
-  if (period === '3M' && plan.priceThreeMonths != null) return plan.priceThreeMonths;
-  if (period === '1Y' && plan.priceYearly != null) return plan.priceYearly;
-  // fallback: calcul avec remise si prix DB absent
-  const base = plan.priceMonthly ?? plan.price ?? 0;
-  const opt = PERIOD_OPTIONS.find(p => p.id === period)!;
-  return Math.round(base * opt.months * (1 - opt.discountPct / 100));
-}
-
-function getSavings(plan: SubscriptionPlan, period: BillingPeriod): number {
-  const base = plan.priceMonthly ?? plan.price ?? 0;
-  const opt = PERIOD_OPTIONS.find(p => p.id === period)!;
-  return Math.round(base * opt.months) - getPeriodPrice(plan, period);
-}
+// Grille tarifaire (-15 % / -30 %) et formats : source unique partagée
+import { PERIOD_OPTIONS, BillingPeriod, getPeriodPrice, getSavings, getMonthlyPrice, formatAmount } from '../utils/pricing';
 
 interface SubscriptionProps {
   user: User;
   currency: string;
   onUpgrade?: (plan: SubscriptionPlan) => void;
+  /** Ouvre l'écran de paiement unique pour le plan courant (« Payer ce mois »). */
+  onPayCurrent?: () => void;
   onLogout?: () => void;
 }
 
-const Subscription: React.FC<SubscriptionProps> = ({ user, currency, onUpgrade, onLogout }) => {
+const Subscription: React.FC<SubscriptionProps> = ({ user, currency, onUpgrade, onPayCurrent, onLogout }) => {
   const showToast = useToast();
   const [subscriptionData, setSubscriptionData] = useState<any>(null);
   const [availablePlans, setAvailablePlans] = useState<SubscriptionPlan[]>([]);
@@ -217,18 +190,18 @@ const Subscription: React.FC<SubscriptionProps> = ({ user, currency, onUpgrade, 
                 <div className="mb-8 mt-2">
                   <h3 className="text-[11px] font-black text-slate-400 uppercase tracking-widest mb-4">{plan.name}</h3>
                   <div className="flex items-baseline gap-1">
-                    <span className="text-4xl font-black text-slate-900 tracking-tighter">{periodPrice.toLocaleString()}</span>
+                    <span className="text-4xl font-black text-slate-900 tracking-tighter">{formatAmount(periodPrice)}</span>
                     <span className="text-slate-400 font-bold uppercase text-[10px]">{currency}</span>
                   </div>
                   <div className="mt-1 space-y-0.5">
                     {selectedDuration !== '1M' && (
                       <p className="text-[9px] text-slate-400 font-bold uppercase tracking-widest line-through">
-                        {(plan.price * periodOpt.months).toLocaleString()} {currency}
+                        {formatAmount(getMonthlyPrice(plan) * periodOpt.months)} {currency}
                       </p>
                     )}
                     <p className="text-[9px] text-slate-500 font-bold uppercase tracking-widest">
                       {selectedDuration === '1M' ? '/ mois' : selectedDuration === '3M' ? '/ 3 mois' : '/ an'}
-                      {savings > 0 && <span className="text-emerald-600 ml-2">— Économisez {savings.toLocaleString()} {currency}</span>}
+                      {savings > 0 && <span className="text-emerald-600 ml-2">— Économisez {formatAmount(savings)} {currency}</span>}
                     </p>
                   </div>
                 </div>
@@ -253,7 +226,7 @@ const Subscription: React.FC<SubscriptionProps> = ({ user, currency, onUpgrade, 
                   disabled={!isAdmin}
                   className="w-full py-5 bg-slate-900 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-indigo-600 transition-all shadow-xl active:scale-95 disabled:opacity-50"
                 >
-                  SOUSCRIRE — {periodPrice.toLocaleString()} {currency}
+                  SOUSCRIRE — {formatAmount(periodPrice)} {currency}
                 </button>
               </div>
             );
@@ -390,6 +363,11 @@ const Subscription: React.FC<SubscriptionProps> = ({ user, currency, onUpgrade, 
       showToast('Un paiement est déjà en attente de validation. Veuillez patienter.', 'error');
       return;
     }
+    if (onPayCurrent) {
+      // Même écran que « Souscrire » : montant, code marchand, bouton Wave, QR
+      onPayCurrent();
+      return;
+    }
     setPaymentMethod(null);
     setOperator(null);
     setTxReference('');
@@ -505,7 +483,7 @@ const Subscription: React.FC<SubscriptionProps> = ({ user, currency, onUpgrade, 
                     </div>
                   ) : (
                     <button onClick={handlePayCurrentClick} className="px-4 py-2 bg-emerald-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-emerald-700 transition-all">
-                      PAYER CE MOIS — {currentPlan?.price?.toLocaleString()} {currency}
+                      PAYER CE MOIS — {formatAmount(getMonthlyPrice(currentPlan))} {currency}
                     </button>
                   )}
                 </div>
@@ -584,7 +562,7 @@ const Subscription: React.FC<SubscriptionProps> = ({ user, currency, onUpgrade, 
                                <span className="px-3 py-1 bg-slate-100 border border-slate-200 rounded-lg text-[8px] font-black uppercase tracking-widest text-slate-600">{p.method}</span>
                             </td>
                         <td className="px-10 py-6 text-right font-black text-slate-900">
-                           {Number(p.amount).toLocaleString()} {currency}
+                           {formatAmount(p.amount)} {currency}
                         </td>
                         <td className="px-10 py-6 text-right">
                           {p.status === 'PENDING' ? (
@@ -798,10 +776,10 @@ const Subscription: React.FC<SubscriptionProps> = ({ user, currency, onUpgrade, 
                       <div className="p-4 md:p-6 bg-indigo-50 border border-indigo-100 rounded-[2rem] flex justify-between items-center">
                         <div>
                           <p className="text-[9px] font-black text-indigo-400 uppercase tracking-widest mb-1">{selectedPlan?.name} — {periodOpt.label}</p>
-                          {savings > 0 && <p className="text-[9px] text-emerald-600 font-black uppercase">Économie : {savings.toLocaleString()} {currency}</p>}
+                          {savings > 0 && <p className="text-[9px] text-emerald-600 font-black uppercase">Économie : {formatAmount(savings)} {currency}</p>}
                         </div>
                         <div className="text-right">
-                          <span className="text-xl md:text-3xl font-black text-indigo-600">{periodPrice.toLocaleString()}</span>
+                          <span className="text-xl md:text-3xl font-black text-indigo-600">{formatAmount(periodPrice)}</span>
                           <span className="text-sm font-black text-indigo-400 ml-2">{currency}</span>
                         </div>
                       </div>
@@ -867,7 +845,7 @@ const Subscription: React.FC<SubscriptionProps> = ({ user, currency, onUpgrade, 
                                 className="w-full py-4 bg-cyan-500 hover:bg-cyan-600 text-white rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl flex items-center justify-center gap-3 disabled:opacity-50 transition-all">
                                 {isWaveOnlineLoading
                                   ? <><Loader2 size={18} className="animate-spin" /> Connexion Wave...</>
-                                  : <><CheckCircle size={18} /> Payer {selectedPlan ? getPeriodPrice(selectedPlan, selectedDuration).toLocaleString('fr-FR') : ''} F CFA</>
+                                  : <><CheckCircle size={18} /> Payer {selectedPlan ? formatAmount(getPeriodPrice(selectedPlan, selectedDuration)) : ''} F CFA</>
                                 }
                               </button>
                             </div>
@@ -935,13 +913,13 @@ const Subscription: React.FC<SubscriptionProps> = ({ user, currency, onUpgrade, 
                     </div>
                     <div className="text-right">
                       <p className="text-[9px] font-black text-indigo-400 uppercase tracking-widest mb-1">Montant à payer</p>
-                      <p className="text-xl md:text-3xl font-black text-indigo-600">{currentPlan?.price?.toLocaleString()} {currency}</p>
+                      <p className="text-xl md:text-3xl font-black text-indigo-600">{formatAmount(getMonthlyPrice(currentPlan))} {currency}</p>
                     </div>
                   </div>
 
                   <div className="flex gap-4">
                     <button onClick={() => setShowPayCurrentModal(false)} className="flex-1 py-4 border-2 border-slate-100 text-slate-400 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-slate-50 transition-all">ANNULER</button>
-                    <button onClick={processPayNow} disabled={isProcessing} className="flex-1 py-4 bg-cyan-500 hover:bg-cyan-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all flex items-center justify-center gap-2 disabled:opacity-50">{isProcessing ? <><Loader2 size={16} className="animate-spin" /> CONNEXION WAVE...</> : `PAYER ${currentPlan?.price?.toLocaleString()} ${currency} AVEC WAVE`}</button>
+                    <button onClick={processPayNow} disabled={isProcessing} className="flex-1 py-4 bg-cyan-500 hover:bg-cyan-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all flex items-center justify-center gap-2 disabled:opacity-50">{isProcessing ? <><Loader2 size={16} className="animate-spin" /> CONNEXION WAVE...</> : `PAYER ${formatAmount(getMonthlyPrice(currentPlan))} ${currency} AVEC WAVE`}</button>
                   </div>
                 </div>
               </div>

@@ -4,6 +4,7 @@ import { sequelize } from '../config/database.js';
 import { StripeService } from '../services/StripeService.js';
 import { WaveService, PERIOD_MONTHS } from '../services/WaveService.js';
 import { MailNotificationService } from '../services/MailNotificationService.js';
+import { MerchantPaymentService } from '../services/MerchantPaymentService.js';
 import crypto from 'crypto';
 
 export class SubscriptionController {
@@ -117,6 +118,23 @@ export class SubscriptionController {
   }
 
   /**
+   * Informations de paiement marchand (code, bénéficiaire, lien, QR généré).
+   * GET /api/billing/merchant-info?amount=19900   (public : utilisé aussi à l'inscription)
+   */
+  static async getMerchantInfo(req, res) {
+    try {
+      const amount = Number(req.query.amount);
+      const info = await MerchantPaymentService.getMerchantInfo({
+        amount: Number.isFinite(amount) && amount > 0 && amount < 100000000 ? amount : undefined,
+      });
+      res.set('Cache-Control', 'no-store');
+      return res.status(200).json(info);
+    } catch (error) {
+      return res.status(500).json({ error: 'MerchantInfoError', message: error.message });
+    }
+  }
+
+  /**
    * Récupère tous les plans actifs
    */
   static async listPlans(req, res) {
@@ -196,11 +214,18 @@ export class SubscriptionController {
         paymentStatus: 'PENDING',
         pendingPlanId: planId,           // plan cible de l'upgrade
         pendingPeriod: period || '1M',   // période sélectionnée (1M, 3M, 1Y)
-        subscriptionEndsAt: nextBilling, // date de fin prévisionnelle
+        // subscriptionEndsAt n'est PAS modifié ici : la validation SuperAdmin
+        // prolonge depuis max(maintenant, subscriptionEndsAt). L'avancer dès la
+        // demande comptait la période deux fois, et la gardait si le paiement
+        // était rejeté.
       }, { transaction });
 
-      // Enregistrer le paiement avec le VRAI montant (total période avec remise)
-      const paidAmount = Number(amount) > 0 ? Number(amount) : Number(plan.priceMonthly || 0) * months;
+      // Montant attendu recalculé côté serveur (même grille que Wave Checkout) :
+      // le montant envoyé par le client n'est qu'un repli si le plan n'a pas de prix.
+      const serverAmount = WaveService.computePrice(plan, period || '1M');
+      const paidAmount = serverAmount != null && serverAmount > 0
+        ? serverAmount
+        : (Number(amount) > 0 ? Number(amount) : Number(plan.priceMonthly || 0) * months);
       const payRef = reference || transactionId || `UPGRADE-${planId}-${Date.now()}`;
 
       await Payment.create({

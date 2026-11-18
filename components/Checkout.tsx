@@ -4,11 +4,16 @@
  *
  * Fonctionnalités :
  *  - Durées 1M / 3M (-15%) / 1Y (-30%) avec affichage des économies
- *  - Mobile Money : Wave (paiement direct via Wave Checkout API), Orange Money, MTN
- *  - Carte Bancaire : Stripe Checkout Session (redirection sécurisée)
+ *  - Mobile Money : écran unique MerchantPaymentPanel (montant, code marchand,
+ *    bénéficiaire, bouton « Payer avec Wave », QR, référence en secours).
+ *    Les opérateurs proposés sont ceux configurés côté backend.
+ *  - Carte Bancaire : Stripe Checkout Session (redirection sécurisée) — masqué
+ *
+ * Modes : ACTIVATION (après inscription), UPGRADE (« Souscrire »),
+ * RENEW (« Payer ce mois » / « Régulariser »). Les trois passent par ici.
  */
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   /* CreditCard, */ Smartphone, Check, ArrowLeft,
   Loader2, ShieldCheck, Zap, QrCode,
@@ -18,13 +23,12 @@ import { SUBSCRIPTION_PLANS } from '../constants';
 import { SubscriptionPlan } from '../types';
 import { apiClient } from '../services/api';
 import { useToast } from './ToastProvider';
+import MerchantPaymentPanel, { ManualPaymentInput } from './payment/MerchantPaymentPanel';
+import { PERIOD_OPTIONS, getPeriodPrice, getSavings, formatAmount } from '../utils/pricing';
 
 /* ─── Constantes ──────────────────────────────────────────────── */
-const PERIOD_OPTIONS = [
-  { id: '1M', label: '1 Mois',  months: 1,  discountPct: 0  },
-  { id: '3M', label: '3 Mois',  months: 3,  discountPct: 15 },
-  { id: '1Y', label: '1 An',    months: 12, discountPct: 30 },
-];
+// Les opérateurs réellement proposés viennent de GET /billing/merchant-info.
+// Cette liste ne sert plus qu'aux libellés de l'écran d'attente.
 
 const OPERATORS = [
   { id: 'WAVE',   label: 'Wave',         color: 'bg-cyan-500',   ring: 'ring-cyan-400',   text: 'text-cyan-700',   bg: 'bg-cyan-50'   },
@@ -32,23 +36,7 @@ const OPERATORS = [
   { id: 'MTN',    label: 'MTN MoMo',     color: 'bg-yellow-400', ring: 'ring-yellow-400', text: 'text-yellow-700', bg: 'bg-yellow-50' },
 ];
 
-function getPeriodPrice(plan: SubscriptionPlan, periodId: string): number {
-  if (periodId === '3M' && plan.priceThreeMonths != null) return plan.priceThreeMonths;
-  if (periodId === '1Y' && plan.priceYearly != null) return plan.priceYearly;
-  // fallback: calcul avec remise si prix DB absent
-  const base = plan.priceMonthly ?? plan.price ?? 0;
-  const opt = PERIOD_OPTIONS.find(p => p.id === periodId);
-  if (!opt) return base;
-  return Math.round(base * opt.months * (1 - opt.discountPct / 100));
-}
-
-function getSavings(plan: SubscriptionPlan, periodId: string): number {
-  const base = plan.priceMonthly ?? plan.price ?? 0;
-  const total = getPeriodPrice(plan, periodId);
-  const opt = PERIOD_OPTIONS.find(p => p.id === periodId);
-  if (!opt || opt.discountPct === 0) return 0;
-  return Math.round(base * opt.months) - total;
-}
+// getPeriodPrice / getSavings : voir utils/pricing.ts (source unique -15 % / -30 %)
 
 /* ─── Props ───────────────────────────────────────────────────── */
 interface CheckoutProps {
@@ -56,21 +44,39 @@ interface CheckoutProps {
   user: any;
   planObj?: SubscriptionPlan;
   isUpgrade?: boolean;
+  /** RENEW : renouvellement du plan courant (« Payer ce mois », « Régulariser »). */
+  mode?: 'ACTIVATION' | 'UPGRADE' | 'RENEW';
   onSuccess: () => void;
   onCancel: () => void;
 }
 
 /* ════════════════════════════════════════════════════════════════ */
-const Checkout: React.FC<CheckoutProps> = ({ planId, user, planObj, isUpgrade = false, onSuccess, onCancel }) => {
+const Checkout: React.FC<CheckoutProps> = ({ planId, user, planObj, isUpgrade = false, mode, onSuccess, onCancel }) => {
   const showToast = useToast();
+  const checkoutMode = mode || (isUpgrade ? 'UPGRADE' : 'ACTIVATION');
+  const isRenew = checkoutMode === 'RENEW';
+  // Renouvellement et upgrade passent par la même demande /billing/upgrade
+  const usesUpgradeEndpoint = isUpgrade || isRenew;
 
-  /* Plan */
-  const plan = useMemo(() => planObj || SUBSCRIPTION_PLANS.find(p => p.id === planId) || SUBSCRIPTION_PLANS[0], [planObj, planId]);
+  /* Plan : prix du backend (source unique), repli sur le plan reçu puis les constantes */
+  const [serverPlans, setServerPlans] = useState<SubscriptionPlan[] | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    apiClient.get('/plans')
+      .then((data: SubscriptionPlan[]) => { if (!cancelled && Array.isArray(data)) setServerPlans(data); })
+      .catch(() => { /* repli silencieux */ });
+    return () => { cancelled = true; };
+  }, []);
+  const plan = useMemo(
+    () => serverPlans?.find(p => p.id === planId) || planObj || SUBSCRIPTION_PLANS.find(p => p.id === planId) || SUBSCRIPTION_PLANS[0],
+    [serverPlans, planObj, planId]
+  );
 
   /* États */
   const [selectedPeriod, setSelectedPeriod] = useState<string>('1M');
-  const [method, setMethod] = useState<'MOBILE' | 'CARD' | null>(null);
-  const [operator, setOperator] = useState<'WAVE' | 'ORANGE' | 'MTN'>('WAVE');
+  // Mobile Money présélectionné : une étape de moins sur téléphone
+  const [method, setMethod] = useState<'MOBILE' | 'CARD' | null>('MOBILE');
+  const [operator, setOperator] = useState<string>('WAVE');
   const [phoneNumber, setPhoneNumber] = useState('');
   const [status, setStatus] = useState<'IDLE' | 'WAITING' | 'SUCCESS' | 'ERROR'>('IDLE');
   const [isProcessing, setIsProcessing] = useState(false);
@@ -80,33 +86,41 @@ const Checkout: React.FC<CheckoutProps> = ({ planId, user, planObj, isUpgrade = 
   const totalPrice = useMemo(() => getPeriodPrice(plan, selectedPeriod), [plan, selectedPeriod]);
   const savings = useMemo(() => getSavings(plan, selectedPeriod), [plan, selectedPeriod]);
   const periodOpt = PERIOD_OPTIONS.find(p => p.id === selectedPeriod)!;
-  const operatorCfg = OPERATORS.find(o => o.id === operator)!;
+  const operatorLabel = OPERATORS.find(o => o.id === operator)?.label || operator;
 
   /* ─── Paiement Mobile Money ──────────────────────────────────── */
   // Wave passe exclusivement par la Checkout API : seuls Orange/MTN
   // empruntent encore la validation manuelle par numéro.
   const canSubmitMobile = phoneNumber.trim().length >= 8;
 
-  const handleMobilePayment = async () => {
+  /** Secours : référence saisie à la main → demande PENDING validée par un admin. */
+  const handleManualPayment = async ({ method: op, reference, phone }: ManualPaymentInput) => {
+    setOperator(op);
+    setPhoneNumber(phone || '');
+    await handleMobilePayment(reference, op, phone);
+  };
+
+  const handleMobilePayment = async (manualRef?: string, op: string = operator, phone: string = phoneNumber) => {
     setIsProcessing(true);
     setStatus('WAITING');
     try {
-      const ref = `MOB-${Date.now()}`;
-      if (isUpgrade) {
+      const ref = manualRef || `MOB-${Date.now()}`;
+      if (usesUpgradeEndpoint) {
         // Upgrade : crée une demande PENDING → validation par SuperAdmin
         await apiClient.post('/subscription/upgrade', {
           planId: plan.id,
           period: selectedPeriod,
           amount: totalPrice,
-          paymentMethod: operator,
+          paymentMethod: op,
           transactionId: ref,
           reference: ref,
-          phone: phoneNumber,
+          phone,
         });
+        sessionStorage.setItem('gsp_upgrade_pending', JSON.stringify({ planId: plan.id, planName: plan.name }));
       } else {
         // Activation initiale (post-inscription)
         await apiClient.post('/payments/callback', {
-          provider: operator,
+          provider: op,
           tenantId: user.tenantId,
           amount: totalPrice,
           status: 'PENDING',
@@ -115,11 +129,11 @@ const Checkout: React.FC<CheckoutProps> = ({ planId, user, planObj, isUpgrade = 
           period: selectedPeriod,
           months: periodOpt.months,
           discountPct: periodOpt.discountPct,
-          phone: phoneNumber,
+          phone,
         });
       }
       setStatus('SUCCESS');
-      setTimeout(onSuccess, isUpgrade ? 3500 : 2800);
+      setTimeout(onSuccess, usesUpgradeEndpoint ? 3500 : 2800);
     } catch (e: any) {
       setStatus('ERROR');
       showToast('Erreur lors de la validation du paiement. Réessayez.', 'error');
@@ -138,17 +152,17 @@ const Checkout: React.FC<CheckoutProps> = ({ planId, user, planObj, isUpgrade = 
         period: selectedPeriod,
       });
       if (res?.url) {
+        if (usesUpgradeEndpoint) {
+          sessionStorage.setItem('gsp_upgrade_pending', JSON.stringify({ planId: plan.id, planName: plan.name }));
+        }
         window.location.href = res.url;
       } else {
         throw new Error('URL Wave manquante.');
       }
     } catch (e: any) {
-      showToast(
-        e?.message || 'Le service de paiement Wave est momentanément indisponible. Réessayez dans quelques instants ou contactez le support.',
-        'error'
-      );
-    } finally {
       setIsWaveOnlineLoading(false);
+      // Remonté au panneau, qui propose alors le code marchand + la référence
+      throw new Error(e?.message || 'Le paiement Wave en ligne est momentanément indisponible.');
     }
   };
 
@@ -184,10 +198,12 @@ const Checkout: React.FC<CheckoutProps> = ({ planId, user, planObj, isUpgrade = 
           </div>
           <div>
             <h1 className="text-3xl font-black text-emerald-700 uppercase tracking-tighter">
-              {isUpgrade ? 'Demande Envoyée !' : 'Paiement Enregistré !'}
+              {usesUpgradeEndpoint ? 'Référence envoyée !' : 'Paiement enregistré !'}
             </h1>
             <p className="text-slate-500 text-sm mt-3 leading-relaxed">
-              {isUpgrade
+              {isRenew
+                ? `Votre référence de paiement pour le plan ${plan.name} a été transmise. Votre abonnement sera prolongé dès vérification par notre équipe.`
+                : isUpgrade
                 ? `Votre demande d'upgrade vers le plan ${plan.name} a été transmise. L'accès aux nouvelles fonctionnalités sera disponible dès validation par l'administrateur.`
                 : 'Votre demande a été transmise. Votre espace sera activé dès validation par notre équipe.'}
             </p>
@@ -212,7 +228,7 @@ const Checkout: React.FC<CheckoutProps> = ({ planId, user, planObj, isUpgrade = 
           <div>
             <h2 className="text-2xl font-black text-indigo-700 uppercase tracking-tight">Vérification en cours</h2>
             <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-2">
-              Validation du paiement {operator}...
+              Envoi de votre référence {operatorLabel}...
             </p>
           </div>
         </div>
@@ -244,11 +260,11 @@ const Checkout: React.FC<CheckoutProps> = ({ planId, user, planObj, isUpgrade = 
           <div className="relative z-10">
             <div className="flex items-center gap-2 mb-3">
               <Zap size={14} className="text-indigo-300" />
-              <span className="text-[9px] font-black text-indigo-300 uppercase tracking-widest">Activation Instance</span>
+              <span className="text-[9px] font-black text-indigo-300 uppercase tracking-widest">{isRenew ? 'Renouvellement' : isUpgrade ? 'Changement de formule' : 'Activation du compte'}</span>
             </div>
             <h2 className="text-3xl font-black text-white tracking-tighter mb-1">{plan?.name}</h2>
             <div className="flex items-baseline gap-2 mt-4">
-              <span className="text-4xl font-black text-white">{totalPrice.toLocaleString('fr-FR')}</span>
+              <span className="text-4xl font-black text-white">{formatAmount(totalPrice)}</span>
               <span className="text-indigo-300 font-bold text-sm">F CFA</span>
             </div>
             <p className="text-indigo-300 text-[10px] font-bold uppercase tracking-widest mt-1">
@@ -257,7 +273,7 @@ const Checkout: React.FC<CheckoutProps> = ({ planId, user, planObj, isUpgrade = 
             {savings > 0 && (
               <div className="mt-3 inline-flex items-center gap-1.5 bg-emerald-500/20 border border-emerald-400/30 text-emerald-300 px-3 py-1.5 rounded-xl">
                 <Star size={11} />
-                <span className="text-[10px] font-black uppercase">Économie : {savings.toLocaleString('fr-FR')} F CFA</span>
+                <span className="text-[10px] font-black uppercase">Économie : {formatAmount(savings)} F CFA</span>
               </div>
             )}
           </div>
@@ -287,7 +303,7 @@ const Checkout: React.FC<CheckoutProps> = ({ planId, user, planObj, isUpgrade = 
                       <div>
                         <p className="text-xs font-black">{opt.label}</p>
                         <p className={`text-[9px] font-bold ${selectedPeriod === opt.id ? 'text-indigo-500' : 'text-indigo-300'}`}>
-                          {price.toLocaleString('fr-FR')} F CFA
+                          {formatAmount(price)} F CFA
                         </p>
                       </div>
                     </div>
@@ -325,7 +341,7 @@ const Checkout: React.FC<CheckoutProps> = ({ planId, user, planObj, isUpgrade = 
         {/* ── Panneau droit : Méthode de paiement ── */}
         <div className="lg:col-span-3 p-8 flex flex-col gap-6">
           <div>
-            <h3 className="text-2xl font-black text-slate-900 tracking-tighter uppercase">Paiement Sécurisé</h3>
+            <h3 className="text-2xl font-black text-slate-900 tracking-tighter uppercase">{isRenew ? 'Payer mon abonnement' : 'Paiement sécurisé'}</h3>
             <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">
               Choisissez votre méthode de paiement
             </p>
@@ -347,8 +363,6 @@ const Checkout: React.FC<CheckoutProps> = ({ planId, user, planObj, isUpgrade = 
               </span>
               <div className="flex gap-1">
                 <span className="text-[8px] bg-cyan-100 text-cyan-600 px-1.5 py-0.5 rounded font-bold">Wave</span>
-                <span className="text-[8px] bg-orange-100 text-orange-600 px-1.5 py-0.5 rounded font-bold">Orange</span>
-                <span className="text-[8px] bg-yellow-100 text-yellow-600 px-1.5 py-0.5 rounded font-bold">MTN</span>
               </div>
             </button>
             {/* Bouton Carte Bancaire (Stripe) — temporairement masqué
@@ -369,122 +383,16 @@ const Checkout: React.FC<CheckoutProps> = ({ planId, user, planObj, isUpgrade = 
             */}
           </div>
 
-          {/* ── Mobile Money ── */}
+          {/* ── Mobile Money : écran de paiement unique ── */}
           {method === 'MOBILE' && (
-            <div className="space-y-5 animate-in fade-in duration-300">
-              {/* Opérateur tabs */}
-              <div>
-                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-3">Opérateur</p>
-                <div className="flex gap-2">
-                  {OPERATORS.map(op => (
-                    <button
-                      key={op.id}
-                      onClick={() => { setOperator(op.id as any); setPhoneNumber(''); }}
-                      className={`flex-1 py-2.5 px-3 rounded-2xl border-2 text-[10px] font-black uppercase tracking-widest transition-all ${
-                        operator === op.id
-                          ? `${op.bg} border-current ${op.text} shadow-inner`
-                          : 'border-slate-200 text-slate-400 hover:border-slate-300'
-                      }`}
-                    >
-                      {op.label.split(' ')[0]}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* ── Wave : paiement direct via la Checkout API ── */}
-              {operator === 'WAVE' && (
-                <div className="space-y-4 animate-in fade-in duration-200">
-                  <div className={`rounded-3xl p-6 ${operatorCfg.bg} border border-cyan-100 space-y-4`}>
-                    <div className="flex items-center gap-3">
-                      <div className="w-12 h-12 bg-cyan-500 rounded-2xl flex items-center justify-center shadow-lg">
-                        <QrCode size={24} className="text-white" />
-                      </div>
-                      <div>
-                        <p className="text-sm font-black text-cyan-900">Paiement Wave en ligne</p>
-                        <p className="text-[9px] text-cyan-600 font-bold">Redirection sécurisée vers Wave</p>
-                      </div>
-                    </div>
-                    <div className="bg-white/80 rounded-2xl p-4 space-y-1">
-                      <p className="text-[9px] font-black text-cyan-800 uppercase tracking-widest">Montant à payer</p>
-                      <p className="text-2xl font-black text-cyan-900">{totalPrice.toLocaleString('fr-FR')} F CFA</p>
-                      <p className="text-[9px] text-cyan-600 font-bold">{plan?.name} — {periodOpt.label}</p>
-                    </div>
-                    <div className="space-y-1.5">
-                      {['Paiement sécurisé via Wave', 'Activation automatique du compte', 'Aucune saisie manuelle requise'].map(t => (
-                        <div key={t} className="flex items-center gap-2">
-                          <CheckCircle2 size={12} className="text-cyan-500 flex-shrink-0" />
-                          <span className="text-[9px] text-cyan-700 font-bold">{t}</span>
-                        </div>
-                      ))}
-                    </div>
-                    <button
-                      onClick={handleWaveOnlineCheckout}
-                      disabled={isWaveOnlineLoading}
-                      className="w-full py-4 bg-cyan-500 hover:bg-cyan-600 text-white rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl flex items-center justify-center gap-3 disabled:opacity-50 transition-all"
-                    >
-                      {isWaveOnlineLoading
-                        ? <><Loader2 size={18} className="animate-spin" /> Connexion Wave...</>
-                        : <><CheckCircle2 size={18} /> Payer {totalPrice.toLocaleString('fr-FR')} F CFA avec Wave</>
-                      }
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {/* ── Orange / MTN : numéro de téléphone ── 
-              /*{(operator === 'ORANGE' || operator === 'MTN') && (
-                <div className="space-y-4 animate-in fade-in duration-200">
-                  <div className={`rounded-3xl p-5 ${operatorCfg.bg} border ${operator === 'ORANGE' ? 'border-orange-100' : 'border-yellow-100'}`}>
-                    <div className="flex items-center gap-3 mb-3">
-                      <div className={`w-10 h-10 ${operatorCfg.color} rounded-2xl flex items-center justify-center`}>
-                        <Phone size={18} className="text-white" />
-                      </div>
-                      <div>
-                        <p className={`text-xs font-black ${operatorCfg.text}`}>{operatorCfg.label}</p>
-                        <p className="text-[9px] text-slate-500 font-bold">Paiement via votre numéro mobile</p>
-                      </div>
-                    </div>
-                    <div className={`rounded-2xl bg-white/70 p-3 text-xs font-bold ${operatorCfg.text}`}>
-                      Montant : <span className="font-black">{totalPrice.toLocaleString('fr-FR')} F CFA</span>
-                    </div>
-                  </div>
-                  <div>
-                    <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-1.5">
-                      Numéro de téléphone *
-                    </label>
-                    <input
-                      type="tel"
-                      value={phoneNumber}
-                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => setPhoneNumber(e.target.value)}
-                      placeholder="Ex: 77 123 45 67"
-                      className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-5 py-4 text-sm font-black outline-none focus:ring-4 focus:ring-orange-500/10 focus:border-orange-400"
-                    />
-                    <p className="text-[9px] text-slate-400 mt-1.5 font-medium">
-                      Une demande de paiement sera envoyée à ce numéro.
-                    </p>
-                  </div>
-                </div>
-              )}
-                */}
-
-              {/* Bouton validation Mobile — Orange/MTN uniquement (Wave est 100% API) */}
-              {operator !== 'WAVE' && (
-                <button
-                  onClick={handleMobilePayment}
-                  disabled={!canSubmitMobile || isProcessing}
-                  className={`w-full py-5 rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl flex items-center justify-center gap-3 disabled:opacity-40 transition-all text-white ${
-                    operator === 'ORANGE' ? 'bg-orange-500 hover:bg-orange-600'
-                    : operator === 'MTN' ? 'bg-yellow-500 hover:bg-yellow-600'
-                    : 'bg-cyan-600 hover:bg-cyan-700'
-                  }`}
-                >
-                  {isProcessing
-                    ? <><Loader2 size={18} className="animate-spin" /> Validation...</>
-                    : <><CheckCircle2 size={18} /> Valider le paiement {totalPrice.toLocaleString('fr-FR')} F CFA</>
-                  }
-                </button>
-              )}
+            <div className="animate-in fade-in duration-300">
+              <MerchantPaymentPanel
+                amount={totalPrice}
+                planName={plan?.name}
+                periodLabel={periodOpt.label}
+                onWaveCheckout={handleWaveOnlineCheckout}
+                onManualSubmit={handleManualPayment}
+              />
             </div>
           )}
 

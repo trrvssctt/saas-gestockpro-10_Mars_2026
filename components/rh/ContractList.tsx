@@ -34,6 +34,7 @@ import { apiClient, fetchWithToken } from '../../services/api';
 import { motion, AnimatePresence } from 'framer-motion';
 import HRModal from './HRModal';
 import { useToast } from '../ToastProvider';
+import { initialsAvatar } from '../../utils/avatar';
 
 interface ContractListProps {
   onNavigate: (tab: string, meta?: any) => void;
@@ -330,10 +331,10 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
       return contract.employee.photoUrl;
     }
     if (!Array.isArray(employees) || employees.length === 0) {
-      return `https://picsum.photos/seed/${contract.employeeId}/100/100`;
+      return initialsAvatar(getEmployeeName(contract), contract.employeeId);
     }
     const emp = employees.find(e => e.id === contract.employeeId);
-    return emp?.photoUrl || `https://picsum.photos/seed/${contract.employeeId}/100/100`;
+    return emp?.photoUrl || initialsAvatar(getEmployeeName(contract), contract.employeeId);
   };
 
   const filteredContracts = Array.isArray(contracts) ? contracts.filter(contract => {
@@ -1340,7 +1341,7 @@ const ContractList: React.FC<ContractListProps> = ({ onNavigate }) => {
                               referrerPolicy="no-referrer"
                               onError={(e) => {
                                 const target = e.target as HTMLImageElement;
-                                target.src = `https://picsum.photos/seed/${contract.employeeId}/100/100`;
+                                target.src = initialsAvatar(getEmployeeName(contract), contract.employeeId);
                               }}
                             />
                             {isExpiringSoon && (

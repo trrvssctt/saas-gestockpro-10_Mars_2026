@@ -104,13 +104,12 @@ const Layout: React.FC<LayoutProps> = ({
     onLogout();
   };
 
+  // Debug « Layout debug - user.planId… » retiré : il exposait plan et rôles dans la console en production.
   useEffect(() => {
+    if (!import.meta.env.DEV) return;
     try {
-      console.log('Layout debug - user.planId:', (user as any)?.planId, 'roles:', (user as any)?.roles);
-      console.log('Layout debug - module access:', allMenuItems.map(i => ({ id: i.id, allowed: authBridge.canAccess(user, i.id) })));
-    } catch (e) {
-      console.warn('Layout debug failed', e);
-    }
+      console.debug('Layout debug - user.planId:', (user as any)?.planId, 'roles:', (user as any)?.roles);
+    } catch { /* noop */ }
   }, [user]);
 
   // Helpers: normalize hex and compute relative luminance for contrast decisions

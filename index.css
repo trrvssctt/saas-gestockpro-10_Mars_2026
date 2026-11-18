@@ -1,3 +1,8 @@
+/* Tailwind compilé par Vite (PostCSS) — remplace cdn.tailwindcss.com */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
 /* Global styles for GeStockPro */
 :root {
   --primary-kernel: #4f46e5;
@@ -25,3 +30,10 @@ html, body, #root {
 * { box-sizing: border-box; }
 
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+
+/* Titre de la landing : sur desktop la colonne ne fait que la moitié de la
+   largeur, l'ancien 8vw faisait déborder « INTELLIGENCE. » sur l'illustration. */
+.landing-hero-title { font-size: clamp(1.875rem, 8vw, 3.75rem); overflow-wrap: break-word; }
+@media (min-width: 1024px) {
+  .landing-hero-title { font-size: clamp(2.25rem, 3.8vw, 3.75rem); }
+}

@@ -49,6 +49,7 @@ import DeclarationsSocialesFiscales from './DeclarationsSocialesFiscales';
 import PayslipPreview from './PayslipPreview';
 import { api } from '../../services/api';
 import { authBridge } from '../../services/authBridge';
+import { initialsAvatar } from '../../utils/avatar';
 
 interface PayrollManagementProps {
   onNavigate: (tab: string, meta?: any) => void;
@@ -2692,7 +2693,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
                                 <div className="flex items-center gap-3">
                                   <div className="w-10 h-10 bg-slate-200 rounded-lg overflow-hidden">
                                     <img
-                                      src={employee?.photoUrl || `https://picsum.photos/seed/${payslip.employeeId}/100/100`}
+                                      src={employee?.photoUrl || initialsAvatar(`${employee?.firstName || ''} ${employee?.lastName || ''}`, payslip.employeeId)}
                                       alt={employee?.firstName}
                                       className="w-full h-full object-cover"
                                     />
@@ -3925,7 +3926,7 @@ const PayrollManagement: React.FC<PayrollManagementProps> = ({ onNavigate, initi
                 <div className="w-10 h-10 bg-slate-200 rounded-lg overflow-hidden">
                   <img
                     src={employees.find(e => e.id === selectedPayslip.employeeId)?.photoUrl ||
-                      `https://picsum.photos/seed/${selectedPayslip.employeeId}/100/100`}
+                      initialsAvatar(`${employees.find(e => e.id === selectedPayslip.employeeId)?.firstName || ''} ${employees.find(e => e.id === selectedPayslip.employeeId)?.lastName || ''}`, selectedPayslip.employeeId)}
                     alt="Employé"
                     className="w-full h-full object-cover"
                   />

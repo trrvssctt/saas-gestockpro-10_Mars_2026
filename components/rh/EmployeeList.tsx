@@ -29,6 +29,7 @@ import { apiClient } from '../../services/api';
 import { uploadFile } from '../../services/uploadService';
 import { useToast } from '../ToastProvider';
 import HRModal from './HRModal';
+import { initialsAvatar } from '../../utils/avatar';
 
 interface Employee {
   id: string;
@@ -734,7 +735,7 @@ const EmployeeList: React.FC<EmployeeListProps> = ({ onNavigate }) => {
               <div className="relative">
                 <div className="w-20 h-20 bg-slate-100 rounded-[2rem] overflow-hidden border-4 border-white shadow-lg group-hover:scale-105 transition-transform duration-500">
                   <img 
-                    src={emp.photoUrl || `https://picsum.photos/seed/${emp.id}/200/200`} 
+                    src={emp.photoUrl || initialsAvatar(`${emp.firstName || ''} ${emp.lastName || ''}`, emp.id)} 
                     alt={emp.firstName} 
                     className="w-full h-full object-cover"
                     referrerPolicy="no-referrer"

@@ -6,10 +6,51 @@ import { SupportTicket } from '../models/SupportTicket.js';
 // Quota universel documents (indépendant du plan d'abonnement)
 const DOCUMENT_QUOTA_BYTES = 5 * 1024 * 1024 * 1024; // 5 Go
 
+const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+
+/**
+ * Vérifie le contenu réel du fichier (signature binaire) : le `mimetype` de
+ * multer vient de l'en-tête envoyé par le client et peut être falsifié.
+ */
+const startsWith = (buf, bytes, offset = 0) => bytes.every((b, i) => buf[offset + i] === b);
+const ZIP = [0x50, 0x4b, 0x03, 0x04];                       // docx / xlsx
+const OLE = [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]; // doc / xls
+const CONTENT_CHECKS = {
+  'image/jpeg': (b) => startsWith(b, [0xff, 0xd8, 0xff]),
+  'image/jpg':  (b) => startsWith(b, [0xff, 0xd8, 0xff]),
+  'image/png':  (b) => startsWith(b, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+  'image/gif':  (b) => startsWith(b, [0x47, 0x49, 0x46, 0x38]),
+  'image/webp': (b) => startsWith(b, [0x52, 0x49, 0x46, 0x46]) && startsWith(b, [0x57, 0x45, 0x42, 0x50], 8),
+  'application/pdf': (b) => startsWith(b, [0x25, 0x50, 0x44, 0x46]),
+  'application/msword': (b) => startsWith(b, OLE),
+  'application/vnd.ms-excel': (b) => startsWith(b, OLE),
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': (b) => startsWith(b, ZIP),
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': (b) => startsWith(b, ZIP),
+  // SVG : texte XML, sans script ni gestionnaire d'événement
+  'image/svg+xml': (b) => {
+    const txt = b.subarray(0, 512 * 1024).toString('utf8');
+    return /<svg[\s>]/i.test(txt) && !/<script|\son[a-z]+\s*=|javascript:/i.test(txt);
+  },
+  // Texte / CSV : pas d'octet nul
+  'text/plain': (b) => !b.subarray(0, 8192).includes(0),
+  'text/csv':   (b) => !b.subarray(0, 8192).includes(0),
+};
+
+/** Sous-dossier sûr : le dossier racine du tenant est imposé par le serveur. */
+const sanitizeFolder = (raw) => {
+  const cleaned = String(raw || 'uploads')
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_|_$/g, '')
+    .slice(0, 40);
+  return cleaned || 'uploads';
+};
+
 // Multer en mémoire — pas de disque, tout passe en buffer vers S3
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 50 * 1024 * 1024 }, // 50 Mo max
+  limits: { fileSize: MAX_UPLOAD_BYTES }, // 10 Mo max (aligné sur la limite affichée côté front)
   fileFilter: (_req, file, cb) => {
     const allowed = [
       'image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml',
@@ -68,7 +109,17 @@ export class UploadController {
         });
       }
 
-      const folder = req.body.folder || 'uploads';
+      const check = CONTENT_CHECKS[req.file.mimetype];
+      if (!check || !check(req.file.buffer)) {
+        return res.status(415).json({
+          error: 'INVALID_FILE_CONTENT',
+          message: 'Le contenu du fichier ne correspond pas à son type déclaré.',
+        });
+      }
+
+      // Jamais de chemin fourni par le client : `gestockpro/{tenantId}/` est
+      // ajouté par uploadToCloudinary, on ne garde ici qu'un nom de sous-dossier.
+      const folder = sanitizeFolder(req.body.folder);
       const result = await uploadToCloudinary(
         req.file.buffer,
         req.file.originalname,
